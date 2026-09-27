@@ -106,6 +106,7 @@ class MeetingArchive:
             "updated_at": str(transcript.get("updated_at") or ""),
             "latest_at": str(transcript.get("latest_at") or ""),
             "segments": list(transcript.get("segments") or []),
+            "capture_warnings": list(transcript.get("capture_warnings") or []),
         }
         target = self.archive_root / _safe(meeting_id) / "meeting.json"
         previous = _json(target, {})
@@ -299,6 +300,7 @@ class MeetingArchive:
             "recording_dir": (recording or {}).get("dir", ""),
             "audio_file": self._audio_file(recording),
             "transcript": segments,
+            "capture_warnings": list(snapshot.get("capture_warnings") or []),
             "journal": sorted(journal, key=lambda i: str(i.get("created_at") or "")),
             "frames": sorted(frames, key=lambda i: str(i.get("captured_at") or "")),
             "meeting_chat": sorted(chat, key=lambda i: str(i.get("captured_at") or "")),
@@ -702,6 +704,7 @@ class MeetingArchive:
             "product_name": MeetingArchive.product_name,
             "title": detail.get("title", ""),
             "segments": detail.get("transcript", []),
+            "capture_warnings": detail.get("capture_warnings", []),
             "journal": detail.get("journal", []),
             "frames": [
                 {key: item.get(key) for key in ("id", "captured_at", "speaker", "participant_labels", "path")}
@@ -1188,7 +1191,7 @@ class MeetingArchive:
     def _known_speaker(value: object) -> bool:
         name = str(value or "").strip()
         return bool(name) and not (
-            name.casefold() in {"я", "me", "you", "собеседник", "собеседники", "participant", "участник"}
+            name.casefold() in {"я", "me", "you", "собеседник", "собеседники", "participant", "участник", "голос не подтверждён"}
             or re.fullmatch(r"(?:спикер|speaker|remote|участник)[ -]?\d+", name, re.IGNORECASE)
         )
 
@@ -1238,7 +1241,7 @@ class MeetingArchive:
             for label in item.get("participant_labels", []):
                 label = str(label or "").strip()
                 if cls._known_speaker(label) and meet_label_counts[label] >= 2:
-                    person(label)["seen"].add("аккаунт Meet")
+                    person(label)["seen"].add("аккаунт Teams" if item.get("participant_platform") == "teams" else "аккаунт Meet")
 
         for item in detail.get("meeting_chat", []):
             name = str(item.get("sender") or "").strip()
@@ -1262,7 +1265,8 @@ class MeetingArchive:
         spoken = [item for item in ranked if item["speech"] > 0]
         main = (
             spoken[0]["name"]
-            if spoken and spoken[0]["speech"] >= max(speech_by_label.values(), default=0)
+            if not detail.get("capture_warnings") and spoken
+            and spoken[0]["speech"] >= max(speech_by_label.values(), default=0)
             else "Не определён по записи"
         )
         return ranked, main
@@ -1299,9 +1303,13 @@ class MeetingArchive:
         )
         sources = Counter(str(item.get("source") or "") for item in detail.get("transcript", []))
         audio_identity_note = (
+            '<p class="uncertain">Потеряна системная дорожка собеседника. '
+            'На отмеченном участке голос не подтверждён; подпись «Я» не означает, '
+            'что эту реплику произнесли вы. Пропавшее аудио восстановить из текста нельзя.</p>'
+            if detail.get("capture_warnings") else
             f'<p class="uncertain">Фрагменты стенограммы: удалённый звук — {sources["system"]}, '
             f'локальный микрофон — {sources["microphone"]}. Удалённый канал не разделён '
-            'надёжно между аккаунтами Meet.</p>'
+            'надёжно между участниками.</p>'
             if main_speaker == "Не определён по записи" and sources["system"] else ""
         )
         roster = "".join(

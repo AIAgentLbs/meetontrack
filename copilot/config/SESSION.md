@@ -51,6 +51,10 @@ Good `ASK` examples: `Откуда взялись 60% и что именно в�
 - For code, cite `repo/path/file`, symbol, and commit SHA.
 - For dirty-tree evidence, add `working tree: dirty` and do not present the content as committed.
 - For meeting history, cite meeting title, date, and speaker when known.
+- `microphone` and `system` identify capture channels, not necessarily people.
+  When `capture_warnings` or an unverified-speaker label is present, do not
+  attribute those turns to Mike or another person. Do not learn Mike's tone
+  from unverified turns. Preserve uncertainty in decisions and commitments.
 - Preserve visible Zoom-chat messages separately with the participant nickname and displayed time. Do not silently treat chat text as spoken audio.
 - Preserve manual notes separately as Mike's own notes with their meeting-relative timecode. Correlate them with the nearest transcript passage, but do not misattribute them to a speaker.
 - If a claim is an inference, label it and state the evidence it rests on.

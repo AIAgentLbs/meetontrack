@@ -26,6 +26,7 @@ from urllib.parse import urlparse, urlsplit, urlunsplit
 from archive import MeetingArchive
 from live_translation import LiveTranslation
 from meet_participants import meet_active_speaker, meet_participant_labels
+from teams_participants import teams_one_to_one_name, teams_participant_labels
 
 
 HOST = "127.0.0.1"
@@ -970,6 +971,7 @@ class TranscriptState:
         self.latest_at = ""
         self.error = ""
         self.mentions_fingerprint = ""
+        self.capture_warnings: list[dict] = []
 
     def snapshot(self) -> dict:
         with self.lock:
@@ -988,6 +990,7 @@ class TranscriptState:
                 "meeting": self.meeting,
                 "meeting_id": self.meeting_id,
                 "segments": list(self.segments),
+                "capture_warnings": list(self.capture_warnings),
                 "source": "meeting-copilot",
                 "status": self.status,
                 "started_at": self.started_at,
@@ -1056,6 +1059,7 @@ class TranscriptState:
                 self.meeting = meeting
                 self.meeting_id = meeting_id
                 self.segments = segments
+                self.capture_warnings = list(payload.get("capture_warnings") or [])
                 self.status = status
                 self.started_at = str(payload.get("started_at") or "")
                 self.updated_at = str(payload.get("updated_at") or "")
@@ -1355,7 +1359,10 @@ class MeetingFrames:
             visual_text = "\n".join(visual_lines)
             is_meet = "meet.google.com" in visual_text.casefold() or str(window.get("title", "")).casefold().startswith("meet -")
             participant_labels = meet_participant_labels(observations) if is_meet else []
-            if participant_labels:
+            teams_labels = teams_participant_labels(observations)
+            if teams_labels:
+                participant_labels = teams_labels
+            if participant_labels and is_meet and not teams_labels:
                 meet_speaker = meet_active_speaker(path, observations)
                 if meet_speaker:
                     speaker, confidence = meet_speaker, "meet-active-tile"
@@ -1369,6 +1376,7 @@ class MeetingFrames:
                 "speaker": speaker,
                 "speaker_confidence": confidence,
                 "participant_labels": participant_labels,
+                "participant_platform": "teams" if teams_labels else ("meet" if is_meet else ""),
                 "window_title": str(window.get("title", "Zoom")),
                 "path": str(path),
                 "visual_text": visual_text,
@@ -1397,6 +1405,15 @@ class MeetingFrames:
         with self.lock:
             frames = list(self.items)
         segments = transcript.get("segments", [])
+        meeting_frames = [frame for frame in frames if frame.get("meeting_id") == transcript.get("meeting_id")]
+        teams_name = teams_one_to_one_name(meeting_frames)
+        acoustic_slots = {segment.get("voice_id") for segment in segments
+                          if segment.get("source") == "system" and segment.get("voice_id")}
+        if teams_name and len(acoustic_slots) <= 1:
+            for segment in segments:
+                if segment.get("source") == "system" and not segment.get("speaker"):
+                    segment["speaker"] = teams_name
+                    segment["speaker_confidence"] = "teams-one-on-one"
 
         def nearest_named_frame(segment: dict) -> tuple[float, dict] | None:
             if segment.get("source") != "system" or not segment.get("timestamp"):
@@ -1463,6 +1480,15 @@ class MeetingFrames:
                 used_names.add(name)
 
         for segment in segments:
+            if segment.get("source") == "microphone" and any(
+                warning.get("reason") == "system-audio-lost"
+                and str(warning.get("started_at") or "") <= str(segment.get("timestamp") or "")
+                and (not warning.get("ended_at") or str(segment.get("timestamp") or "") < str(warning["ended_at"]))
+                for warning in transcript.get("capture_warnings", [])
+            ):
+                segment["speaker_identity"] = "unverified"
+                segment["speaker_confidence"] = "capture-channel-loss"
+                segment["speaker"] = "Голос не подтверждён"
             if segment.get("source") != "system" or not segment.get("timestamp"):
                 continue
             voice_id = str(segment.get("voice_id") or "")
@@ -1988,7 +2014,15 @@ class Handler(BaseHTTPRequestHandler):
         for item in snapshot.get("segments", []):
             speaker = item.get("speaker") or item.get("source", "unknown")
             lines.append(f"[{item.get('timestamp', '')}] {speaker}: {item.get('text', '')}")
-        return "\n".join(lines)[-max_chars:]
+        text = "\n".join(lines)[-max_chars:]
+        if snapshot.get("capture_warnings"):
+            text = (
+                "[КАЧЕСТВО ЗАПИСИ: потеряна системная аудиодорожка. "
+                "Реплики с подписью «Голос не подтверждён» нельзя приписывать Майку "
+                "или собеседнику. microphone/system — каналы захвата, не личности.]\n"
+                + text
+            )
+        return text
 
     def do_GET(self) -> None:
         if not self._valid_host():

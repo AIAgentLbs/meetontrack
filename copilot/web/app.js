@@ -84,11 +84,15 @@ const translations = {
     "transcript.copied": "Диалог скопирован",
     "transcript.copy_empty": "Нет реплик для копирования",
     "transcript.copy_failed": "Не удалось скопировать",
-    "transcript.translation_jump": "EN-переводы: {count} · к последнему",
+    "transcript.translation_jump": "EN: {count} · к последнему",
     "transcript.translation_hint": "Последний перевод: {time}. Новые реплики на английском не переводятся.",
     "frames.tab": "Кадры",
     "speaker.all": "Все",
     "speaker.me": "Я",
+    "speaker.unverified": "Голос не подтверждён",
+    "speaker.unverified_short": "Неясно",
+    "transcript.capture_lost": "Потеря аудио",
+    "transcript.capture_lost_hint": "Системная дорожка пропала. На отмеченном участке нельзя уверенно определить, кто говорит.",
     "speaker.others": "Собеседники",
     "transcript.empty_title": "Жду стенограмму",
     "transcript.empty_text": "Meeting Copilot передаёт локальную расшифровку примерно раз в секунду.",
@@ -265,11 +269,15 @@ const translations = {
     "transcript.copied": "Dialogue copied",
     "transcript.copy_empty": "No utterances to copy",
     "transcript.copy_failed": "Could not copy",
-    "transcript.translation_jump": "EN translations: {count} · show latest",
+    "transcript.translation_jump": "EN: {count} · show latest",
     "transcript.translation_hint": "Latest translation: {time}. New English utterances are not translated.",
     "frames.tab": "Frames",
     "speaker.all": "All",
     "speaker.me": "Me",
+    "speaker.unverified": "Unverified voice",
+    "speaker.unverified_short": "Unverified",
+    "transcript.capture_lost": "Audio dropout",
+    "transcript.capture_lost_hint": "The system audio track was lost. Speaker identity is uncertain in the marked interval.",
     "speaker.others": "Others",
     "transcript.empty_title": "Waiting for the transcript",
     "transcript.empty_text": "Meeting Copilot publishes the local transcript about once per second.",
@@ -609,9 +617,13 @@ function renderTranscript(transcript) {
 
   elements.transcriptMeta.textContent = transcript.error
     ? transcript.error
+    : transcript.capture_warnings?.length
+      ? t("transcript.capture_lost")
     : transcript.status === "overloaded"
       ? t("transcript.overloaded_meta", { age: ageLabel(transcript.latest_age_seconds) })
       : t("transcript.latest_meta", { age: ageLabel(transcript.latest_age_seconds) });
+  elements.transcriptMeta.title = transcript.capture_warnings?.length
+    ? t("transcript.capture_lost_hint") : "";
 
   const nearBottom =
     elements.transcript.scrollHeight - elements.transcript.scrollTop - elements.transcript.clientHeight < 120;
@@ -640,13 +652,17 @@ function renderTranscript(transcript) {
       const speaker = textNode(
         "div",
         "speaker",
-        segment.source === "microphone"
+        segment.speaker_identity === "unverified"
+          ? t("speaker.unverified_short")
+          : segment.source === "microphone"
           ? t("speaker.me")
           : (segment.speaker || (segment.voice_id
             ? t("speaker.voice", { value: segment.voice_id.replace(/^remote-/, "") })
             : t("speaker.others"))),
       );
-      if (segment.speaker_confidence === "acoustic-diarization" || segment.voice_id) {
+      if (segment.speaker_identity === "unverified") {
+        speaker.title = t("transcript.capture_lost_hint");
+      } else if (segment.speaker_confidence === "acoustic-diarization" || segment.voice_id) {
         speaker.title = ["visual-active-speaker", "visual-voice-map"].includes(segment.speaker_confidence)
           ? t("speaker.name_hint")
           : t("speaker.voice_hint");
@@ -663,7 +679,7 @@ function renderTranscript(transcript) {
       } else {
         body.append(textNode("p", "text", segment.text));
       }
-      body.append(textNode("time", "", localTime(segment.timestamp)));
+      speaker.append(textNode("time", "", localTime(segment.timestamp)));
       row.append(speaker, body);
       fragment.append(row);
     }
@@ -1089,7 +1105,7 @@ function trafficLight(active) {
 function transcriptDialogue(transcript) {
   if (!transcript?.segments?.length) return "";
   const lines = transcript.segments.map((segment) => {
-    const speaker = segment.source === "microphone"
+    const speaker = segment.speaker_identity === "unverified" ? t("speaker.unverified") : segment.source === "microphone"
       ? t("speaker.me")
       : (segment.speaker || (segment.voice_id
         ? t("speaker.voice", { value: segment.voice_id.replace(/^remote-/, "") })

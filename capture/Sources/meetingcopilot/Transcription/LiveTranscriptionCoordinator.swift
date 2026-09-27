@@ -26,6 +26,13 @@ actor LiveTranscriptionCoordinator {
         let isEnabled: Bool
         let entries: [LiveTranscriptState.Entry]
         let status: Status
+        var captureWarnings: [CaptureWarning] = []
+    }
+
+    struct CaptureWarning: Sendable, Encodable {
+        let started_at: String
+        var ended_at: String? = nil
+        let reason = "system-audio-lost"
     }
 
     struct SessionSinks: Sendable {
@@ -68,6 +75,8 @@ actor LiveTranscriptionCoordinator {
     private var managers: [Source: StreamingNemotronMultilingualAsrManager] = [:]
     private var sharedModels: SharedNemotronMultilingualModels?
     private var currentRemoteVoice: Int?
+    private var lastSystemSignal: Date?
+    private var captureWarnings: [CaptureWarning] = []
 
     init(modelStore: LiveTranscriptionModelStore = .init()) {
         self.modelStore = modelStore
@@ -78,7 +87,8 @@ actor LiveTranscriptionCoordinator {
             isRecording: isRecording,
             isEnabled: transcript.isEnabled,
             entries: transcript.entries,
-            status: status
+            status: status,
+            captureWarnings: captureWarnings
         )
     }
 
@@ -92,6 +102,8 @@ actor LiveTranscriptionCoordinator {
         self.update = update
         self.attach = attach
         startedAt = Date()
+        lastSystemSignal = nil
+        captureWarnings = []
         isRecording = true
         status = enabled ? .loading : .paused
         let epoch = transcript.beginRecording(enabled: enabled)
@@ -278,6 +290,7 @@ actor LiveTranscriptionCoordinator {
             do {
                 for await packet in stream {
                     guard !Task.isCancelled else { return }
+                    await self?.observeAudio(peak: AudioLevel.peak(of: packet.buffer), from: source, epoch: epoch)
                     let seconds = Double(packet.buffer.frameLength)
                         / packet.buffer.format.sampleRate
                     if let diarizer = activeRemoteDiarizer {
@@ -320,6 +333,22 @@ actor LiveTranscriptionCoordinator {
             epoch: epoch
         )
         publish()
+    }
+
+    private func observeAudio(peak: Float?, from source: Source, epoch: Int) {
+        guard transcript.epoch == epoch, source == .system, let peak else { return }
+        let now = Date()
+        if peak > 0.00001 {
+            lastSystemSignal = now
+            if let index = captureWarnings.indices.last, captureWarnings[index].ended_at == nil {
+                captureWarnings[index].ended_at = ISO8601DateFormatter().string(from: now)
+                publish()
+            }
+        } else if let lastSystemSignal, now.timeIntervalSince(lastSystemSignal) >= 45,
+                  captureWarnings.last?.ended_at != nil || captureWarnings.isEmpty {
+            captureWarnings.append(CaptureWarning(started_at: ISO8601DateFormatter().string(from: lastSystemSignal)))
+            publish()
+        }
     }
 
     /// A real voice change closes the current far-end paragraph even if the

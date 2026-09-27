@@ -707,8 +707,8 @@ input:focus-visible + span {
 .utterance {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);
-  gap: 16px;
-  padding: 11px 0;
+  gap: 10px;
+  padding: 5px 0;
 }
 
 .utterance + .utterance {
@@ -734,7 +734,7 @@ input:focus-visible + span {
 .utterance .text {
   margin: 0;
   font-size: 15px;
-  line-height: 1.48;
+  line-height: 1.32;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -767,7 +767,7 @@ input:focus-visible + span {
 
 .utterance time {
   display: block;
-  margin-top: 6px;
+  margin-top: 2px;
   color: var(--faint);
   font-family: var(--mono);
   font-size: 10px;

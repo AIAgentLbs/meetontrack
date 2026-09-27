@@ -1,5 +1,25 @@
 # Meeting Copilot delivery follow-up
 
+## Speaker attribution and compact transcript — 2026-09-27
+
+- Installed: repeated name-chip evidence from Teams frames can name a single
+  remote voice; unrelated browser tabs and conflicting names are rejected.
+- Installed: transcript rows use 5 px vertical padding, 1.32 line height and
+  timestamps in the speaker column, keeping more dialogue visible.
+- Installed: bounded system-audio tap recovery for output-route changes,
+  stalled callbacks and sustained digital silence while call output is active.
+  Recording files stay open across recovery; route format changes are converted.
+- Audio loss is preserved in live/archive metadata and shown in UI/reports.
+  Microphone speech during the loss is marked unverified rather than confidently
+  assigned to the owner. Missing remote audio cannot be recovered from text.
+- Verification: Python regression tests, JavaScript syntax, server self-test,
+  release build, installed app signature/permissions and real browser rendering.
+  Standalone Swift health-policy checks pass (`scripts/capture-health-smoke.swift`).
+- Remaining acceptance: a new live call with a mid-call output-device switch
+  must prove both tracks continue and names stay correct. Existing captured
+  audio proves the old failure, not successful live recovery. Full Swift tests
+  are blocked by this Command Line Tools installation lacking the Testing module.
+
 ## Repository meeting history
 
 Requested: after a meeting ends, identify the relevant selected GitHub/GitLab

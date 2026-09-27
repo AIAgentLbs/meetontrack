@@ -39,6 +39,7 @@ actor LiveTranscriptExporter {
         let updatedAt: String
         let remoteAttendees: [String]
         let segments: [Segment]
+        let captureWarnings: [LiveTranscriptionCoordinator.CaptureWarning]
 
         enum CodingKeys: String, CodingKey {
             case version, source, title, status, segments
@@ -46,6 +47,7 @@ actor LiveTranscriptExporter {
             case startedAt = "started_at"
             case updatedAt = "updated_at"
             case remoteAttendees = "remote_attendees"
+            case captureWarnings = "capture_warnings"
         }
     }
 
@@ -88,7 +90,8 @@ actor LiveTranscriptExporter {
             startedAt: Self.iso(context.startedAt),
             updatedAt: Self.iso(now),
             remoteAttendees: context.remoteAttendees,
-            segments: segments
+            segments: segments,
+            captureWarnings: snapshot.captureWarnings
         )
 
         do {
