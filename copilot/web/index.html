@@ -39,6 +39,7 @@
           <div class="transcript-actions">
             <button class="quiet-button translation-jump" id="translation-jump" type="button" hidden></button>
             <button class="quiet-button copy-dialog-button" id="copy-dialog" type="button" data-i18n="transcript.copy">Копировать диалог</button>
+            <button class="quiet-button" id="speaker-edit" type="button" data-i18n="speakers.open">Имена</button>
             <div class="view-tabs transcript-tabs" role="group" aria-label="Вид левой панели" data-i18n-aria-label="aria.transcript_view">
               <button class="active" data-transcript-view="transcript" type="button"><span data-i18n="transcript.tab">Стенограмма</span></button>
               <button data-transcript-view="frames" type="button"><span data-i18n="frames.tab">Кадры</span> <span id="frame-count">0</span></button>
@@ -200,6 +201,31 @@
             </div>
           </section>
         </div>
+      </div>
+    </dialog>
+    <dialog class="speaker-dialog" id="speaker-dialog">
+      <div class="speaker-dialog-shell">
+        <div class="repo-dialog-header">
+          <div><h2 data-i18n="speakers.title">Участники и реплики</h2><p id="speaker-edit-help"></p></div>
+          <button class="icon-button" id="speaker-edit-close" type="button" data-i18n-aria-label="common.close">×</button>
+        </div>
+        <div class="speaker-editor-body">
+          <h3 data-i18n="speakers.rename_title">Переименовать во всей встрече</h3>
+          <div id="speaker-name-list"></div>
+          <h3 data-i18n="speakers.assign_title">Исправить, кто говорит</h3>
+          <div class="speaker-selection-actions">
+            <button class="quiet-button" id="speaker-select-pending" type="button" data-i18n="speakers.select_pending">Выбрать неразмеченные</button>
+            <button class="quiet-button" id="speaker-select-clear" type="button" data-i18n="speakers.clear_selection">Снять выбор</button>
+            <span id="speaker-selection-count" aria-live="polite"></span>
+          </div>
+          <div class="speaker-assignment-controls">
+            <select id="speaker-assignment-target" data-i18n-aria-label="speakers.target"></select>
+            <input id="speaker-assignment-name" maxlength="80" data-i18n-placeholder="speakers.new_name" data-i18n-aria-label="speakers.new_name">
+            <button class="send-button" id="speaker-assignment-save" type="button" data-i18n="speakers.assign">Назначить выбранным</button>
+          </div>
+          <div id="speaker-utterance-list"></div>
+        </div>
+        <div class="repo-dialog-footer"><span id="speaker-edit-status" role="status"></span></div>
       </div>
     </dialog>
     <script src="/app.js" defer></script>

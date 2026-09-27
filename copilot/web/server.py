@@ -2018,7 +2018,7 @@ class Handler(BaseHTTPRequestHandler):
         if snapshot.get("capture_warnings"):
             text = (
                 "[КАЧЕСТВО ЗАПИСИ: потеряна системная аудиодорожка. "
-                "Реплики с подписью «Голос не подтверждён» нельзя приписывать Майку "
+                "Неразмеченные реплики («Распределить» / «Голос не подтверждён») нельзя приписывать Майку "
                 "или собеседнику. microphone/system — каналы захвата, не личности.]\n"
                 + text
             )
@@ -2038,7 +2038,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/health":
             self._json({"ok": True, "service": "meeting-copilot"})
         elif path == "/api/state":
-            transcript = TRANSLATIONS.annotate(FRAMES.annotate(TRANSCRIPT.snapshot()))
+            transcript = ARCHIVE.annotate_speakers(TRANSLATIONS.annotate(FRAMES.annotate(TRANSCRIPT.snapshot())))
             transcript["display_meeting"] = ARCHIVE.display_title(transcript)
             FRAMES.ingest_artifacts(transcript["meeting_id"], transcript["meeting"])
             COPILOT.bind_meeting(transcript["meeting_id"])
@@ -2106,7 +2106,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             payload = self._body()
             if path == "/api/chat":
-                snap = FRAMES.annotate(TRANSCRIPT.snapshot())
+                snap = ARCHIVE.annotate_speakers(FRAMES.annotate(TRANSCRIPT.snapshot()))
                 question = str(payload.get("question", ""))
                 transcript = self._transcript_text(snap)
                 visual = FRAMES.visual_context(snap["meeting_id"])
@@ -2163,7 +2163,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self._json({"ok": True, "note": item})
             elif path == "/api/analyze":
-                snap = FRAMES.annotate(TRANSCRIPT.snapshot())
+                snap = ARCHIVE.annotate_speakers(FRAMES.annotate(TRANSCRIPT.snapshot()))
                 transcript = self._transcript_text(snap)
                 visual = FRAMES.visual_context(snap["meeting_id"])
                 notes = JOURNAL.manual_context(snap["meeting_id"])
@@ -2222,6 +2222,36 @@ class Handler(BaseHTTPRequestHandler):
                 REPOSITORIES.set_selection(meeting_id, selection)
                 COPILOT.reset(clear_messages=False)
                 self._json({"ok": True, "selection": selection})
+            elif path == "/api/speakers":
+                meeting_id = str(payload.get("meeting_id") or "")
+                current = FRAMES.annotate(TRANSCRIPT.snapshot())
+                if meeting_id == current.get("meeting_id"):
+                    snapshot = current
+                else:
+                    detail = ARCHIVE.detail(meeting_id)
+                    if detail is None:
+                        raise ValueError("Встреча не найдена")
+                    snapshot = {**detail, "segments": detail["transcript"]}
+                operation = str(payload.get("operation") or "")
+                if operation == "rename":
+                    updated = ARCHIVE.speaker_edits.rename(snapshot, str(payload.get("speaker_id") or ""), str(payload.get("name") or ""))
+                elif operation == "assign":
+                    updated = ARCHIVE.speaker_edits.assign(snapshot, payload.get("segment_ids"), str(payload.get("speaker_id") or ""), str(payload.get("name") or ""))
+                else:
+                    raise ValueError("Некорректное действие")
+                if meeting_id == current.get("meeting_id"):
+                    # Do not erase answers when names change, but don't let the
+                    # reasoning thread retain an obsolete speaker attribution.
+                    COPILOT.reset(clear_messages=False)
+                def refresh_speaker_report():
+                    try:
+                        detail = ARCHIVE.detail(meeting_id)
+                        if detail and detail.get("report"):
+                            ARCHIVE.generate_report(meeting_id, deliver=False)
+                    except Exception:
+                        print("Speaker edit saved; report refresh needs retry", flush=True)
+                threading.Thread(target=refresh_speaker_report, daemon=True).start()
+                self._json({"ok": True, "transcript": updated})
             elif path == "/api/archive/report":
                 meeting_id = str(payload.get("meeting_id") or "")
                 if not meeting_id:

@@ -1,5 +1,31 @@
 # Meeting Copilot delivery follow-up
 
+## Meeting-scoped speaker editor — 2026-09-27
+
+- Names opens a compact participant/utterance editor in the live view and
+  archived meetings. Clicking a transcript speaker opens the same editor.
+- Renaming a voice updates every existing and future turn with that stable
+  voice ID in this meeting only. Manual names override screenshot/ASR names.
+- Selected utterances can be reassigned to an existing participant or a new
+  person. This fixes merged/wrong-channel turns without falsifying the source
+  audio channel or rewriting the original words.
+- User corrections overwrite speaker fields in the canonical private
+  `meeting.json`. No separate correction file or edit history is stored.
+  Capture refresh preserves those corrections and applies renamed voice IDs to
+  new turns. Live view, filters, clipboard, archive, Copilot context and generated
+  HTML/PDF all use this corrected original. Previously sent memos are not resent.
+- Verified: 38 Python tests including real HTTP rename/reassignment,
+  canonical-file readback, stale/live refresh and report refresh without memo
+  delivery; source/installed self-tests and JavaScript syntax pass. Installed
+  browser editor opens with 153 turns and no JavaScript errors. Real missing
+  audio still requires manual assignment; the editor is not proof of automatic
+  voice recovery.
+- Real audio loss is not a voice ID. If local acoustic separation cannot
+  distinguish people, those turns require explicit assignment rather than
+  mapping every unknown turn to a fabricated common speaker. Screenshot names
+  establish the roster, not the speaker of every utterance; 99% identity accuracy
+  is not verified and must not be promised.
+
 ## Speaker attribution and compact transcript — 2026-09-27
 
 - Installed: repeated name-chip evidence from Teams frames can name a single

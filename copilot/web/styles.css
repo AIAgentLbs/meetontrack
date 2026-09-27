@@ -723,6 +723,40 @@ input:focus-visible + span {
   letter-spacing: 0.035em;
 }
 
+.speaker-name-button {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.speaker-name-button:hover { text-decoration: underline; }
+.speaker-name-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.speaker-dialog { width: min(850px, calc(100vw - 24px)); max-height: 90dvh; padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--surface-strong); }
+.speaker-dialog::backdrop { background: rgb(0 0 0 / 35%); }
+.speaker-dialog-shell { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; max-height: 88dvh; }
+.speaker-editor-body { overflow: auto; padding: 8px 20px 16px; }
+.speaker-editor-body h3 { margin: 16px 0 10px; font-size: 15px; }
+.speaker-name-row, .speaker-assignment-controls { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.speaker-name-row span { min-width: 120px; font-size: 12px; }
+.speaker-editor-body input:not([type="checkbox"]), .speaker-editor-body select { min-width: 0; flex: 1; padding: 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 13px; }
+.speaker-selection-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; }
+.speaker-assignment-controls { position: sticky; top: 0; padding: 8px 0; background: var(--surface-strong); z-index: 1; }
+.speaker-edit-utterance { display: grid; grid-template-columns: 20px 125px minmax(0, 1fr); gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; cursor: pointer; }
+.speaker-edit-utterance input { margin: 3px 0 0; accent-color: var(--accent); }
+.speaker-edit-utterance strong { font-size: 11px; font-weight: 650; }
+.speaker-edit-utterance time { display: block; font-size: 10px; color: var(--muted); }
+.speaker-edit-utterance span { line-height: 1.35; }
+.speaker-edit-utterance:has(input:checked) { background: var(--accent-soft); }
+@media (max-width: 600px) {
+  .speaker-name-row, .speaker-assignment-controls { flex-wrap: wrap; }
+  .speaker-edit-utterance { grid-template-columns: 20px 85px minmax(0, 1fr); }
+}
+
 .utterance.microphone .speaker {
   color: var(--accent-strong);
 }

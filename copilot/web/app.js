@@ -17,6 +17,19 @@ const elements = {
   frameStatus: document.querySelector("#frame-status"),
   captureFrame: document.querySelector("#capture-frame"),
   copyDialog: document.querySelector("#copy-dialog"),
+  speakerEdit: document.querySelector("#speaker-edit"),
+  speakerDialog: document.querySelector("#speaker-dialog"),
+  speakerEditClose: document.querySelector("#speaker-edit-close"),
+  speakerNameList: document.querySelector("#speaker-name-list"),
+  speakerUtteranceList: document.querySelector("#speaker-utterance-list"),
+  speakerEditHelp: document.querySelector("#speaker-edit-help"),
+  speakerEditStatus: document.querySelector("#speaker-edit-status"),
+  speakerSelectionCount: document.querySelector("#speaker-selection-count"),
+  speakerAssignmentTarget: document.querySelector("#speaker-assignment-target"),
+  speakerAssignmentName: document.querySelector("#speaker-assignment-name"),
+  speakerAssignmentSave: document.querySelector("#speaker-assignment-save"),
+  speakerSelectPending: document.querySelector("#speaker-select-pending"),
+  speakerSelectClear: document.querySelector("#speaker-select-clear"),
   translationJump: document.querySelector("#translation-jump"),
   speakerFilters: document.querySelector("#speaker-filters"),
   chat: document.querySelector("#chat"),
@@ -88,6 +101,21 @@ const translations = {
     "transcript.translation_hint": "Последний перевод: {time}. Новые реплики на английском не переводятся.",
     "frames.tab": "Кадры",
     "speaker.all": "Все",
+    "speakers.open": "Имена",
+    "speakers.title": "Участники и реплики",
+    "speakers.help": "Имя меняется во всей встрече. Если два голоса слиплись, выберите реплики и назначьте участника.",
+    "speakers.rename_title": "Переименовать во всей встрече",
+    "speakers.assign_title": "Исправить, кто говорит",
+    "speakers.select_pending": "Выбрать неразмеченные",
+    "speakers.clear_selection": "Снять выбор",
+    "speakers.selected": "Выбрано: {count}",
+    "speakers.target": "Кто говорит",
+    "speakers.new_name": "Или новое имя",
+    "speakers.assign": "Назначить выбранным",
+    "speakers.rename": "Переименовать все",
+    "speakers.saved": "Сохранено. Имена обновлены в стенограмме и архиве; отчёт обновится автоматически.",
+    "speakers.pending": "Разметить",
+    "speakers.edit_hint": "Нажмите, чтобы переименовать спикера или изменить автора реплики",
     "speaker.me": "Я",
     "speaker.unverified": "Голос не подтверждён",
     "speaker.unverified_short": "Неясно",
@@ -158,7 +186,7 @@ const translations = {
     "message.autoanalysis": "Автоанализ",
     "message.thinking": "Ищу в стенограмме и репозиториях",
     "message.latest": "К последнему ответу",
-    "speaker.voice": "Спикер {value}",
+    "speaker.voice": "Собеседник {value}",
     "speaker.voice_hint": "Голос различён локально по аудио; имя появится, когда Zoom покажет активного участника",
     "copilot.error": "Ошибка: {error}",
     "copilot.active": "Контекст Codex активен, репозитории доступны только для чтения",
@@ -273,6 +301,21 @@ const translations = {
     "transcript.translation_hint": "Latest translation: {time}. New English utterances are not translated.",
     "frames.tab": "Frames",
     "speaker.all": "All",
+    "speakers.open": "Names",
+    "speakers.title": "Participants and utterances",
+    "speakers.help": "A name changes throughout this meeting. If voices were merged, select utterances and assign a participant.",
+    "speakers.rename_title": "Rename throughout the meeting",
+    "speakers.assign_title": "Correct who is speaking",
+    "speakers.select_pending": "Select unassigned",
+    "speakers.clear_selection": "Clear selection",
+    "speakers.selected": "Selected: {count}",
+    "speakers.target": "Who is speaking",
+    "speakers.new_name": "Or a new name",
+    "speakers.assign": "Assign selected",
+    "speakers.rename": "Rename all",
+    "speakers.saved": "Saved. Transcript and archive updated; the report will refresh automatically.",
+    "speakers.pending": "Assign",
+    "speakers.edit_hint": "Click to rename this speaker or correct the utterance author",
     "speaker.me": "Me",
     "speaker.unverified": "Unverified voice",
     "speaker.unverified_short": "Unverified",
@@ -343,7 +386,7 @@ const translations = {
     "message.autoanalysis": "Auto-analysis",
     "message.thinking": "Searching the transcript and repositories",
     "message.latest": "Jump to latest",
-    "speaker.voice": "Speaker {value}",
+    "speaker.voice": "Participant {value}",
     "speaker.voice_hint": "The voice was separated locally from audio; a name appears when Zoom shows the active participant",
     "copilot.error": "Error: {error}",
     "copilot.active": "Codex context is active; repositories are read-only",
@@ -581,6 +624,117 @@ function readableAnswer(text) {
     .replace(/\[([^\]]+)]\(([^)]+)\)/g, "$1\n$2");
 }
 
+function speakerLabel(segment) {
+  if (segment.speaker_id === "unassigned") return t("speakers.pending");
+  if (segment.speaker_identity === "manual") return segment.speaker_label || segment.speaker;
+  if (segment.source === "microphone") return t("speaker.me");
+  const label = segment.speaker_label || segment.speaker;
+  if (label && !/^(Собеседник|Спикер)\s*\d*$/.test(label)) return label;
+  return t("speaker.voice", { value: (segment.voice_id || "remote-1").replace(/^remote-/, "") });
+}
+
+let speakerEditorSnapshot = null;
+let speakerEditorSelection = new Set();
+
+function updateSpeakerSelection() {
+  elements.speakerSelectionCount.textContent = t("speakers.selected", { count: speakerEditorSelection.size });
+  elements.speakerAssignmentSave.disabled = !speakerEditorSelection.size;
+  elements.speakerUtteranceList.querySelectorAll("input[type=checkbox]").forEach((input) => {
+    input.checked = speakerEditorSelection.has(input.value);
+  });
+}
+
+function openSpeakerEditor(snapshot, selectedSegment = "") {
+  speakerEditorSnapshot = snapshot;
+  speakerEditorSelection = new Set(selectedSegment ? [selectedSegment] : []);
+  elements.speakerEditStatus.textContent = "";
+  elements.speakerAssignmentName.value = "";
+  elements.speakerEditHelp.textContent = t("speakers.help");
+  const names = document.createDocumentFragment();
+  const choices = document.createDocumentFragment();
+  choices.append(new Option(t("speakers.target"), ""));
+  for (const person of snapshot.speakers || []) {
+    if (person.unassigned) continue;
+    const row = document.createElement("form");
+    row.className = "speaker-name-row";
+    row.append(textNode("span", "", `${person.name} · ${person.count}`));
+    const input = document.createElement("input");
+    input.value = person.name;
+    input.maxLength = 80;
+    input.required = true;
+    input.setAttribute("aria-label", `${t("speakers.rename")}: ${person.name}`);
+    const save = textNode("button", "quiet-button", t("speakers.rename"));
+    save.type = "submit";
+    row.append(input, save);
+    row.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void saveSpeakerEdit({ operation: "rename", speaker_id: person.id, name: input.value }, save);
+    });
+    names.append(row);
+    choices.append(new Option(person.name, person.id));
+  }
+  elements.speakerNameList.replaceChildren(names);
+  elements.speakerAssignmentTarget.replaceChildren(choices);
+  const utterances = document.createDocumentFragment();
+  for (const segment of snapshot.segments || []) {
+    const row = document.createElement("label");
+    row.className = "speaker-edit-utterance";
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.value = segment.segment_id;
+    check.checked = speakerEditorSelection.has(check.value);
+    check.addEventListener("change", () => {
+      if (check.checked) speakerEditorSelection.add(check.value);
+      else speakerEditorSelection.delete(check.value);
+      updateSpeakerSelection();
+    });
+    const author = textNode("strong", "", speakerLabel(segment));
+    author.append(textNode("time", "", localTime(segment.timestamp)));
+    row.append(check, author, textNode("span", "", segment.text));
+    utterances.append(row);
+  }
+  elements.speakerUtteranceList.replaceChildren(utterances);
+  updateSpeakerSelection();
+  if (!elements.speakerDialog.open) elements.speakerDialog.showModal();
+  if (selectedSegment) {
+    const check = elements.speakerUtteranceList.querySelector(`input[value="${CSS.escape(selectedSegment)}"]`);
+    check?.closest("label").scrollIntoView({ block: "center" });
+  }
+}
+
+async function saveSpeakerEdit(payload, button) {
+  const meetingId = speakerEditorSnapshot?.meeting_id;
+  if (!meetingId) return;
+  button.disabled = true;
+  elements.speakerEditStatus.textContent = "…";
+  try {
+    const data = await post("/api/speakers", { ...payload, meeting_id: meetingId });
+    openSpeakerEditor(data.transcript);
+    elements.speakerEditStatus.textContent = t("speakers.saved");
+    if (activeTranscript?.meeting_id === meetingId) {
+      transcriptSignature = "";
+      await state();
+    }
+    if (selectedArchiveMeeting === meetingId && elements.archiveDialog.open) await loadArchiveMeeting(meetingId);
+  } catch (error) {
+    elements.speakerEditStatus.textContent = String(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+elements.speakerEdit.addEventListener("click", () => { if (activeTranscript) openSpeakerEditor(activeTranscript); });
+elements.speakerEditClose.addEventListener("click", () => elements.speakerDialog.close());
+elements.speakerSelectPending.addEventListener("click", () => {
+  speakerEditorSelection = new Set((speakerEditorSnapshot?.segments || []).filter(s => s.speaker_id === "unassigned").map(s => s.segment_id));
+  updateSpeakerSelection();
+});
+elements.speakerSelectClear.addEventListener("click", () => { speakerEditorSelection.clear(); updateSpeakerSelection(); });
+elements.speakerAssignmentSave.addEventListener("click", () => void saveSpeakerEdit({
+  operation: "assign", segment_ids: [...speakerEditorSelection],
+  speaker_id: elements.speakerAssignmentTarget.value, name: elements.speakerAssignmentName.value,
+}, elements.speakerAssignmentSave));
+
 function renderTranscript(transcript) {
   activeTranscript = transcript;
   elements.copyDialog.disabled = !transcript.segments.length;
@@ -611,7 +765,7 @@ function renderTranscript(transcript) {
     elements.liveStatus.lastChild.textContent = t("status.no_fresh");
   }
 
-  const signature = `${sourceFilter}:${transcript.meeting_id}:${transcript.updated_at}:${transcript.segments.length}:${transcript.translation_revision || 0}`;
+  const signature = `${sourceFilter}:${transcript.meeting_id}:${transcript.updated_at}:${transcript.segments.length}:${transcript.translation_revision || 0}:${transcript.speaker_revision || 0}`;
   if (signature === transcriptSignature) return;
   transcriptSignature = signature;
 
@@ -629,7 +783,9 @@ function renderTranscript(transcript) {
     elements.transcript.scrollHeight - elements.transcript.scrollTop - elements.transcript.clientHeight < 120;
   const fragment = document.createDocumentFragment();
   const filtered = transcript.segments.filter(
-    (segment) => sourceFilter === "all" || segment.source === sourceFilter,
+    (segment) => sourceFilter === "all" || (segment.speaker_id
+      ? (sourceFilter === "microphone" ? segment.speaker_id === "self" : segment.speaker_id !== "self")
+      : segment.source === sourceFilter),
   );
 
   if (!filtered.length) {
@@ -649,17 +805,13 @@ function renderTranscript(transcript) {
       const row = document.createElement("article");
       row.className = `utterance ${segment.source}`;
       row.dataset.timestamp = segment.timestamp;
-      const speaker = textNode(
-        "div",
-        "speaker",
-        segment.speaker_identity === "unverified"
-          ? t("speaker.unverified_short")
-          : segment.source === "microphone"
-          ? t("speaker.me")
-          : (segment.speaker || (segment.voice_id
-            ? t("speaker.voice", { value: segment.voice_id.replace(/^remote-/, "") })
-            : t("speaker.others"))),
-      );
+      const speaker = document.createElement("div");
+      speaker.className = "speaker";
+      const nameButton = textNode("button", "speaker-name-button", speakerLabel(segment));
+      nameButton.type = "button";
+      nameButton.title = t("speakers.edit_hint");
+      nameButton.addEventListener("click", () => openSpeakerEditor(transcript, segment.segment_id));
+      speaker.append(nameButton);
       if (segment.speaker_identity === "unverified") {
         speaker.title = t("transcript.capture_lost_hint");
       } else if (segment.speaker_confidence === "acoustic-diarization" || segment.voice_id) {
@@ -1105,11 +1257,7 @@ function trafficLight(active) {
 function transcriptDialogue(transcript) {
   if (!transcript?.segments?.length) return "";
   const lines = transcript.segments.map((segment) => {
-    const speaker = segment.speaker_identity === "unverified" ? t("speaker.unverified") : segment.source === "microphone"
-      ? t("speaker.me")
-      : (segment.speaker || (segment.voice_id
-        ? t("speaker.voice", { value: segment.voice_id.replace(/^remote-/, "") })
-        : t("speaker.others")));
+    const speaker = speakerLabel(segment);
     const spoken = `[${localTime(segment.timestamp)}] ${speaker}: ${segment.text}`;
     return segment.translation_en ? `${spoken}\nEN: ${segment.translation_en}` : spoken;
   });
@@ -1364,6 +1512,11 @@ function renderArchiveDetail(meeting) {
     }, 1800);
   });
   reportActions.append(copy);
+  const names = textNode("button", "quiet-button", t("speakers.title"));
+  names.type = "button";
+  names.disabled = !meeting.transcript?.length;
+  names.addEventListener("click", () => openSpeakerEditor({ ...meeting, segments: meeting.transcript }));
+  reportActions.append(names);
   report.append(reportActions);
   const delivery = document.createElement("p");
   delivery.className = "archive-delivery";
@@ -1435,7 +1588,7 @@ function renderArchiveDetail(meeting) {
   }
   for (const item of meeting.transcript || []) {
     const row = document.createElement("article");
-    const speaker = item.speaker || (item.source === "microphone" ? t("speaker.me") : t("speaker.others"));
+    const speaker = speakerLabel(item);
     row.append(
       textNode("strong", "", speaker),
       textNode("time", "", localTime(item.timestamp)),

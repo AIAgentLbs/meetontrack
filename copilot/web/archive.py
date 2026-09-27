@@ -17,6 +17,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from speaker_edits import SpeakerEdits
 
 
 def _json(path: Path, fallback: Any) -> Any:
@@ -78,12 +79,16 @@ class MeetingArchive:
         self.reports_root = reports_root
         self.config_root = config_root
         self.lock = threading.RLock()
+        self.speaker_edits = SpeakerEdits(archive_root)
         self.archive_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.reports_root.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     @property
     def journal(self) -> list[dict]:
         return list(_json(self.config_root / "journal.json", {}).get("items", []))
+
+    def annotate_speakers(self, snapshot: dict) -> dict:
+        return self.speaker_edits.annotate(snapshot)
 
     @property
     def frames(self) -> list[dict]:
@@ -109,12 +114,19 @@ class MeetingArchive:
             "capture_warnings": list(transcript.get("capture_warnings") or []),
         }
         target = self.archive_root / _safe(meeting_id) / "meeting.json"
-        previous = _json(target, {})
-        # Never replace a longer completed transcript with a shorter stale one.
-        if len(previous.get("segments", [])) > len(clean["segments"]):
-            clean["segments"] = previous["segments"]
-        if previous != clean:
-            _atomic_json(target, clean)
+        # Serialize capture refresh with manual corrections. The corrected
+        # meeting.json is the original used by every downstream consumer.
+        with self.speaker_edits.lock:
+            previous = _json(target, {})
+            if len(previous.get("segments", [])) > len(clean["segments"]):
+                clean["segments"] = previous["segments"]
+            corrected = self.annotate_speakers(clean)
+            clean["segments"] = corrected["segments"]
+            for field in ("speaker_names", "speaker_revision", "speaker_corrected_at"):
+                if field in previous:
+                    clean[field] = previous[field]
+            if previous != clean:
+                _atomic_json(target, clean)
 
     def _recordings(self) -> list[dict]:
         result: list[dict] = []
@@ -290,7 +302,7 @@ class MeetingArchive:
         duration = int((recording or {}).get("duration_seconds") or 0)
         report_dir = self.reports_root / meeting_id
         report_meta = _json(report_dir / "report.json", {})
-        return {
+        result = {
             "meeting_id": meeting_id,
             "title": title,
             "status": str(snapshot.get("status") or "finished"),
@@ -307,6 +319,9 @@ class MeetingArchive:
             "participants": participants,
             "report": report_meta,
         }
+        annotated = self.annotate_speakers({**result, "segments": segments})
+        annotated["transcript"] = annotated.pop("segments")
+        return annotated
 
     @staticmethod
     def _dedupe_items(items: list[dict], time_key: str) -> list[dict]:
@@ -495,7 +510,7 @@ class MeetingArchive:
         indexes = {round(index * (len(existing) - 1) / (limit - 1)) for index in range(limit)}
         return [existing[index] for index in sorted(indexes)]
 
-    def generate_report(self, meeting_id: str) -> dict:
+    def generate_report(self, meeting_id: str, *, deliver: bool = True) -> dict:
         with self.lock:
             detail = self.report_detail(meeting_id)
             if detail is None:
@@ -550,6 +565,10 @@ class MeetingArchive:
             }
             _atomic_json(report_dir / "report.json", meta)
             delivery = (
+                {"drive_status": "pending",
+                 "mail_status": str(previous_report.get("mail_status") or "not_configured"),
+                 "telegram_status": str(previous_report.get("telegram_status") or "not_configured")}
+                if not deliver else
                 self.deliver(detail, meta, previous=previous_delivery)
                 if self._ready_for_delivery(detail)
                 else {
@@ -704,6 +723,7 @@ class MeetingArchive:
             "product_name": MeetingArchive.product_name,
             "title": detail.get("title", ""),
             "segments": detail.get("transcript", []),
+            "speaker_revision": detail.get("speaker_revision", 0),
             "capture_warnings": detail.get("capture_warnings", []),
             "journal": detail.get("journal", []),
             "frames": [
@@ -1191,7 +1211,7 @@ class MeetingArchive:
     def _known_speaker(value: object) -> bool:
         name = str(value or "").strip()
         return bool(name) and not (
-            name.casefold() in {"я", "me", "you", "собеседник", "собеседники", "participant", "участник", "голос не подтверждён"}
+            name.casefold() in {"я", "me", "you", "собеседник", "собеседники", "participant", "участник", "голос не подтверждён", "распределить"}
             or re.fullmatch(r"(?:спикер|speaker|remote|участник)[ -]?\d+", name, re.IGNORECASE)
         )
 
