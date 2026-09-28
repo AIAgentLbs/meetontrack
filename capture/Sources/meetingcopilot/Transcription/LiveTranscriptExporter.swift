@@ -9,6 +9,7 @@ actor LiveTranscriptExporter {
         let title: String
         let startedAt: Date
         let remoteAttendees: [String]
+        let meetingLink: String?
         let oneToOneRemoteSpeaker: String?
     }
 
@@ -38,6 +39,7 @@ actor LiveTranscriptExporter {
         let startedAt: String
         let updatedAt: String
         let remoteAttendees: [String]
+        let meetingLink: String?
         let segments: [Segment]
         let captureWarnings: [LiveTranscriptionCoordinator.CaptureWarning]
 
@@ -47,6 +49,7 @@ actor LiveTranscriptExporter {
             case startedAt = "started_at"
             case updatedAt = "updated_at"
             case remoteAttendees = "remote_attendees"
+            case meetingLink = "meeting_link"
             case captureWarnings = "capture_warnings"
         }
     }
@@ -90,6 +93,7 @@ actor LiveTranscriptExporter {
             startedAt: Self.iso(context.startedAt),
             updatedAt: Self.iso(now),
             remoteAttendees: context.remoteAttendees,
+            meetingLink: context.meetingLink,
             segments: segments,
             captureWarnings: snapshot.captureWarnings
         )

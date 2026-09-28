@@ -964,6 +964,37 @@ input:focus-visible + span {
   min-height: 0;
 }
 
+.call-plan {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 20px 44px;
+}
+
+.call-plan-title { margin: 0 0 5px; font-size: 18px; }
+.call-plan-tentative { margin: 0 0 10px; color: #ad6b17; font-weight: 650; }
+.call-plan-source { margin: 0 0 8px; font-size: 11px; color: var(--muted); }
+.call-plan-intro { margin: 0 0 14px; color: var(--muted); line-height: 1.4; }
+.call-plan-score { display: grid; gap: 5px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-muted); font-size: 12px; }
+.call-plan-score progress { width: 100%; height: 8px; accent-color: #4f8c61; }
+.call-plan-group-scores { display: flex; flex-wrap: wrap; gap: 5px 12px; color: var(--muted); font-size: 11px; }
+.call-plan-section-title { margin: 16px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent-strong); }
+.call-plan-links { display: flex; flex-wrap: wrap; gap: 7px; }
+.call-plan-links a { padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; color: var(--accent-strong); background: var(--surface); font-size: 12px; text-decoration: none; }
+.call-plan-links a:hover { text-decoration: underline; }
+.call-plan-item { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 6px 10px; align-items: start; padding: 9px 10px; border: 1px solid var(--line); border-left: 4px solid #c7922b; border-radius: 8px; margin-bottom: 6px; background: var(--surface); }
+.call-plan-item.resolved { border-left-color: #4f8c61; }
+.call-plan-item.clarify { border-left-color: #d38b20; }
+.call-plan-marker { color: #a7792a; font-weight: 850; font-size: 16px; line-height: 1.1; }
+.call-plan-item.resolved .call-plan-marker { color: #4f8c61; }
+.call-plan-item.clarify .call-plan-marker { color: #d38b20; }
+.call-plan-item-text { margin: 0; line-height: 1.35; }
+.call-plan-item select { max-width: 125px; padding: 4px 5px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--surface-strong); font: inherit; font-size: 11px; }
+.call-plan-evidence { grid-column: 2 / -1; color: var(--muted); line-height: 1.3; }
+.archive-call-plan { display: grid; gap: 6px; }
+.archive-call-plan > a { color: var(--accent-strong); font-size: 12px; }
+.call-plan-archive-status { font-size: 11px; white-space: nowrap; }
+
 .journal-list {
   height: 100%;
   padding: 14px 18px 42px;

@@ -753,6 +753,7 @@ final class AppController {
             title: context.title ?? context.folderSuffix ?? newSession.dir.lastPathComponent,
             startedAt: newSession.startedAt,
             remoteAttendees: context.remoteAttendees,
+            meetingLink: context.link,
             oneToOneRemoteSpeaker: context.oneToOneRemoteSpeaker
         )
         Task { [weak self, liveTranscription, liveTranscriptExporter] in

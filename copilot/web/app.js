@@ -46,6 +46,9 @@ const elements = {
   analyze: document.querySelector("#analyze-button"),
   autoAnalysis: document.querySelector("#auto-analysis"),
   journal: document.querySelector("#journal"),
+  callPlan: document.querySelector("#call-plan"),
+  callPlanTab: document.querySelector("#call-plan-tab"),
+  callPlanCount: document.querySelector("#call-plan-count"),
   journalList: document.querySelector("#journal-list"),
   journalCounts: {
     questions: document.querySelector("#questions-count"),
@@ -132,6 +135,29 @@ const translations = {
     "copilot.heading": "Чат с контекстом",
     "copilot.meta": "Codex читает стенограмму и локальные Git-репозитории",
     "view.chat": "Чат",
+    "plan.tab": "Карта звонка",
+    "plan.links": "Материалы",
+    "plan.question": "Вопросы",
+    "plan.risk": "Риски",
+    "plan.objection": "Возражения",
+    "plan.open": "Не закрыто",
+    "plan.resolved": "Закрыто",
+    "plan.clarify": "Уточнить",
+    "plan.evidence": "Из разговора: {quote}",
+    "plan.tentative": "Подобрано по времени. Проверьте, что это нужная встреча.",
+    "plan.calendar": "Подобрано по событию календаря. Проверьте, что это нужная встреча.",
+    "plan.source": "Подготовка из {source}",
+    "plan.score": "Пунктов закрыто: {resolved} из {total} · уточнить: {clarify}",
+    "plan.group_score": "{label}: {resolved}/{total}",
+    "plan.question.open": "Без ответа",
+    "plan.question.resolved": "Ответ получен",
+    "plan.question.clarify": "Уточнить ответ",
+    "plan.risk.open": "Риск открыт",
+    "plan.risk.resolved": "Риск снят",
+    "plan.risk.clarify": "Риск уточнён",
+    "plan.objection.open": "Не отработано",
+    "plan.objection.resolved": "Отработано",
+    "plan.objection.clarify": "Нужны детали",
     "view.journal": "Журнал",
     "view.meeting_chat": "Чат встречи",
     "copilot.reset": "Новый контекст",
@@ -332,6 +358,29 @@ const translations = {
     "copilot.heading": "Context chat",
     "copilot.meta": "Codex reads the transcript and local Git repositories",
     "view.chat": "Chat",
+    "plan.tab": "Call map",
+    "plan.links": "Materials",
+    "plan.question": "Questions",
+    "plan.risk": "Risks",
+    "plan.objection": "Objections",
+    "plan.open": "Open",
+    "plan.resolved": "Resolved",
+    "plan.clarify": "Clarify",
+    "plan.evidence": "From this call: {quote}",
+    "plan.tentative": "Matched by time only. Check this is the right meeting.",
+    "plan.calendar": "Matched to a calendar event. Check this is the right meeting.",
+    "plan.source": "Preparation from {source}",
+    "plan.score": "Resolved: {resolved} of {total} · clarify: {clarify}",
+    "plan.group_score": "{label}: {resolved}/{total}",
+    "plan.question.open": "Unanswered",
+    "plan.question.resolved": "Answered",
+    "plan.question.clarify": "Needs clarification",
+    "plan.risk.open": "Open risk",
+    "plan.risk.resolved": "Risk cleared",
+    "plan.risk.clarify": "Risk clarified",
+    "plan.objection.open": "Not addressed",
+    "plan.objection.resolved": "Addressed",
+    "plan.objection.clarify": "More information needed",
     "view.journal": "Journal",
     "view.meeting_chat": "Meeting chat",
     "copilot.reset": "New context",
@@ -534,6 +583,9 @@ let noteBusy = false;
 let chatPinnedToLatest = true;
 let archiveMeetings = [];
 let selectedArchiveMeeting = "";
+let callPlanSignature = "";
+let selectedPlanMeetingId = "";
+let currentCallPlan = null;
 
 const journalGroups = {
   questions: new Set(["QUESTION", "ASK"]),
@@ -1172,6 +1224,105 @@ async function saveRepositorySelection() {
   }
 }
 
+function renderCallPlan(plan) {
+  const previousMeeting = selectedPlanMeetingId;
+  currentCallPlan = plan;
+  elements.callPlanTab.hidden = !plan;
+  if (!plan) {
+    callPlanSignature = "";
+    elements.callPlan.replaceChildren();
+    if (previousMeeting) document.querySelector('[data-content-view="chat"]').click();
+    selectedPlanMeetingId = "";
+    return;
+  }
+  selectedPlanMeetingId = plan.meeting_id;
+  elements.callPlanCount.textContent = String(plan.items.filter((item) => item.status !== "resolved").length);
+  const signature = `${uiLanguage}:${JSON.stringify(plan)}`;
+  if (signature !== callPlanSignature) {
+    callPlanSignature = signature;
+    const fragment = document.createDocumentFragment();
+    fragment.append(textNode("h3", "call-plan-title", plan.title));
+    if (plan.match === "time-only") fragment.append(textNode("p", "call-plan-tentative", t("plan.tentative")));
+    if (plan.match === "calendar") fragment.append(textNode("p", "call-plan-tentative", t("plan.calendar")));
+    if (plan.source_label) fragment.append(textNode("p", "call-plan-source", t("plan.source", { source: plan.source_label })));
+    if (plan.intro) fragment.append(textNode("p", "call-plan-intro", plan.intro));
+    const score = document.createElement("div");
+    score.className = "call-plan-score";
+    score.append(textNode("strong", "", t("plan.score", plan.score)));
+    const progress = document.createElement("progress");
+    progress.max = Math.max(1, plan.score.total);
+    progress.value = plan.score.resolved;
+    score.append(progress);
+    const groupScores = document.createElement("div");
+    groupScores.className = "call-plan-group-scores";
+    for (const kind of ["question", "risk", "objection"]) {
+      const group = plan.score.by_kind?.[kind];
+      if (!group?.total) continue;
+      groupScores.append(textNode("span", "", t("plan.group_score", {
+        label: t(`plan.${kind}`), resolved: group.resolved, total: group.total,
+      })));
+    }
+    score.append(groupScores);
+    fragment.append(score);
+    if (plan.links.length) {
+      fragment.append(textNode("h4", "call-plan-section-title", t("plan.links")));
+      const links = document.createElement("div");
+      links.className = "call-plan-links";
+      for (const link of plan.links) {
+        const anchor = document.createElement("a");
+        anchor.href = link.url;
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+        anchor.textContent = link.label;
+        links.append(anchor);
+      }
+      fragment.append(links);
+    }
+    for (const kind of ["question", "risk", "objection"]) {
+      const items = plan.items.filter((item) => item.kind === kind);
+      if (!items.length) continue;
+      fragment.append(textNode("h4", "call-plan-section-title", t(`plan.${kind}`)));
+      for (const item of items) {
+        const card = document.createElement("article");
+        card.className = `call-plan-item ${item.status}`;
+        const marker = textNode("span", "call-plan-marker", item.status === "resolved" ? "✓" : item.status === "clarify" ? "?" : "○");
+        marker.setAttribute("aria-hidden", "true");
+        const text = textNode("p", "call-plan-item-text", item.text);
+        const select = document.createElement("select");
+        select.setAttribute("aria-label", `${item.text}: ${t("plan.tab")}`);
+        for (const status of ["open", "resolved", "clarify"]) {
+          const option = document.createElement("option");
+          option.value = status;
+          option.textContent = t(`plan.${kind}.${status}`);
+          option.selected = item.status === status;
+          select.append(option);
+        }
+        select.addEventListener("change", async () => {
+          select.disabled = true;
+          try {
+            const result = await post("/api/call-plan/status", {
+              meeting_id: plan.meeting_id, item_id: item.id, status: select.value,
+            });
+            callPlanSignature = "";
+            renderCallPlan(result.call_plan);
+          } catch (error) {
+            select.value = item.status;
+            elements.help.textContent = String(error);
+            elements.help.classList.add("error");
+          } finally {
+            select.disabled = false;
+          }
+        });
+        card.append(marker, text, select);
+        if (item.evidence) card.append(textNode("small", "call-plan-evidence", t("plan.evidence", { quote: item.evidence })));
+        fragment.append(card);
+      }
+    }
+    elements.callPlan.replaceChildren(fragment);
+  }
+  if (previousMeeting !== plan.meeting_id) elements.callPlanTab.click();
+}
+
 function renderJournal(items) {
   for (const [group, categories] of Object.entries(journalGroups)) {
     if (elements.journalCounts[group]) {
@@ -1529,6 +1680,31 @@ function renderArchiveDetail(meeting) {
   report.append(delivery);
   root.append(report);
 
+  if (meeting.call_plan) {
+    const map = document.createElement("div");
+    map.className = "archive-call-plan";
+    for (const link of meeting.call_plan.links || []) {
+      const anchor = document.createElement("a");
+      anchor.href = link.url;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      anchor.textContent = link.label;
+      map.append(anchor);
+    }
+    for (const item of meeting.call_plan.items || []) {
+      const row = document.createElement("div");
+      row.className = `call-plan-item ${item.status}`;
+      row.append(
+        textNode("span", "call-plan-marker", item.status === "resolved" ? "✓" : item.status === "clarify" ? "?" : "○"),
+        textNode("span", "call-plan-item-text", item.text),
+        textNode("strong", "call-plan-archive-status", t(`plan.${item.kind}.${item.status}`)),
+      );
+      if (item.evidence) row.append(textNode("small", "call-plan-evidence", t("plan.evidence", { quote: item.evidence })));
+      map.append(row);
+    }
+    root.append(archiveSection(t("plan.tab"), meeting.call_plan.items.length, map, true));
+  }
+
   const journal = document.createElement("div");
   journal.className = "archive-journal";
   for (const item of meeting.journal || []) {
@@ -1656,6 +1832,7 @@ async function state() {
     renderFrames(data.frames || []);
     renderFrameStatus(data.frame_capture || {});
     renderMessages(data.copilot);
+    renderCallPlan(data.call_plan || null);
     renderJournal(data.journal || []);
     renderMeetingChat(data.meeting_chat || []);
     elements.send.disabled = requestBusy || data.copilot.busy;
@@ -1816,6 +1993,7 @@ document.querySelectorAll("[data-content-view]").forEach((button) => {
       void state();
     }
     elements.chat.hidden = view !== "chat";
+    elements.callPlan.hidden = view !== "plan";
     elements.journal.hidden = !journalView;
     elements.meetingChat.hidden = view !== "meeting-chat";
     elements.chatLatest.hidden = view !== "chat" || chatPinnedToLatest;

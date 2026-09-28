@@ -79,6 +79,7 @@
 
         <div class="copilot-content">
           <div class="workspace-filters" id="workspace-filters" role="tablist" aria-label="Чат и сигналы" data-i18n-aria-label="aria.workspace_filter">
+            <button data-content-view="plan" id="call-plan-tab" role="tab" type="button" hidden><span data-i18n="plan.tab">Карта звонка</span><span class="tab-count" id="call-plan-count">0</span></button>
             <button class="active" data-content-view="chat" role="tab" type="button" data-i18n="view.chat">Чат</button>
             <button data-content-view="questions" role="tab" type="button"><span data-i18n="journal.questions">Вопросы</span><span class="tab-count" id="questions-count">0</span></button>
             <button data-content-view="objections" role="tab" type="button"><span data-i18n="journal.objections">Риски и возражения</span><span class="tab-count" id="objections-count">0</span></button>
@@ -88,6 +89,7 @@
             <button data-content-view="meeting-chat" role="tab" type="button"><span data-i18n="view.meeting_chat">Чат встречи</span><span class="tab-count" id="meeting-chat-count">0</span></button>
           </div>
           <div class="workspace-view">
+            <div class="call-plan" id="call-plan" hidden aria-live="polite"></div>
             <div class="chat" id="chat" aria-live="polite">
               <div class="welcome" id="welcome">
                 <h3 data-i18n="welcome.title">Спросите по ходу разговора</h3>
