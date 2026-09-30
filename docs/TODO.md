@@ -1,5 +1,28 @@
 # Meeting Copilot delivery follow-up
 
+## Simultaneous live registers — 2026-09-30
+
+- Installed default call overview: questions to ask, incoming/general meeting
+  questions, and risks/objections are visible simultaneously. Desktop gives
+  roughly 28% width to the transcript and 72% to the assistant. Each register
+  scrolls independently and keeps its position during updates.
+- Preparation joins the same registers. Open, clarification and closed states
+  use traffic-light colors plus text; manual changes persist per meeting.
+  Online updates require quoted current speech and preserve manual decisions.
+- User questions to Copilot never become incoming meeting questions. Incoming
+  questions require captured speech; unknown direction is explicitly general.
+- Evidence/source details are collapsed for scanning; materials remain
+  accessible. RU/EN, keyboard focus and narrow-screen priority are supported.
+- Verified: 51 Python tests, server self-test, JS syntax, isolated browser
+  status/RU/EN/desktop/mobile checks, inspected desktop/laptop/mobile renders.
+  Impeccable's detector reported four pre-existing thick accent borders in
+  legacy transcript/preparation/chat components; the new registers use thin
+  separators and add no such accents. See `docs/live-call-map.md`.
+- Automatic capture and closure run with the existing analysis cadence;
+  a forced analysis of the last captured call produced one quoted general
+  question, closed two ASK items and marked one risk for clarification.
+  This proves the live integration path, not general classification accuracy.
+
 ## Meeting-scoped speaker editor — 2026-09-27
 
 - Names opens a compact participant/utterance editor in the live view and

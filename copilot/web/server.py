@@ -55,7 +55,7 @@ ZOOM_WINDOW_FILE = HOME / ".config/meeting-copilot/zoom-window.json"
 FRAME_TRIGGER_FILE = HOME / ".config/meeting-copilot/capture-frame.trigger"
 CODEX = Path(shutil.which("codex") or "/usr/local/bin/codex")
 JOURNAL_BLOCK_RE = re.compile(
-    r"(?m)^(FACT|CONTRADICTION|HISTORY|RISK|COMMITMENT|DECISION|ASK|URL|PRODUCT|SERVICE)"
+    r"(?m)^(FACT|CONTRADICTION|HISTORY|RISK|OBJECTION|INCOMING_QUESTION|OPEN_QUESTION|COMMITMENT|DECISION|ASK|URL|PRODUCT|SERVICE)"
     r"\s*(?:[—:–-]\s*|\n+)"
 )
 URL_RE = re.compile(
@@ -437,7 +437,7 @@ class RepositoryScope:
 def parse_journal_blocks(text: str) -> list[tuple[str, str]]:
     normalized = re.sub(
         r"(?m)^\s*(?:[-*]\s+)?\*{0,2}"
-        r"(FACT|CONTRADICTION|HISTORY|RISK|COMMITMENT|DECISION|ASK|URL|PRODUCT|SERVICE)\*{0,2}"
+        r"(FACT|CONTRADICTION|HISTORY|RISK|OBJECTION|INCOMING_QUESTION|OPEN_QUESTION|COMMITMENT|DECISION|ASK|URL|PRODUCT|SERVICE)\*{0,2}"
         r"\s*(?:[—:–-]\s*|\n+)",
         lambda match: f"{match.group(1)}\n",
         text.strip(),
@@ -666,6 +666,7 @@ def parse_zoom_chat(observations: list[dict], captured_at: str) -> list[dict[str
 
 
 class MeetingJournal:
+    ACTIONABLE = {"ASK", "INCOMING_QUESTION", "OPEN_QUESTION", "RISK", "OBJECTION", "CONTRADICTION"}
     def __init__(self, path: Path) -> None:
         self.path = path
         self.lock = threading.Lock()
@@ -709,6 +710,8 @@ class MeetingJournal:
         *,
         meeting_time_seconds: int | None = None,
         anchor_at: str = "",
+        evidence: str = "",
+        speaker: str = "",
     ) -> dict | None:
         clean = text.strip()
         if not clean:
@@ -727,6 +730,10 @@ class MeetingJournal:
             item["timecode"] = format_timecode(item["meeting_time_seconds"])
         if anchor_at:
             item["anchor_at"] = anchor_at
+        if evidence:
+            item["evidence"] = evidence[:400]
+        if speaker:
+            item["speaker"] = speaker[:120]
         with self.lock:
             if source in {"copilot", "screen", "transcript"} and any(
                 existing.get("category") == category
@@ -748,11 +755,82 @@ class MeetingJournal:
 
     def add_answer(self, answer: str, meeting_id: str, meeting: str) -> None:
         for category, text in parse_journal_blocks(answer):
+            if category in {"INCOMING_QUESTION", "OPEN_QUESTION"}:
+                continue  # Meeting questions require captured speech, not a model label alone.
             if category == "URL":
                 for url in extract_urls(text):
                     self.add(category, url, meeting_id, meeting, "copilot")
             else:
                 self.add(category, text, meeting_id, meeting, "copilot")
+
+    def capture_questions(self, transcript: dict, answer: str) -> int:
+        captured = 0
+        for raw in re.findall(r"(?m)^QUESTION_CAPTURE\s*[:—-]\s*(\{[^\n]*\})\s*$", answer):
+            try:
+                question = json.loads(raw)
+                quote = str(question.get("evidence") or "").strip()
+                normalized = " ".join(re.findall(r"\w+", quote.casefold()))
+                direction = question.get("direction")
+                if direction not in {"incoming", "general"} or len(normalized) < 12:
+                    continue
+                segment = next((segment for segment in transcript.get("segments", [])
+                                if not segment.get("provisional") and normalized in " ".join(
+                                    re.findall(r"\w+", str(segment.get("text") or "").casefold()))), None)
+                if segment is None:
+                    continue
+                if direction == "incoming" and (not segment.get("speaker_id") or segment["speaker_id"] in {"self", "unassigned"}):
+                    direction = "general"
+                item = self.add("INCOMING_QUESTION" if direction == "incoming" else "OPEN_QUESTION",
+                                quote, str(transcript.get("meeting_id") or ""),
+                                str(transcript.get("meeting") or ""), "transcript",
+                                evidence=quote, speaker=str(segment.get("speaker") or ""),
+                                anchor_at=str(segment.get("timestamp") or ""))
+                captured += int(item is not None)
+            except (ValueError, TypeError, AttributeError):
+                continue
+        return captured
+
+    def set_status(self, meeting_id: str, item_id: str, status: str, *,
+                   evidence: str = "", source: str = "manual") -> dict:
+        if status not in {"open", "resolved", "clarify"}:
+            raise ValueError("Некорректный статус")
+        with self.lock:
+            item = next((item for item in self.items if item.get("id") == item_id
+                         and meeting_id and item.get("meeting_id") == meeting_id
+                         and item.get("category") in self.ACTIONABLE), None)
+            if item is None:
+                raise ValueError("Пункт не найден в текущей встрече")
+            if source != "manual" and item.get("status_source") == "manual":
+                return dict(item)
+            item.update(status=status, status_source=source, evidence=evidence[:400],
+                        status_updated_at=datetime.now().astimezone().isoformat(timespec="seconds"))
+            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            temporary = self.path.with_suffix(".tmp")
+            temporary.write_text(json.dumps({"version": 1, "items": self.items},
+                                           ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            temporary.chmod(0o600)
+            temporary.replace(self.path)
+            return dict(item)
+
+    def apply_analysis(self, transcript: dict, answer: str) -> int:
+        speech = " ".join(re.findall(r"\w+", " ".join(
+            str(segment.get("text") or "") for segment in transcript.get("segments", [])
+            if not segment.get("provisional")
+        ).casefold()))
+        changed = 0
+        for raw in re.findall(r"(?m)^SIGNAL_UPDATE\s*[:—-]\s*(\{[^\n]*\})\s*$", answer):
+            try:
+                update = json.loads(raw)
+                evidence = str(update.get("evidence") or "").strip()
+                quote = " ".join(re.findall(r"\w+", evidence.casefold()))
+                if update.get("status") not in {"resolved", "clarify"} or len(quote) < 12 or quote not in speech:
+                    continue
+                self.set_status(str(transcript.get("meeting_id") or ""), str(update.get("id") or ""),
+                                update["status"], evidence=evidence, source="analysis")
+                changed += 1
+            except (ValueError, TypeError, AttributeError):
+                continue
+        return changed
 
 
 class MeetingChat:
@@ -1740,7 +1818,7 @@ class CodexSession:
 Вопрос пользователя:
 {question}
 
-Ответь по-русски, прямо и компактно. Ищи сначала и преимущественно только в указанном рабочем наборе. Не выбирай случайный репозиторий по старому контексту. Для каждого факта дай provenance: repo/path/file, heading или symbol, строки при возможности, HEAD commit SHA и состояние working tree. Отделяй слова на встрече от документированных фактов и inference. Используй только уместные категории FACT, CONTRADICTION, HISTORY, RISK, COMMITMENT, DECISION, ASK, URL, PRODUCT, SERVICE. URL возвращай без query и fragment; не раскрывай Zoom join links. PRODUCT и SERVICE используй для явно названных или видимых продуктов/сервисов, а не общих существительных. Не делай общий пересказ встречи. Пиши обычным текстом без Markdown-ссылок, звёздочек и обратных кавычек.
+Ответь по-русски, прямо и компактно. Ищи сначала и преимущественно только в указанном рабочем наборе. Не выбирай случайный репозиторий по старому контексту. Для каждого факта дай provenance: repo/path/file, heading или symbol, строки при возможности, HEAD commit SHA и состояние working tree. Отделяй слова на встрече от документированных фактов и inference. Используй только уместные категории FACT, CONTRADICTION, HISTORY, RISK, OBJECTION, COMMITMENT, DECISION, ASK, URL, PRODUCT, SERVICE. URL возвращай без query и fragment; не раскрывай Zoom join links. PRODUCT и SERVICE используй для явно названных или видимых продуктов/сервисов, а не общих существительных. Не делай общий пересказ встречи. Пиши обычным текстом без Markdown-ссылок, звёздочек и обратных кавычек.
 ASK формулируй как одну короткую реплику, которую Майк может сразу произнести вслух: один конкретный вопрос, до 18 слов и одного знака вопроса. Ориентируйся на прямой разговорный тон его реплик из microphone, не копируя ошибки распознавания. Без длинной подводки, канцелярита, перечня подпунктов и нескольких вопросов в одном. Выбери главное неизвестное. Формат: ASK — <вопрос?>. Если нужно объяснение, добавь отдельно одну короткую строку «Основание: ...» и затем источник; не помещай таймкод и provenance внутрь вопроса. Например: «Откуда взялись 60% и что именно вы считали?» или «Покажете реальную базу по Бразилии под нашу задачу?»
 """
 
@@ -2205,6 +2283,13 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("Встреча изменилась; обновите страницу")
                 plan = PLANS.manual_status(snap, str(payload.get("item_id") or ""), str(payload.get("status") or ""))
                 self._json({"ok": True, "call_plan": plan})
+            elif path == "/api/journal/status":
+                snap = TRANSCRIPT.snapshot()
+                if str(payload.get("meeting_id") or "") != snap["meeting_id"] or not snap["meeting_id"]:
+                    raise ValueError("Встреча изменилась; обновите страницу")
+                JOURNAL.set_status(snap["meeting_id"], str(payload.get("item_id") or ""),
+                                   str(payload.get("status") or ""))
+                self._json({"ok": True, "journal": JOURNAL.snapshot(snap["meeting_id"])})
             elif path == "/api/analyze":
                 snap = ARCHIVE.annotate_speakers(FRAMES.annotate(TRANSCRIPT.snapshot()))
                 transcript = self._transcript_text(snap)
@@ -2224,7 +2309,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 question = (
                     "Проверь только новый текущий контекст. Покажи максимум пять действительно "
-                    "важных FACT, CONTRADICTION, HISTORY, RISK, COMMITMENT, DECISION, ASK, URL, "
+                    "важных FACT, CONTRADICTION, HISTORY, RISK, OBJECTION, COMMITMENT, DECISION, ASK, URL, "
                     "PRODUCT или SERVICE. URL сохраняй без query/fragment; не повторяй уже "
                     "названные продукты и сервисы. "
                     "Если нужен ASK, напиши один короткий вопрос, который Майк мог бы "
@@ -2233,6 +2318,25 @@ class Handler(BaseHTTPRequestHandler):
                     "Ищи по локальным репозиториям, когда в репликах есть конкретная сущность. "
                     "Если ценного сигнала нет, ответь ровно: НЕТ НОВОГО СИГНАЛА"
                 )
+                question += (
+                    "\nОтдельно фиксируй реальные вопросы из новой речи строками QUESTION_CAPTURE: "
+                    '{"direction":"incoming"|"general","evidence":"дословный вопрос из одной реплики"}. '
+                    "incoming — только вопрос собеседника, явно адресованный Майку; "
+                    "general — адресат не установлен или вопрос группе. Не выдавай ASK, "
+                    "вопрос пользователя к Copilot, риторический вопрос или подготовку за вопрос собеседника. "
+                    "OBJECTION — выраженное возражение, RISK — риск."
+                )
+                live_items = [item for item in JOURNAL.snapshot(snap["meeting_id"])
+                              if item.get("category") in JOURNAL.ACTIONABLE
+                              and item.get("status", "open") != "resolved"][:50]
+                if live_items:
+                    question += (
+                        "\nОткрытые пункты реестра:\n" + "\n".join(
+                            f"{item['id']} [{item['category']}]: {item['text']}" for item in live_items
+                        ) + '\nЕсли есть прямой ответ/снятие риска или уточнение, добавь SIGNAL_UPDATE: '
+                        '{"id":"...","status":"resolved"|"clarify","evidence":"дословная цитата из текущей стенограммы"}. '
+                        "Закрывай только при явном ответе или снятии риска/возражения, не по догадке."
+                    )
                 plan = PLANS.snapshot(snap)
                 if plan:
                     checklist = "\n".join(
@@ -2261,7 +2365,9 @@ class Handler(BaseHTTPRequestHandler):
                     show_user=False,
                 )
                 PLANS.apply_analysis(snap, answer)
-                signal_answer = re.sub(r"(?m)^PLAN_UPDATE\s*[:—-]\s*\{[^\n]*\}\s*$", "", answer).strip()
+                JOURNAL.apply_analysis(snap, answer)
+                JOURNAL.capture_questions(snap, answer)
+                signal_answer = re.sub(r"(?m)^(?:PLAN_UPDATE|SIGNAL_UPDATE|QUESTION_CAPTURE)\s*[:—-]\s*\{[^\n]*\}\s*$", "", answer).strip()
                 JOURNAL.add_answer(signal_answer, snap["meeting_id"], snap["meeting"])
                 COPILOT.record_analysis(answer=signal_answer or "НЕТ НОВОГО СИГНАЛА")
                 self._json({"ok": True, "answer": signal_answer or "НЕТ НОВОГО СИГНАЛА"})

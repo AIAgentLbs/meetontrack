@@ -47,6 +47,7 @@ const elements = {
   autoAnalysis: document.querySelector("#auto-analysis"),
   journal: document.querySelector("#journal"),
   callPlan: document.querySelector("#call-plan"),
+  callBoard: document.querySelector("#call-board"),
   callPlanTab: document.querySelector("#call-plan-tab"),
   callPlanCount: document.querySelector("#call-plan-count"),
   journalList: document.querySelector("#journal-list"),
@@ -132,10 +133,10 @@ const translations = {
     "frames.armed": "Съёмка готова.",
     "frames.ok": "Последний кадр: {time}.",
     "frames.error": "Ошибка съёмки: {error}",
-    "copilot.heading": "Чат с контекстом",
+    "copilot.heading": "Карта звонка и помощник",
     "copilot.meta": "Codex читает стенограмму и локальные Git-репозитории",
     "view.chat": "Чат",
-    "plan.tab": "Карта звонка",
+    "plan.tab": "Подготовка",
     "plan.links": "Материалы",
     "plan.question": "Вопросы",
     "plan.risk": "Риски",
@@ -355,10 +356,10 @@ const translations = {
     "frames.armed": "Capture is armed.",
     "frames.ok": "Last frame: {time}.",
     "frames.error": "Capture error: {error}",
-    "copilot.heading": "Context chat",
+    "copilot.heading": "Call map & assistant",
     "copilot.meta": "Codex reads the transcript and local Git repositories",
     "view.chat": "Chat",
-    "plan.tab": "Call map",
+    "plan.tab": "Preparation",
     "plan.links": "Materials",
     "plan.question": "Questions",
     "plan.risk": "Risks",
@@ -586,10 +587,36 @@ let selectedArchiveMeeting = "";
 let callPlanSignature = "";
 let selectedPlanMeetingId = "";
 let currentCallPlan = null;
+let currentJournal = [];
+let callBoardSignature = "";
+const boardExpanded = new Set();
+
+Object.assign(translations.ru, {
+  "board.tab": "Обзор звонка", "board.mine": "Мне задать", "board.incoming": "Ко мне и общие",
+  "board.risks": "Риски и возражения", "board.open": "Открыто", "board.clarify": "Нужно уточнение",
+  "board.resolved": "Закрыто", "board.count": "{open} открыто · {closed} закрыто",
+  "board.details": "Основание и источник", "board.prepared": "Подготовка", "board.live": "По ходу звонка",
+  "board.to_me": "Ко мне", "board.general": "Общий вопрос", "board.risk": "Риск", "board.objection": "Возражение",
+  "board.empty.mine": "Здесь появятся вопросы из подготовки и подсказки, что спросить.",
+  "board.empty.incoming": "Здесь появятся вопросы собеседников из стенограммы.",
+  "board.empty.risks": "Здесь появятся риски и возражения из подготовки и разговора.",
+  "board.waiting": "Пункты появятся по мере анализа разговора.",
+});
+Object.assign(translations.en, {
+  "board.tab": "Call overview", "board.mine": "Questions to ask", "board.incoming": "To me & the group",
+  "board.risks": "Risks & objections", "board.open": "Open", "board.clarify": "Needs clarification",
+  "board.resolved": "Closed", "board.count": "{open} open · {closed} closed",
+  "board.details": "Evidence & source", "board.prepared": "Preparation", "board.live": "During this call",
+  "board.to_me": "To me", "board.general": "General question", "board.risk": "Risk", "board.objection": "Objection",
+  "board.empty.mine": "Prepared questions and suggestions for what to ask appear here.",
+  "board.empty.incoming": "Questions captured from the conversation appear here.",
+  "board.empty.risks": "Prepared and live risks and objections appear here.",
+  "board.waiting": "Items appear as the conversation is analyzed.",
+});
 
 const journalGroups = {
-  questions: new Set(["QUESTION", "ASK"]),
-  objections: new Set(["CONTRADICTION", "RISK"]),
+  questions: new Set(["QUESTION", "ASK", "INCOMING_QUESTION", "OPEN_QUESTION"]),
+  objections: new Set(["CONTRADICTION", "RISK", "OBJECTION"]),
   decisions: new Set(["DECISION", "COMMITMENT"]),
   notes: new Set(["NOTE"]),
   entities: new Set(["URL", "PRODUCT", "SERVICE"]),
@@ -599,6 +626,9 @@ const journalLabels = {
   ru: {
     QUESTION: "ВОПРОС",
     ASK: "ЧТО СПРОСИТЬ",
+    INCOMING_QUESTION: "ВОПРОС КО МНЕ",
+    OPEN_QUESTION: "ОБЩИЙ ВОПРОС",
+    OBJECTION: "ВОЗРАЖЕНИЕ",
     CONTRADICTION: "ПРОТИВОРЕЧИЕ",
     RISK: "РИСК",
     DECISION: "РЕШЕНИЕ",
@@ -613,6 +643,9 @@ const journalLabels = {
   en: {
     QUESTION: "QUESTION",
     ASK: "ASK",
+    INCOMING_QUESTION: "QUESTION TO ME",
+    OPEN_QUESTION: "GENERAL QUESTION",
+    OBJECTION: "OBJECTION",
     CONTRADICTION: "CONTRADICTION",
     RISK: "RISK",
     DECISION: "DECISION",
@@ -821,14 +854,15 @@ function renderTranscript(transcript) {
   if (signature === transcriptSignature) return;
   transcriptSignature = signature;
 
+  const audioDropoutActive = transcript.capture_warnings?.some((warning) => !warning.ended_at);
   elements.transcriptMeta.textContent = transcript.error
     ? transcript.error
-    : transcript.capture_warnings?.length
+    : audioDropoutActive
       ? t("transcript.capture_lost")
     : transcript.status === "overloaded"
       ? t("transcript.overloaded_meta", { age: ageLabel(transcript.latest_age_seconds) })
       : t("transcript.latest_meta", { age: ageLabel(transcript.latest_age_seconds) });
-  elements.transcriptMeta.title = transcript.capture_warnings?.length
+  elements.transcriptMeta.title = audioDropoutActive
     ? t("transcript.capture_lost_hint") : "";
 
   const nearBottom =
@@ -1225,13 +1259,11 @@ async function saveRepositorySelection() {
 }
 
 function renderCallPlan(plan) {
-  const previousMeeting = selectedPlanMeetingId;
   currentCallPlan = plan;
   elements.callPlanTab.hidden = !plan;
   if (!plan) {
     callPlanSignature = "";
     elements.callPlan.replaceChildren();
-    if (previousMeeting) document.querySelector('[data-content-view="chat"]').click();
     selectedPlanMeetingId = "";
     return;
   }
@@ -1305,6 +1337,7 @@ function renderCallPlan(plan) {
             });
             callPlanSignature = "";
             renderCallPlan(result.call_plan);
+            renderCallBoard(result.call_plan, currentJournal);
           } catch (error) {
             select.value = item.status;
             elements.help.textContent = String(error);
@@ -1320,7 +1353,123 @@ function renderCallPlan(plan) {
     }
     elements.callPlan.replaceChildren(fragment);
   }
-  if (previousMeeting !== plan.meeting_id) elements.callPlanTab.click();
+}
+
+function renderCallBoard(plan, journal) {
+  currentJournal = journal;
+  const signature = `${uiLanguage}:${activeTranscript?.meeting_id}:${JSON.stringify(plan)}:${JSON.stringify(journal)}`;
+  if (signature === callBoardSignature) return;
+  callBoardSignature = signature;
+  const scrolls = Object.fromEntries([...elements.callBoard.querySelectorAll("[data-board-list]")]
+    .map((list) => [list.dataset.boardList, list.scrollTop]));
+  const entries = (plan?.items || []).map((item) => ({ ...item, origin: "plan",
+    lane: item.kind === "question" ? "mine" : "risks", category: item.kind === "objection" ? "OBJECTION" : "RISK" }));
+  for (const item of journal) {
+    const lane = item.category === "ASK" ? "mine"
+      : ["INCOMING_QUESTION", "OPEN_QUESTION"].includes(item.category) ? "incoming"
+      : ["RISK", "OBJECTION", "CONTRADICTION"].includes(item.category) ? "risks" : "";
+    if (lane) entries.push({ ...item, origin: "journal", lane, status: item.status || "open" });
+  }
+  const fragment = document.createDocumentFragment();
+  const summary = document.createElement("div");
+  summary.className = "board-summary";
+  for (const status of ["open", "clarify", "resolved"]) {
+    const count = entries.filter((item) => item.status === status).length;
+    summary.append(textNode("span", `board-summary-status ${status}`, `${t(`board.${status}`)} ${count}`));
+  }
+  if (plan?.links?.length) {
+    const materials = document.createElement("details");
+    materials.className = "board-materials";
+    materials.append(textNode("summary", "", t("plan.links")));
+    const links = document.createElement("div");
+    links.className = "call-plan-links";
+    for (const link of plan.links) {
+      const anchor = textNode("a", "", link.label);
+      anchor.href = link.url;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      links.append(anchor);
+    }
+    materials.append(links);
+    summary.append(materials);
+  }
+  fragment.append(summary);
+  const columns = document.createElement("div");
+  columns.className = "board-columns";
+  for (const lane of ["mine", "incoming", "risks"]) {
+    const group = entries.filter((item) => item.lane === lane).sort((a, b) =>
+      ({ clarify: 0, open: 1, resolved: 2 }[a.status] - { clarify: 0, open: 1, resolved: 2 }[b.status]));
+    const section = document.createElement("section");
+    section.className = `board-column ${lane}`;
+    const header = document.createElement("header");
+    header.className = "board-column-header";
+    header.append(textNode("h3", "", t(`board.${lane}`)), textNode("p", "", t("board.count", {
+      open: group.filter((item) => item.status !== "resolved").length,
+      closed: group.filter((item) => item.status === "resolved").length,
+    })));
+    const list = document.createElement("div");
+    list.className = "board-list";
+    list.dataset.boardList = lane;
+    if (!group.length) list.append(textNode("p", "board-empty", t(`board.empty.${lane}`)));
+    for (const item of group) {
+      const card = document.createElement("article");
+      card.className = `board-item ${item.status}`;
+      const heading = document.createElement("div");
+      heading.className = "board-item-heading";
+      const light = trafficLight(item.status === "resolved" ? "green" : item.status === "clarify" ? "yellow" : "red");
+      light.setAttribute("aria-label", t(`board.${item.status}`));
+      light.title = t(`board.${item.status}`);
+      heading.append(light);
+      const mainText = readableAnswer(item.text).split(/\n|(?:Основание|Источник|Evidence|Source):/u)[0].trim();
+      heading.append(textNode("p", "", mainText));
+      const controls = document.createElement("div");
+      controls.className = "board-item-controls";
+      const subtype = lane === "incoming" ? (item.category === "INCOMING_QUESTION" ? "to_me" : "general")
+        : lane === "risks" ? (item.category === "OBJECTION" ? "objection" : "risk")
+        : item.origin === "plan" ? "prepared" : "live";
+      controls.append(textNode("span", "board-item-type", t(`board.${subtype}`)));
+      const select = document.createElement("select");
+      select.setAttribute("aria-label", `${mainText}: ${t("board.tab")}`);
+      for (const status of ["open", "clarify", "resolved"]) {
+        const option = textNode("option", "", t(`board.${status}`));
+        option.value = status;
+        option.selected = item.status === status;
+        select.append(option);
+      }
+      select.addEventListener("change", async () => {
+        select.disabled = true;
+        try {
+          const result = await post(item.origin === "plan" ? "/api/call-plan/status" : "/api/journal/status", {
+            meeting_id: activeTranscript.meeting_id, item_id: item.id, status: select.value,
+          });
+          if (result.call_plan) renderCallPlan(result.call_plan);
+          if (result.journal) renderJournal(result.journal);
+          renderCallBoard(result.call_plan || currentCallPlan, result.journal || currentJournal);
+        } catch (error) {
+          select.value = item.status;
+          elements.help.textContent = String(error);
+          elements.help.classList.add("error");
+        } finally { select.disabled = false; }
+      });
+      controls.append(select);
+      card.append(heading, controls);
+      const detail = document.createElement("details");
+      const key = `${activeTranscript?.meeting_id}:${item.origin}:${item.id}`;
+      detail.open = boardExpanded.has(key);
+      detail.append(textNode("summary", "", t("board.details")), textNode("p", "", readableAnswer(item.text)));
+      if (item.evidence) detail.append(textNode("p", "board-evidence", t("plan.evidence", { quote: item.evidence })));
+      if (item.origin === "plan" && plan.source_label) detail.append(textNode("small", "", plan.source_label));
+      if (item.speaker) detail.append(textNode("small", "", item.speaker));
+      detail.addEventListener("toggle", () => { if (detail.open) boardExpanded.add(key); else boardExpanded.delete(key); });
+      card.append(detail);
+      list.append(card);
+    }
+    section.append(header, list);
+    columns.append(section);
+  }
+  fragment.append(columns);
+  elements.callBoard.replaceChildren(fragment);
+  for (const list of elements.callBoard.querySelectorAll("[data-board-list]")) list.scrollTop = scrolls[list.dataset.boardList] || 0;
 }
 
 function renderJournal(items) {
@@ -1834,6 +1983,7 @@ async function state() {
     renderMessages(data.copilot);
     renderCallPlan(data.call_plan || null);
     renderJournal(data.journal || []);
+    renderCallBoard(data.call_plan || null, data.journal || []);
     renderMeetingChat(data.meeting_chat || []);
     elements.send.disabled = requestBusy || data.copilot.busy;
     elements.analyze.disabled = requestBusy || data.copilot.busy;
@@ -1993,6 +2143,7 @@ document.querySelectorAll("[data-content-view]").forEach((button) => {
       void state();
     }
     elements.chat.hidden = view !== "chat";
+    elements.callBoard.hidden = view !== "board";
     elements.callPlan.hidden = view !== "plan";
     elements.journal.hidden = !journalView;
     elements.meetingChat.hidden = view !== "meeting-chat";
