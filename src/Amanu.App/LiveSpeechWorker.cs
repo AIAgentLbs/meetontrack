@@ -37,9 +37,11 @@ internal sealed class LiveSpeechWorker : ILiveSpeechWorker
         while (await process.StandardError.ReadAsync(buffer).ConfigureAwait(false) != 0) { }
     }
 
+    internal static string ExecutablePath() => Path.ChangeExtension(typeof(LiveSpeechWorker).Assembly.Location, ".exe");
+
     public static async Task<LiveSpeechWorker> CreateAsync(string runtime, string model, string? language, int threads, CancellationToken token)
     {
-        var start = new ProcessStartInfo(Path.Combine(Path.GetDirectoryName(runtime)!, "Amanu.exe"))
+        var start = new ProcessStartInfo(ExecutablePath())
         {
             UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,

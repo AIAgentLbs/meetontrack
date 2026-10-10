@@ -8,6 +8,17 @@ namespace Amanu.Live.Tests;
 public sealed class CopilotExporterTests
 {
     [Fact]
+    public void DecoderUsesPackagedCaptureExecutableNotUpstreamName()
+    {
+        var type = typeof(AmanuRuntime).Assembly.GetType("Amanu.App.LiveSpeechWorker")!;
+        var method = type.GetMethod("ExecutablePath", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var path = (string)method.Invoke(null, null)!;
+        Assert.Equal("MeetingCopilotCapture.exe", Path.GetFileName(path));
+        Assert.Equal(Path.GetDirectoryName(typeof(AmanuRuntime).Assembly.Location), Path.GetDirectoryName(path));
+    }
+
+    [Fact]
     public void ExportsCurrentSessionBothAudioSidesAndRetainsFinishedSession()
     {
         var type = typeof(AmanuRuntime).Assembly.GetType("Amanu.App.CopilotExporter");
