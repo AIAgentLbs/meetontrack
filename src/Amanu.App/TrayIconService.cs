@@ -52,7 +52,6 @@ internal sealed class TrayIconService : IDisposable
         menu.Items.Add(Item(T("Show Meeting Copilot window", "Показать окно Meeting Copilot"), window.Reveal));
         menu.Items.Add(Item(T("Open recordings folder", "Открыть папку записей"), () =>
         {
-            runtime.TrackArtifact("recordings_root");
             AmanuRuntime.Open(runtime.Settings.RecordingsDirectory);
         }));
         menu.Items.Add(Item(T("Manage recordings…", "Управление записями…"), App.ShowRecordings));

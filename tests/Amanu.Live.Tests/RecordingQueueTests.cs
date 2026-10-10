@@ -110,7 +110,6 @@ public sealed class RecordingQueueTests
     {
         private readonly string root = Path.Combine(Path.GetTempPath(), "amanu-queue-tests", Guid.NewGuid().ToString("N"));
         private readonly HttpClient http = new();
-        private AnalyticsService analytics = null!;
         public string First => Path.Combine(root, "recordings", "first");
         public string Second => Path.Combine(root, "recordings", "second");
         public ControlledEngine Engine { get; } = new();
@@ -137,8 +136,7 @@ public sealed class RecordingQueueTests
             Directory.CreateDirectory(Path.Combine(fixture.root, "local-runtime"));
             await File.WriteAllBytesAsync(Path.Combine(fixture.root, "local-runtime", "transcribe-cli.exe"), []);
             await File.WriteAllBytesAsync(models.ModelPath("parakeet"), []);
-            fixture.analytics = new AnalyticsService(fixture.root, () => settings, () => false, fixture.http);
-            fixture.Processor = new(() => settings, () => true, new SecretStore(), models, fixture.http, fixture.analytics,
+            fixture.Processor = new(() => settings, () => true, new SecretStore(), models, fixture.http,
                 (_, _) => fixture.Engine);
             return fixture;
         }
@@ -146,7 +144,6 @@ public sealed class RecordingQueueTests
         {
             Engine.Release.TrySetResult();
             await Processor.DisposeAsync();
-            await analytics.DisposeAsync();
             http.Dispose();
             Directory.Delete(root, true);
         }

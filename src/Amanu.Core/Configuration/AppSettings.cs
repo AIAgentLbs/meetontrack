@@ -26,8 +26,6 @@ public sealed class AppSettings
     [JsonPropertyName("keep_audio")]
     public bool KeepAudio { get; set; }
 
-    [JsonPropertyName("analytics")]
-    public bool Analytics { get; set; } = true;
 
     [JsonPropertyName("interface_language")]
     public string InterfaceLanguage { get; set; } = "auto";
@@ -95,7 +93,6 @@ public sealed class AppSettings
     {
         var settings = CreateDefault(homeDirectory);
         settings.AutoRecord.Enabled = false;
-        settings.Analytics = false;
         settings.Transcription.Engine = "local";
         settings.Summary.Backend = "none";
         settings.SpeakerNames.Backend = "none";

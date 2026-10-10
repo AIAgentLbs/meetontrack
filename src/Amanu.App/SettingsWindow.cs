@@ -64,7 +64,6 @@ internal sealed class SettingsWindow : Window
             advanced.Detach();
         };
         ShowProblems();
-        runtime.TrackSettingsOpened();
     }
 
     public void ShowTab(int index) => tabs.SelectedIndex = index;

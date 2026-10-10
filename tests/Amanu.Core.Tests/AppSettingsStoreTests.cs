@@ -32,7 +32,6 @@ public sealed class AppSettingsStoreTests
 
         Assert.True(load.IsUnreadable);
         Assert.False(load.Settings.AutoRecord.Enabled);
-        Assert.False(load.Settings.Analytics);
         Assert.Equal("local", load.Settings.Transcription.Engine);
         Assert.Equal("none", load.Settings.Summary.Backend);
         Assert.Equal("{ definitely not json", File.ReadAllText(configPath));
@@ -44,7 +43,7 @@ public sealed class AppSettingsStoreTests
     {
         using var temporary = new TemporaryDirectory();
         var configPath = Path.Combine(temporary.Path, "config.json");
-        File.WriteAllText(configPath, """{ "summary": { "backend": "ollama" }, "analytics": false }""");
+        File.WriteAllText(configPath, """{ "summary": { "backend": "ollama" } }""");
         var store = new AppSettingsStore(configPath, Documents);
         var good = store.Load().Settings;
 
@@ -53,7 +52,6 @@ public sealed class AppSettingsStoreTests
 
         Assert.True(load.IsUnreadable);
         Assert.Equal("ollama", load.Settings.Summary.Backend);
-        Assert.False(load.Settings.Analytics);
         Assert.True(load.Settings.AutoRecord.Enabled);
     }
 

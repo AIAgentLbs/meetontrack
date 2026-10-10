@@ -86,7 +86,6 @@ internal sealed class RecordingsWindow : Window
         var import = Ui.Button(T("Import…", "Импортировать…"), () => _ = App.ImportAsync(this));
         var openRoot = Ui.Button(T("Open recordings folder", "Открыть папку записей"), () =>
         {
-            runtime.TrackArtifact("recordings_root");
             AmanuRuntime.Open(runtime.Settings.RecordingsDirectory);
         });
         openRoot.Margin = new Thickness(8, 0, 0, 0);
@@ -164,8 +163,7 @@ internal sealed class RecordingsWindow : Window
         runtime.SessionsChanged += changed;
         Closed += (_, _) => runtime.SessionsChanged -= changed;
         Loaded += async (_, _) => await ReloadAsync();
-        runtime.TrackArtifact("recordings_window");
-    }
+        }
 
     private Row? Selected => grid.SelectedItem as Row;
 
@@ -423,13 +421,11 @@ internal sealed class RecordingsWindow : Window
         var audio = new[] { "audio.m4a", "mic.wav" }.Select(name => Path.Combine(row.Item.Directory, name)).FirstOrDefault(File.Exists)
                     ?? Directory.EnumerateFiles(row.Item.Directory, "source.*").FirstOrDefault();
         if (audio is null) return;
-        runtime.TrackArtifact("session_folder");
         AmanuRuntime.Open(audio);
     }
 
     private void OpenFolder(Row row)
     {
-        runtime.TrackArtifact("session_folder");
         AmanuRuntime.Open(row.Item.Directory);
     }
 

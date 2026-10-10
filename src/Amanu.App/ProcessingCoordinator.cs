@@ -4,7 +4,6 @@ using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Channels;
-using Amanu.Core.Analytics;
 using Amanu.Core.Configuration;
 using Amanu.Core.Processing;
 using static Amanu.Core.Localization.Localized;
@@ -44,7 +43,6 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
     private readonly SecretStore secrets;
     private readonly ModelManager models;
     private readonly HttpClient httpClient;
-    private readonly AnalyticsService analytics;
     private readonly LanguageModels languageModels;
     private readonly Func<string, AppSettings, ITranscriptionEngine>? localEngineFactory;
     private readonly Channel<string> queue = Channel.CreateUnbounded<string>();
@@ -63,7 +61,6 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
         SecretStore secrets,
         ModelManager models,
         HttpClient httpClient,
-        AnalyticsService analytics,
         Func<string, AppSettings, ITranscriptionEngine>? localEngineFactory = null)
     {
         this.settings = settings;
@@ -71,7 +68,6 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
         this.secrets = secrets;
         this.models = models;
         this.httpClient = httpClient;
-        this.analytics = analytics;
         this.localEngineFactory = localEngineFactory;
         languageModels = new LanguageModels(httpClient, secrets, settings);
     }
@@ -429,11 +425,6 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
             File.Delete(Path.Combine(directory, "transcribe.deferred"));
             SessionsChanged?.Invoke(this, EventArgs.Empty);
             WriteLedger(directory, ReadLedger(directory) with { LastError = null });
-            _ = analytics.RecordAsync("transcript_finished", new Dictionary<string, object?>
-            {
-                ["engine"] = transcript.Engine,
-                ["model"] = KnownModel(transcript.Engine, transcript.Model),
-            });
             try
             {
                 await SettleAudioAsync(audio, current.KeepAudio, cancellationToken).ConfigureAwait(false);
@@ -453,19 +444,11 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
             if (failure.Kind != FailureKind.Recording)
             {
                 await DeferAsync(directory, "transcribe.deferred", failure.Message, cancellationToken).ConfigureAwait(false);
-                _ = analytics.RecordAsync("transcript_failed", new Dictionary<string, object?>
-                {
-                    ["engine"] = engine, ["reason"] = Reason(failure), ["outcome"] = "deferred",
-                });
                 if (failure.Kind == FailureKind.Transient) ScheduleRetry(directory, TimeSpan.FromMinutes(2));
                 return false;
             }
             var attempts = ledger.TranscribeAttempts + 1;
             WriteLedger(directory, ReadLedger(directory) with { TranscribeAttempts = attempts, LastError = failure.Message });
-            _ = analytics.RecordAsync("transcript_failed", new Dictionary<string, object?>
-            {
-                ["engine"] = engine, ["reason"] = Reason(failure), ["outcome"] = attempts >= TranscribeAttemptLimit ? "gave_up" : "deferred",
-            });
             if (attempts >= TranscribeAttemptLimit)
             {
                 await GiveUpAsync(directory, failure.Message, cancellationToken).ConfigureAwait(false);
@@ -491,10 +474,6 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
             }
             catch (ProcessingFailure failure) when (plan.Local is not null && failure.Kind != FailureKind.Recording)
             {
-                _ = analytics.RecordAsync("transcript_fallback", new Dictionary<string, object?>
-                {
-                    ["from_engine"] = cloud, ["to_engine"] = plan.Local, ["reason"] = Reason(failure),
-                });
                 await File.AppendAllTextAsync(Path.Combine(audio.Directory, "transcribe.log"),
                     $"{DateTimeOffset.UtcNow:O} {cloud} → {plan.Local}: {failure.Message}{Environment.NewLine}", cancellationToken).ConfigureAwait(false);
             }
@@ -545,15 +524,13 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
             await TranscriptWriter.WriteAsync(directory, title, transcript, result.Names, cancellationToken).ConfigureAwait(false);
             File.Delete(Path.Combine(directory, "speakers.deferred"));
             if (result.AskedModel) WriteLedger(directory, ReadLedger(directory) with { NamesAsked = true });
-            if (result.AskedModel)
-                _ = analytics.RecordAsync("speaker_names_finished", new Dictionary<string, object?> { ["backend"] = current.SpeakerNames.Backend });
             return true;
         }
         catch (ProcessingFailure failure)
         {
             return await LanguageModelFailedAsync(directory, "speakers", failure,
                 ledger => ledger.NamesAttempts, (ledger, attempts) => ledger with { NamesAttempts = attempts },
-                "speaker_names_failed", current.SpeakerNames.Backend, cancellationToken).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -575,17 +552,13 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
             var markdown = await File.ReadAllTextAsync(Path.Combine(directory, "transcript.md"), cancellationToken).ConfigureAwait(false);
             var answer = await new SummaryService(languageModels, settings).GenerateAsync(directory, markdown, cancellationToken).ConfigureAwait(false);
             File.Delete(Path.Combine(directory, "summary.deferred"));
-            _ = analytics.RecordAsync("summary_finished", new Dictionary<string, object?>
-            {
-                ["backend"] = answer.Backend, ["model"] = answer.Model,
-            });
             return true;
         }
         catch (ProcessingFailure failure)
         {
             return await LanguageModelFailedAsync(directory, "summary", failure,
                 ledger => ledger.SummaryAttempts, (ledger, attempts) => ledger with { SummaryAttempts = attempts },
-                "summary_failed", current.Summary.Backend, cancellationToken).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -596,22 +569,17 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
     private async Task<bool> LanguageModelFailedAsync(
         string directory, string prefix, ProcessingFailure failure,
         Func<ProcessingLedger, int> attemptsOf, Func<ProcessingLedger, int, ProcessingLedger> withAttempts,
-        string analyticsEvent, string backend, CancellationToken cancellationToken)
+        CancellationToken cancellationToken)
     {
         var ledger = ReadLedger(directory);
         if (failure.Kind == FailureKind.Environmental)
         {
             await DeferAsync(directory, $"{prefix}.deferred", failure.Message, cancellationToken).ConfigureAwait(false);
-            _ = analytics.RecordAsync(analyticsEvent, new Dictionary<string, object?> { ["backend"] = backend, ["reason"] = Reason(failure), ["outcome"] = "deferred" });
             return false;
         }
         var attempts = attemptsOf(ledger) + 1;
         WriteLedger(directory, withAttempts(ledger, attempts) with { LastError = failure.Message });
         var gaveUp = attempts >= LanguageModelAttemptLimit;
-        _ = analytics.RecordAsync(analyticsEvent, new Dictionary<string, object?>
-        {
-            ["backend"] = backend, ["reason"] = Reason(failure), ["outcome"] = gaveUp ? "gave_up" : "deferred",
-        });
         if (gaveUp)
         {
             File.Delete(Path.Combine(directory, $"{prefix}.deferred"));
@@ -810,26 +778,7 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
         SessionsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private static string KnownModel(string engine, string model) => (engine, model) switch
-    {
-        ("assemblyai", _) => "universal-3-pro",
-        ("openai", "gpt-4o-transcribe-diarize") => "gpt-4o-transcribe-diarize",
-        ("elevenlabs", _) => "scribe_v2",
-        ("parakeet", _) => "parakeet-v3",
-        ("gigaam", _) => "gigaam-v3",
-        ("whisper", _) => "whisper-large-v3-turbo",
-        _ => "custom",
-    };
 
-    private static string Reason(ProcessingFailure failure) => failure.Kind switch
-    {
-        FailureKind.Environmental when failure.Unreachable => "no_network",
-        FailureKind.Environmental when failure.Message.Contains("key", StringComparison.OrdinalIgnoreCase)
-                                       || failure.Message.Contains("ключ", StringComparison.OrdinalIgnoreCase) => "no_key",
-        FailureKind.Environmental => "no_model",
-        FailureKind.Transient => "usage_limit",
-        _ => "unknown",
-    };
 
     public async ValueTask DisposeAsync()
     {

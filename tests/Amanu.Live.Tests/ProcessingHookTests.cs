@@ -27,16 +27,14 @@ public sealed class ProcessingHookTests
         var settings = AppSettings.CreateDefault(root);
         settings.RecordingsDirectory = root;
         settings.Transcription.Enabled = false;
-        settings.Analytics = false;
         settings.OnStop = new CommandHook
         {
             Executable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),
             Arguments = ["-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(script))],
         };
         using var http = new HttpClient();
-        await using var analytics = new AnalyticsService(root, () => settings, () => false, http);
         var processor = new ProcessingCoordinator(() => settings, () => true,
-            new SecretStore(), new ModelManager(root, http), http, analytics);
+            new SecretStore(), new ModelManager(root, http), http);
         var completed = new ConcurrentDictionary<string, bool>();
         var bothDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var repeated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

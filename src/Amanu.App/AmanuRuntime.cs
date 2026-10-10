@@ -5,7 +5,6 @@ using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Amanu.Core.Analytics;
 using Amanu.Core.Configuration;
 using Amanu.Core.Localization;
 using Amanu.Core.Processing;
@@ -39,7 +38,6 @@ public sealed class AmanuRuntime : IAsyncDisposable
     private readonly ProcessingCoordinator processing;
     private readonly WindowsAudioCapture capture;
     private readonly LiveTranscriptionCoordinator liveTranscription;
-    private readonly AnalyticsService analytics;
     private readonly CopilotExporter copilotExporter;
     private readonly CancellationTokenSource lifetime = new();
     private readonly FileSystemWatcher? configWatcher;
@@ -76,39 +74,24 @@ public sealed class AmanuRuntime : IAsyncDisposable
         httpClient.DefaultRequestHeaders.UserAgent.ParseAdd($"Meeting Copilot-Windows/{AppVersion}");
         secrets = new SecretStore();
         models = new ModelManager(dataDirectory, httpClient);
-        analytics = new AnalyticsService(dataDirectory, () => Settings, () => !ConfigUnreadable, httpClient);
-        processing = new ProcessingCoordinator(() => Settings, () => !ConfigUnreadable, secrets, models, httpClient, analytics);
+        processing = new ProcessingCoordinator(() => Settings, () => !ConfigUnreadable, secrets, models, httpClient);
         liveTranscription = new LiveTranscriptionCoordinator(capture, models, () => Settings);
 
         coordinator.StateChanged += (_, state) =>
         {
             copilotExporter.SetState(state);
             StateChanged?.Invoke(this, state);
-            if (state.IsRecording)
-                _ = analytics.RecordAsync("recording_started", new Dictionary<string, object?> { ["trigger"] = TriggerName(state.Trigger) });
         };
         coordinator.RecordingCompleted += (_, recording) =>
         {
             if (!recording.Discarded && recording.Settled) processing.Enqueue(recording.Session.Directory);
             SessionsChanged?.Invoke(this, EventArgs.Empty);
-            if (recording.Discarded) return;
-            _ = analytics.RecordAsync("recording_finished", new Dictionary<string, object?>
-            {
-                ["trigger"] = TriggerName(recording.Session.Trigger),
-                ["duration_bucket"] = AnalyticsPolicy.DurationBucket((DateTimeOffset.Now - recording.Session.StartedAt).TotalSeconds),
-                ["live_used"] = Settings.LiveTranscription.Enabled,
-                ["system_audio"] = AudioPreprocessor.HasSamples(recording.Session.SystemTrack),
-            });
         };
         coordinator.AutomaticStartFailed += (_, failure) =>
         {
             Notify(T("Couldn't start recording", "Не удалось начать запись"),
                 failure.Error.Message + " " + T($"Trying again in {(int)failure.RetryIn.TotalSeconds} s.", $"Повторю через {(int)failure.RetryIn.TotalSeconds} с."),
                 NotificationKind.Error);
-            _ = analytics.RecordAsync("recording_start_failed", new Dictionary<string, object?>
-            {
-                ["trigger"] = "mic-activity", ["component"] = "capture", ["reason"] = "unknown",
-            });
         };
         processing.StatusChanged += (_, status) =>
         {
@@ -120,14 +103,11 @@ public sealed class AmanuRuntime : IAsyncDisposable
         };
         processing.SessionsChanged += (_, _) => SessionsChanged?.Invoke(this, EventArgs.Empty);
         models.Progress += (_, progress) => DownloadProgressChanged?.Invoke(this, progress);
-        models.DownloadStarted += (_, item) => _ = analytics.RecordAsync("model_download_started", new Dictionary<string, object?> { ["asset"] = AnalyticsAsset(item) });
         models.DownloadFinished += (_, item) =>
         {
-            _ = analytics.RecordAsync("model_download_finished", new Dictionary<string, object?> { ["asset"] = AnalyticsAsset(item) });
             Task.Run(processing.Rescan);
             if (item.Equals("Model nemotron-live", StringComparison.OrdinalIgnoreCase)) _ = liveTranscription.RefreshAsync();
         };
-        models.DownloadFailed += (_, item) => _ = analytics.RecordAsync("model_download_failed", new Dictionary<string, object?> { ["asset"] = AnalyticsAsset(item), ["reason"] = "unknown" });
         liveTranscription.LineReady += (_, line) => { copilotExporter.AddLine(line); LiveLineReady?.Invoke(this, line); };
         capture.TrackLost += (_, track) => Notify(
             T("A recording device went away", "Устройство записи пропало"),
@@ -236,7 +216,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
         try
         {
             Directory.CreateDirectory(dataDirectory);
-            foreach (var name in new[] { "config.json", "setup.json", "analytics.json", "analytics-pending.json" })
+            foreach (var name in new[] { "config.json", "setup.json" })
             {
                 var source = Path.Combine(installFolder, name);
                 if (File.Exists(source)) File.Move(source, Path.Combine(dataDirectory, name));
@@ -258,15 +238,6 @@ public sealed class AmanuRuntime : IAsyncDisposable
         {
             try { StartupRegistration.SetEnabled(Settings.StartAtLogin); }
             catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or System.Security.SecurityException) { }
-        }
-        // Before the queue, which records events into the pending file this
-        // loads, and whatever it throws: statistics once stopped this method
-        // short of the queue, the call watcher and the rescans, and a meeting
-        // waited for a transcript that never came. Nothing may wait on them.
-        try { await analytics.StartAsync(lifetime.Token); }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            App.WriteCrashLog(exception);
         }
         processing.Start();
         SystemEvents.PowerModeChanged += PowerModeChanged;
@@ -375,9 +346,6 @@ public sealed class AmanuRuntime : IAsyncDisposable
             try { StartupRegistration.SetEnabled(next.StartAtLogin); }
             catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or System.Security.SecurityException) { }
         }
-        _ = analytics.SetEnabledAsync(next.Analytics && !ConfigUnreadable);
-        if (previous.Analytics != next.Analytics || previous.AutoRecord.Enabled != next.AutoRecord.Enabled)
-            _ = analytics.RecordAsync("setting_changed");
         Task.Run(processing.Rescan);
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -404,21 +372,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
 
     // MARK: recording
 
-    public async Task StartManualAsync()
-    {
-        try
-        {
-            await coordinator.StartManualAsync(DateTimeOffset.Now);
-        }
-        catch
-        {
-            _ = analytics.RecordAsync("recording_start_failed", new Dictionary<string, object?>
-            {
-                ["trigger"] = "manual", ["component"] = "capture", ["reason"] = "unknown",
-            });
-            throw;
-        }
-    }
+    public Task StartManualAsync() => coordinator.StartManualAsync(DateTimeOffset.Now);
 
     public Task StopManualAsync() => coordinator.StopAsync(DateTimeOffset.Now, "manual");
 
@@ -529,11 +483,6 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public Task CompleteSetupAsync(CancellationToken cancellationToken = default) =>
         AtomicFiles.WriteJsonAsync(SetupPath, new { version = 1, completed_at = DateTimeOffset.UtcNow }, cancellationToken);
 
-    public void TrackArtifact(string artifact) =>
-        _ = analytics.RecordAsync("artifact_opened", new Dictionary<string, object?> { ["artifact"] = artifact });
-
-    public void TrackSettingsOpened() => _ = analytics.RecordAsync("settings_opened");
-
     public void Notify(string title, string message, NotificationKind kind) =>
         NotificationRequested?.Invoke(this, (title, message, kind));
 
@@ -562,17 +511,6 @@ public sealed class AmanuRuntime : IAsyncDisposable
         catch (ArgumentException) { return false; }
     }
 
-    private static string TriggerName(SessionTrigger? trigger) => trigger == SessionTrigger.Manual ? "manual" : "mic-activity";
-
-    private static string AnalyticsAsset(string item) => item.ToLowerInvariant() switch
-    {
-        "model parakeet" => "parakeet-v3",
-        "model gigaam" => "gigaam-v3",
-        "model whisper" => "whisper-large-v3-turbo",
-        "model nemotron-live" => "nemotron-live",
-        _ => "runtime",
-    };
-
     private static bool IsTestInstance
     {
         get
@@ -599,7 +537,6 @@ public sealed class AmanuRuntime : IAsyncDisposable
         await coordinator.DisposeAsync();
         copilotExporter.Flush();
         copilotExporter.Dispose();
-        await analytics.DisposeAsync();
         httpClient.Dispose();
         lifetime.Dispose();
     }

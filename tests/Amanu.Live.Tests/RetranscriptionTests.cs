@@ -29,13 +29,12 @@ public sealed class RetranscriptionTests
         await File.WriteAllTextAsync(Path.Combine(directory, "summary.md"), "Original summary");
         var engine = new ControlledEngine(fail);
         using var http = new HttpClient();
-        await using var analytics = new AnalyticsService(root, () => settings, () => false, http);
         var models = new ModelManager(root, http, root);
         Directory.CreateDirectory(models.ModelDirectory);
         Directory.CreateDirectory(Path.Combine(root, "local-runtime"));
         await File.WriteAllBytesAsync(Path.Combine(root, "local-runtime", "transcribe-cli.exe"), []);
         await File.WriteAllBytesAsync(models.ModelPath("parakeet"), []);
-        var processor = new ProcessingCoordinator(() => settings, () => true, new SecretStore(), models, http, analytics,
+        var processor = new ProcessingCoordinator(() => settings, () => true, new SecretStore(), models, http,
             (model, _) => { Assert.Equal("parakeet", model); return engine; });
         var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var updates = 0;
