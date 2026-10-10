@@ -35,22 +35,22 @@ public static class UpdateService
         try
         {
             if (!Manager.IsInstalled)
-                return new(UpdateOutcome.NotInstalled, T("This copy of Amanu was not installed by its installer, so it doesn't update itself.",
-                    "Эта копия Amanu установлена не установщиком, поэтому сама не обновляется."));
+                return new(UpdateOutcome.NotInstalled, T("This copy of Meeting Copilot was not installed by its installer, so it doesn't update itself.",
+                    "Эта копия Meeting Copilot установлена не установщиком, поэтому сама не обновляется."));
             cancellationToken.ThrowIfCancellationRequested();
             var update = await Manager.CheckForUpdatesAsync();
             if (update is null)
-                return new(UpdateOutcome.UpToDate, T($"Amanu {AmanuRuntime.AppVersion} is the latest version.", $"Amanu {AmanuRuntime.AppVersion} — последняя версия."));
+                return new(UpdateOutcome.UpToDate, T($"Meeting Copilot {AmanuRuntime.AppVersion} is the latest version.", $"Meeting Copilot {AmanuRuntime.AppVersion} — последняя версия."));
             if (busy() && !interactive)
                 return new(UpdateOutcome.Busy, T("An update waits until the recording ends.", "Обновление подождёт конца записи."));
             await Manager.DownloadUpdatesAsync(update, progress: null, cancelToken: cancellationToken);
             pending = update;
-            return new(UpdateOutcome.Ready, T($"Amanu {update.TargetFullRelease.Version} is downloaded and installs at the next start.",
-                $"Amanu {update.TargetFullRelease.Version} скачана и установится при следующем запуске."));
+            return new(UpdateOutcome.Ready, T($"Meeting Copilot {update.TargetFullRelease.Version} is downloaded and installs at the next start.",
+                $"Meeting Copilot {update.TargetFullRelease.Version} скачана и установится при следующем запуске."));
         }
         catch (NotInstalledException)
         {
-            return new(UpdateOutcome.NotInstalled, T("This copy of Amanu doesn't update itself.", "Эта копия Amanu сама не обновляется."));
+            return new(UpdateOutcome.NotInstalled, T("This copy of Meeting Copilot doesn't update itself.", "Эта копия Meeting Copilot сама не обновляется."));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

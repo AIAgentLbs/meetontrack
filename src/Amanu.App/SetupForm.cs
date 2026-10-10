@@ -117,7 +117,7 @@ internal sealed class SetupForm
         View.Children.Add(Ui.Section(T("Access", "Доступ"), Ui.Box(
             Ui.Row(launch,
                 Ui.Title(T("Start when you sign in to Windows", "Запускать при входе в Windows")),
-                Ui.Detail(T("So a meeting is never missed because nobody opened Amanu.", "Чтобы встреча не пропала из-за того, что Amanu никто не открыл."))),
+                Ui.Detail(T("So a meeting is never missed because nobody opened Meeting Copilot.", "Чтобы встреча не пропала из-за того, что Meeting Copilot никто не открыл."))),
             Ui.Row(Ui.Symbol(""),
                 Ui.Title(T("Microphone", "Микрофон")),
                 Ui.Detail(T("Your side of the call. Windows asks for it under Privacy › Microphone.",
@@ -125,8 +125,8 @@ internal sealed class SetupForm
                 micStatus, micSettings),
             Ui.Row(Ui.Symbol(""),
                 Ui.Title(T("Call audio", "Звук звонка")),
-                Ui.Detail(T("Windows needs no permission for it. Amanu records only the call app’s own sound; in a browser, other tabs of the same browser can be heard too.",
-                    "Windows не спрашивает на него разрешения. Amanu записывает только звук самого приложения звонка; в браузере могут попасть и другие его вкладки."))))));
+                Ui.Detail(T("Windows needs no permission for it. Meeting Copilot records only the call app’s own sound; in a browser, other tabs of the same browser can be heard too.",
+                    "Windows не спрашивает на него разрешения. Meeting Copilot записывает только звук самого приложения звонка; в браузере могут попасть и другие его вкладки."))))));
 
         View.Children.Add(Ui.Section(T("Transcription", "Расшифровка"), Ui.Group(14,
             TranscriptionBox(cloudKeyView),
@@ -146,14 +146,14 @@ internal sealed class SetupForm
         View.Children.Add(Ui.Section(T("Summaries", "Саммари"), SummaryChoices(openAiBaseView, openAiModelView, ollamaBaseView, ollamaModelView), summaries));
 
         noIconsNote.Margin = new Thickness(0, Ui.HeaderGap, 0, 0);
-        View.Children.Add(Ui.Section(T("Where Amanu shows up", "Где видно Amanu"), Ui.Group(0,
+        View.Children.Add(Ui.Section(T("Where Meeting Copilot shows up", "Где видно Meeting Copilot"), Ui.Group(0,
             Ui.Box(
                 Ui.Row(tray, Ui.Title(T("In the notification area", "В области уведомлений")),
                     Ui.Detail(T("The icon by the clock, with a red dot while a meeting records — and the menu with everything in it.",
                         "Значок у часов, во время встречи на нём красная точка, и меню со всем остальным."))),
                 Ui.Row(taskbar, Ui.Title(T("On the taskbar", "На панели задач")),
-                    Ui.Detail(T("The Amanu window on the taskbar and in Alt+Tab, like any other program.",
-                        "Окно Amanu на панели задач и в Alt+Tab, как у любой программы.")))),
+                    Ui.Detail(T("The Meeting Copilot window on the taskbar and in Alt+Tab, like any other program.",
+                        "Окно Meeting Copilot на панели задач и в Alt+Tab, как у любой программы.")))),
             noIconsNote)));
 
         var autoBox = Ui.Box(Ui.Row(autoRecord,
@@ -670,7 +670,7 @@ internal sealed class SetupForm
             local.IsEnabled = runtime.LocalRuntimePresent;
             localDetail.Text = runtime.LocalRuntimePresent
                 ? T("Nothing leaves the computer; local transcripts label speakers as me / them.", "С компьютера ничего не уходит; локальные расшифровки помечают спикеров как «я»/«они».")
-                : T("This build of Amanu has no local transcription engine.", "В этой сборке Amanu нет локального движка расшифровки.");
+                : T("This build of Meeting Copilot has no local transcription engine.", "В этой сборке Meeting Copilot нет локального движка расшифровки.");
             var shown = ShownProvider;
             foreach (var (id, card) in providerCards)
             {
@@ -762,8 +762,8 @@ internal sealed class SetupForm
             tray.IsChecked = settings.TrayIcon;
             taskbar.IsChecked = settings.TaskbarIcon;
             noIconsNote.Text = settings.TrayIcon || settings.TaskbarIcon ? ""
-                : T("Amanu keeps recording with no icon anywhere. To bring the window back, open Amanu again from the Start menu.",
-                    "Amanu продолжит записывать, но её нигде не будет видно. Чтобы вернуть окно, откройте Amanu ещё раз из меню «Пуск».");
+                : T("Meeting Copilot keeps recording with no icon anywhere. To bring the window back, open Meeting Copilot again from the Start menu.",
+                    "Meeting Copilot продолжит записывать, но её нигде не будет видно. Чтобы вернуть окно, откройте Meeting Copilot ещё раз из меню «Пуск».");
             noIconsNote.Visibility = noIconsNote.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             autoRecord.IsChecked = settings.AutoRecord.Enabled;
             autoRecordDetail.Text = T($"And stop when it lets go. A call shorter than {settings.AutoRecord.MinimumDurationSeconds} seconds is thrown away.",

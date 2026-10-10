@@ -73,7 +73,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
             () => Settings.SystemAudio == "all");
         activityMonitor = new CallActivityMonitor(Matcher(settings));
         httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd($"Amanu-Windows/{AppVersion}");
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd($"Meeting Copilot-Windows/{AppVersion}");
         secrets = new SecretStore();
         models = new ModelManager(dataDirectory, httpClient);
         analytics = new AnalyticsService(dataDirectory, () => Settings, () => !ConfigUnreadable, httpClient);
@@ -114,9 +114,9 @@ public sealed class AmanuRuntime : IAsyncDisposable
         {
             ProcessingStatusChanged?.Invoke(this, status);
             if (status.Stage == "complete" && status.SessionDirectory is not null)
-                Notify("Amanu", status.Message, NotificationKind.Information);
+                Notify("Meeting Copilot", status.Message, NotificationKind.Information);
             else if (status.Stage == "failed")
-                Notify(T("Amanu — processing failed", "Amanu — обработка не удалась"), status.Message, NotificationKind.Error);
+                Notify(T("Meeting Copilot — processing failed", "Meeting Copilot — обработка не удалась"), status.Message, NotificationKind.Error);
         };
         processing.SessionsChanged += (_, _) => SessionsChanged?.Invoke(this, EventArgs.Empty);
         models.Progress += (_, progress) => DownloadProgressChanged?.Invoke(this, progress);
@@ -277,7 +277,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
         _ = Task.Run(() => RescanPeriodicallyAsync(lifetime.Token));
         // This distribution is updated by Meeting Copilot's checksum-pinned installer.
         if (ConfigUnreadable)
-            Notify("Amanu", ConfigProblems.First(problem => problem.Unreadable).Headline, NotificationKind.Warning);
+            Notify("Meeting Copilot", ConfigProblems.First(problem => problem.Unreadable).Headline, NotificationKind.Warning);
     }
 
     // MARK: settings
@@ -354,7 +354,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
         Apply(previous, Settings);
         if (wasUnreadable && !ConfigUnreadable) processing.Rescan();
         if (!wasUnreadable && ConfigUnreadable)
-            Notify("Amanu", ConfigProblems.First(problem => problem.Unreadable).Headline, NotificationKind.Warning);
+            Notify("Meeting Copilot", ConfigProblems.First(problem => problem.Unreadable).Headline, NotificationKind.Warning);
     }
 
     private void Apply(AppSettings previous, AppSettings next)

@@ -49,7 +49,7 @@ internal sealed class TrayIconService : IDisposable
         menu.Items.Add(new Separator());
         menu.Items.Add(autoRecordItem);
         menu.Items.Add(new Separator());
-        menu.Items.Add(Item(T("Show Amanu window", "Показать окно Amanu"), window.Reveal));
+        menu.Items.Add(Item(T("Show Meeting Copilot window", "Показать окно Meeting Copilot"), window.Reveal));
         menu.Items.Add(Item(T("Open recordings folder", "Открыть папку записей"), () =>
         {
             runtime.TrackArtifact("recordings_root");
@@ -61,11 +61,11 @@ internal sealed class TrayIconService : IDisposable
         menu.Items.Add(Item(T("Settings…", "Настройки…"), () => App.ShowSettings(0)));
         menu.Items.Add(Item(T("Setup…", "Первая настройка…"), App.ShowSetup));
         menu.Items.Add(Item(T("Check for updates…", "Проверить обновления…"), () => _ = App.CheckForUpdatesAsync()));
-        menu.Items.Add(Item(T("About Amanu", "О программе Amanu"), App.ShowAbout));
+        menu.Items.Add(Item(T("About Meeting Copilot", "О программе Meeting Copilot"), App.ShowAbout));
         menu.Items.Add(new Separator());
-        menu.Items.Add(Item(T("Quit Amanu", "Завершить Amanu"), () => _ = App.QuitAsync()));
+        menu.Items.Add(Item(T("Quit Meeting Copilot", "Завершить Meeting Copilot"), () => _ = App.QuitAsync()));
 
-        icon = new System.Windows.Forms.NotifyIcon { Icon = idleIcon, Text = "Amanu", Visible = runtime.Settings.TrayIcon };
+        icon = new System.Windows.Forms.NotifyIcon { Icon = idleIcon, Text = "Meeting Copilot", Visible = runtime.Settings.TrayIcon };
         icon.MouseUp += (_, args) =>
         {
             if (args.Button == System.Windows.Forms.MouseButtons.Left) window.Dispatcher.Invoke(window.Reveal);
@@ -133,7 +133,7 @@ internal sealed class TrayIconService : IDisposable
         autoRecordItem.IsChecked = runtime.Settings.AutoRecord.Enabled;
         icon.Visible = runtime.Settings.TrayIcon;
         icon.Icon = state.IsPaused ? pausedIcon : state.IsRecording ? recordingIcon : idleIcon;
-        var tooltip = state.IsRecording ? $"Amanu — {display.Heading} · {display.Elapsed}" : $"Amanu — {display.Heading}";
+        var tooltip = state.IsRecording ? $"Meeting Copilot — {display.Heading} · {display.Elapsed}" : $"Meeting Copilot — {display.Heading}";
         icon.Text = tooltip.Length > 63 ? tooltip[..63] : tooltip;
     }
 

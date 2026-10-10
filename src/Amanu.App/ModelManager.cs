@@ -51,7 +51,7 @@ public sealed class ModelManager(string dataDirectory, HttpClient httpClient, st
         if (!ModelCatalog.Models.TryGetValue(model, out var artifact))
             throw new InvalidOperationException($"Unknown local model: {model}");
         if (model == "nemotron-live" ? !LiveRuntimePresent : CliPath is null)
-            throw new InvalidOperationException("The local transcription runtime is missing from this Amanu installation.");
+            throw new InvalidOperationException("The local transcription runtime is missing from this Meeting Copilot installation.");
         Directory.CreateDirectory(ModelDirectory);
         lock (downloading)
         {

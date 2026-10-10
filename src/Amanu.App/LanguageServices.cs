@@ -280,8 +280,8 @@ public static class CommandLineTools
             // someone to sign in rather than spending attempts it cannot win.
             if (SaysSignedOut(detail))
                 throw new ProcessingFailure(FailureKind.Environmental, T(
-                    $"{Path.GetFileNameWithoutExtension(executable)} is not signed in: open amanu setup and press Sign in",
-                    $"в {Path.GetFileNameWithoutExtension(executable)} не выполнен вход: откройте настройки amanu и нажмите «Войти»"));
+                    $"{Path.GetFileNameWithoutExtension(executable)} is not signed in: open Meeting Copilot setup and press Sign in",
+                    $"в {Path.GetFileNameWithoutExtension(executable)} не выполнен вход: откройте настройки Meeting Copilot и нажмите «Войти»"));
             var lower = detail.ToLowerInvariant();
             var passes = new[] { "limit", "quota", "429", "timed out", "timeout", "network", "connect", "overloaded", "unavailable" }
                 .Any(lower.Contains);

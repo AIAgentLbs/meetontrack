@@ -8,6 +8,14 @@ namespace Amanu.Live.Tests;
 public sealed class CopilotExporterTests
 {
     [Fact]
+    public void PackagedApplicationMetadataUsesOurBrand()
+    {
+        var assembly = typeof(AmanuRuntime).Assembly;
+        var product = assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyProductAttribute),false);
+        Assert.Equal("Meeting Copilot Capture", ((System.Reflection.AssemblyProductAttribute)Assert.Single(product)).Product);
+    }
+
+    [Fact]
     public void DecoderUsesPackagedCaptureExecutableNotUpstreamName()
     {
         var type = typeof(AmanuRuntime).Assembly.GetType("Amanu.App.LiveSpeechWorker")!;

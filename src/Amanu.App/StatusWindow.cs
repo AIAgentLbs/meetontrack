@@ -67,7 +67,7 @@ internal sealed class StatusWindow : Window
         Title = "Meeting Copilot Capture";
 #if DEBUG
         if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("AMANU_TEST_DATA")))
-            Title = "Amanu — Live transcript test";
+            Title = "Meeting Copilot — Live transcript test";
 #endif
         Width = 360;
         SizeToContent = SizeToContent.Height;

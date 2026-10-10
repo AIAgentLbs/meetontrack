@@ -21,7 +21,7 @@ internal sealed class SettingsWindow : Window
     public SettingsWindow(AmanuRuntime runtime)
     {
         this.runtime = runtime;
-        Title = T("Amanu Settings", "Настройки Amanu");
+        Title = T("Meeting Copilot Settings", "Настройки Meeting Copilot");
         MinWidth = 700;
         MinHeight = 480;
         Ui.FitToWorkArea(this, 860, 820);
@@ -99,7 +99,7 @@ internal sealed class SetupWindow : Window
 
     public SetupWindow(AmanuRuntime runtime)
     {
-        Title = T("Setting up Amanu", "Первая настройка Amanu");
+        Title = T("Setting up Meeting Copilot", "Первая настройка Meeting Copilot");
         MinWidth = 700;
         MinHeight = 480;
         Ui.FitToWorkArea(this, 860, 820);
@@ -146,14 +146,14 @@ internal sealed class AboutWindow : Window
 {
     public AboutWindow()
     {
-        Title = T("About Amanu", "О программе Amanu");
+        Title = T("About Meeting Copilot", "О программе Meeting Copilot");
         SizeToContent = SizeToContent.WidthAndHeight;
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Icon = App.WindowIcon;
         var stack = new StackPanel { Margin = new Thickness(32, 24, 32, 24), MaxWidth = 380 };
         stack.Children.Add(new System.Windows.Controls.Image { Source = App.WindowIcon, Width = 64, Height = 64, HorizontalAlignment = HorizontalAlignment.Left });
-        var name = Ui.Title("Amanu");
+        var name = Ui.Title("Meeting Copilot");
         name.FontSize = 20;
         name.FontWeight = FontWeights.SemiBold;
         name.Margin = new Thickness(0, 12, 0, 0);
@@ -164,11 +164,12 @@ internal sealed class AboutWindow : Window
         about.Margin = new Thickness(0, 12, 0, 0);
         stack.Children.Add(about);
         var links = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
-        links.Children.Add(Ui.Link("amanu.me", "https://amanu.me"));
-        var privacy = Ui.Link(T("Privacy", "Приватность"), "https://github.com/gsamat/amanu/blob/master/PRIVACY.md");
+        links.Children.Add(Ui.Link("Meeting Copilot", "https://aiagentlbs.github.io/meeting-copilot/"));
+        var privacy = Ui.Link(T("Upstream licenses", "Лицензии оригинала"), "https://github.com/gsamat/amanu/blob/master/LICENSE");
         privacy.Margin = new Thickness(16, 0, 0, 0);
         links.Children.Add(privacy);
         stack.Children.Add(links);
+        stack.Children.Add(Ui.Detail(T("Capture is based on Amanu. Original license notices are included in the package.", "Capture основан на Amanu. Лицензии оригинала включены в пакет.")));
         Content = stack;
     }
 }

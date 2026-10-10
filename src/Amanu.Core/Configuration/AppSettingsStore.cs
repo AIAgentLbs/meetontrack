@@ -16,15 +16,15 @@ public sealed record ConfigProblem(bool Unreadable, string Headline, string Expl
         true,
         T("config.json can't be read — transcription and summaries are waiting",
           "config.json не читается — расшифровка и саммари ждут"),
-        T($"config.json can't be read ({reason}). Until it is fixed, Amanu keeps to the settings it last read from it — its defaults, with auto-record off and nothing sent anywhere, if it never could — and keeps recording, but holds transcription and summaries, sends no usage statistics, and saves no changed settings.",
-          $"config.json не читается ({reason}). Пока файл не исправлен, Amanu держится настроек, прочитанных из него в последний раз (а если не смогла прочитать ни разу — настроек по умолчанию с выключенной автозаписью, ничего никуда не отправляя), и продолжает записывать, но расшифровка и саммари ждут, статистика не отправляется, а изменённые настройки не сохраняются."));
+        T($"config.json can't be read ({reason}). Until it is fixed, Meeting Copilot keeps to the settings it last read from it — its defaults, with auto-record off and nothing sent anywhere, if it never could — and keeps recording, but holds transcription and summaries, sends no usage statistics, and saves no changed settings.",
+          $"config.json не читается ({reason}). Пока файл не исправлен, Meeting Copilot держится настроек, прочитанных из него в последний раз (а если не смогла прочитать ни разу — настроек по умолчанию с выключенной автозаписью, ничего никуда не отправляя), и продолжает записывать, но расшифровка и саммари ждут, статистика не отправляется, а изменённые настройки не сохраняются."));
 
     public static ConfigProblem UnusableValue(string key, string found, string expected) => new(
         false,
-        T("config.json has a setting Amanu can't use — see Settings",
-          "в config.json есть настройка, которую Amanu не может использовать, — см. настройки"),
-        T($"{key} in config.json is {found}, which Amanu can't use: it expects {expected}, so the default applies.",
-          $"{key} в config.json — {found}, а Amanu ждёт там {expected}, поэтому действует значение по умолчанию."));
+        T("config.json has a setting Meeting Copilot can't use — see Settings",
+          "в config.json есть настройка, которую Meeting Copilot не может использовать, — см. настройки"),
+        T($"{key} in config.json is {found}, which Meeting Copilot can't use: it expects {expected}, so the default applies.",
+          $"{key} в config.json — {found}, а Meeting Copilot ждёт там {expected}, поэтому действует значение по умолчанию."));
 }
 
 public sealed class ConfigUnreadableException(ConfigProblem problem) : InvalidOperationException(problem.Explanation)
