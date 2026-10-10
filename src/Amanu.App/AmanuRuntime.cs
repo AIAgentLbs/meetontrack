@@ -40,6 +40,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
     private readonly WindowsAudioCapture capture;
     private readonly LiveTranscriptionCoordinator liveTranscription;
     private readonly AnalyticsService analytics;
+    private readonly CopilotExporter copilotExporter;
     private readonly CancellationTokenSource lifetime = new();
     private readonly FileSystemWatcher? configWatcher;
     private readonly Lock settingsLock = new();
@@ -54,6 +55,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
         settings = load.Settings;
         problems = load.Problems;
         DataDirectory = dataDirectory;
+        copilotExporter = new CopilotExporter(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "meeting-copilot", "meeting-copilot-live.json"));
         SetupPath = Path.Combine(dataDirectory, "setup.json");
 
         TryCreateDirectory(settings.RecordingsDirectory);
@@ -80,6 +82,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
 
         coordinator.StateChanged += (_, state) =>
         {
+            copilotExporter.SetState(state);
             StateChanged?.Invoke(this, state);
             if (state.IsRecording)
                 _ = analytics.RecordAsync("recording_started", new Dictionary<string, object?> { ["trigger"] = TriggerName(state.Trigger) });
@@ -125,7 +128,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
             if (item.Equals("Model nemotron-live", StringComparison.OrdinalIgnoreCase)) _ = liveTranscription.RefreshAsync();
         };
         models.DownloadFailed += (_, item) => _ = analytics.RecordAsync("model_download_failed", new Dictionary<string, object?> { ["asset"] = AnalyticsAsset(item), ["reason"] = "unknown" });
-        liveTranscription.LineReady += (_, line) => LiveLineReady?.Invoke(this, line);
+        liveTranscription.LineReady += (_, line) => { copilotExporter.AddLine(line); LiveLineReady?.Invoke(this, line); };
         capture.TrackLost += (_, track) => Notify(
             T("A recording device went away", "Устройство записи пропало"),
             track == "mic"
@@ -205,14 +208,15 @@ public sealed class AmanuRuntime : IAsyncDisposable
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         // Not %LOCALAPPDATA%\Amanu: that is where Velopack installs the program,
         // and uninstalling removes the folder with everything in it.
-        var dataDirectory = Path.Combine(localData, "Amanu Data");
+        var dataDirectory = Path.Combine(home, ".local", "share", "meeting-copilot", "capture-data");
 #if DEBUG
         if (Environment.GetEnvironmentVariable("AMANU_TEST_DATA") is { Length: > 0 } testDirectory)
             dataDirectory = Path.GetFullPath(testDirectory);
 #endif
-        MoveOutOfInstallFolder(Path.Combine(localData, "Amanu"), dataDirectory);
         Directory.CreateDirectory(dataDirectory);
-        var store = new AppSettingsStore(Path.Combine(dataDirectory, "config.json"), home);
+        var configDirectory = Path.Combine(home, ".config", "meeting-copilot");
+        Directory.CreateDirectory(configDirectory);
+        var store = new AppSettingsStore(Path.Combine(configDirectory, "config.json"), home);
         Current = Choose(store.Load().Settings.InterfaceLanguage, CultureInfo.CurrentUICulture.Name);
         // Read again now the language is settled, so what the file's problems
         // say is said in it.
@@ -248,6 +252,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
 
     public async Task StartAsync()
     {
+        _ = CopilotControl.ServeAsync(this, lifetime.Token);
         _ = liveTranscription.RefreshAsync();
         if (!ConfigUnreadable && !IsTestInstance)
         {
@@ -270,7 +275,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
         // second is no work for the thread that draws the windows.
         _ = Task.Run(() => ObserveCallsAsync(lifetime.Token));
         _ = Task.Run(() => RescanPeriodicallyAsync(lifetime.Token));
-        _ = UpdateService.CheckAsync(() => State.IsRecording || IsProcessing, interactive: false, lifetime.Token);
+        // This distribution is updated by Meeting Copilot's checksum-pinned installer.
         if (ConfigUnreadable)
             Notify("Amanu", ConfigProblems.First(problem => problem.Unreadable).Headline, NotificationKind.Warning);
     }
@@ -416,6 +421,12 @@ public sealed class AmanuRuntime : IAsyncDisposable
     }
 
     public Task StopManualAsync() => coordinator.StopAsync(DateTimeOffset.Now, "manual");
+
+    public async Task ResumeRecognitionAsync()
+    {
+        await liveTranscription.StopAsync();
+        await liveTranscription.RefreshAsync();
+    }
 
     public Task TogglePauseAsync() => coordinator.TogglePauseAsync();
 
@@ -586,6 +597,8 @@ public sealed class AmanuRuntime : IAsyncDisposable
         await liveTranscription.DisposeAsync();
         await processing.DisposeAsync();
         await coordinator.DisposeAsync();
+        copilotExporter.Flush();
+        copilotExporter.Dispose();
         await analytics.DisposeAsync();
         httpClient.Dispose();
         lifetime.Dispose();

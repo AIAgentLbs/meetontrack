@@ -10,8 +10,8 @@ namespace Amanu.App;
 
 public partial class App : System.Windows.Application
 {
-    private const string InstanceName = "Local\\Amanu.Desktop.SingleInstance";
-    private const string DoorbellName = "Local\\Amanu.Desktop.ShowWindow";
+    private const string InstanceName = "Local\\MeetingCopilotCapture.Desktop.SingleInstance";
+    private const string DoorbellName = "Local\\MeetingCopilotCapture.Desktop.ShowWindow";
 
     private static AmanuRuntime? runtime;
     private static StatusWindow? status;
@@ -28,6 +28,11 @@ public partial class App : System.Windows.Application
     private static void Main()
     {
         var arguments = Environment.GetCommandLineArgs()[1..];
+        if (arguments.Length == 2 && arguments[0] == "record")
+        {
+            Environment.ExitCode = CopilotControl.SendAsync(arguments[1]).GetAwaiter().GetResult();
+            return;
+        }
         if (arguments.Length == 5 && arguments[0] == "--live-worker")
         {
             Environment.ExitCode = LiveSpeechWorker.Main(arguments);

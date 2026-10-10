@@ -27,7 +27,7 @@ public static class UpdateService
     private static UpdateInfo? pending;
 
     private static UpdateManager Manager => manager ??= new UpdateManager(
-        new GithubSource("https://github.com/gsamat/amanu", accessToken: null, prerelease: false),
+        new GithubSource("https://github.com/AIAgentLbs/meeting-copilot", accessToken: null, prerelease: true),
         new UpdateOptions { ExplicitChannel = "stable" });
 
     public static async Task<UpdateResult> CheckAsync(Func<bool> busy, bool interactive, CancellationToken cancellationToken)

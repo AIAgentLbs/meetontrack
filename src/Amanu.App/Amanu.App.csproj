@@ -7,7 +7,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <UseWindowsForms>true</UseWindowsForms>
     <StartupObject>Amanu.App.App</StartupObject>
-    <AssemblyName>Amanu</AssemblyName>
+    <AssemblyName>MeetingCopilotCapture</AssemblyName>
     <RootNamespace>Amanu.App</RootNamespace>
     <Version>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../../../VERSION').Trim())</Version>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
