@@ -12,7 +12,7 @@ public sealed class CopilotExporterTests
     {
         var assembly = typeof(AmanuRuntime).Assembly;
         var product = assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyProductAttribute),false);
-        Assert.Equal("Meeting Copilot Capture", ((System.Reflection.AssemblyProductAttribute)Assert.Single(product)).Product);
+        Assert.Equal("MeetOnTrack Capture", ((System.Reflection.AssemblyProductAttribute)Assert.Single(product)).Product);
     }
 
     [Fact]
