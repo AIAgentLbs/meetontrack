@@ -1,7 +1,7 @@
 param([Parameter(Mandatory = $true)][string]$OutputPath)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
-# Match the five-bar waveform used by the Mac app. Generated files stay in obj;
+# Match the MeetOnTrack M-and-dot mark used by the Mac app. Generated files stay in obj;
 # source control contains the renderer, not a copied upstream binary icon.
 $sizes = @(16, 32, 48, 64, 128, 256)
 $images = @()
@@ -9,22 +9,39 @@ foreach ($size in $sizes) {
     $bitmap = New-Object System.Drawing.Bitmap($size, $size)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
     $stream = New-Object System.IO.MemoryStream
-    $background = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(14, 65, 52))
+    $background = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(23, 76, 62))
+    $field = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $mark = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(243, 244, 239), [single]($size * 6 / 64))
+    $dot = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(220, 234, 227))
     try {
         $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
         $graphics.Clear([System.Drawing.Color]::Transparent)
-        $graphics.FillEllipse($background, [single]($size * .04), [single]($size * .04), [single]($size * .92), [single]($size * .92))
-        $width = [single][Math]::Max(1, $size * .075)
-        $gap = [single]($size * .065)
-        $x = [single](($size - (5 * $width + 4 * $gap)) / 2)
-        foreach ($ratio in @(.26, .48, .72, .48, .26)) {
-            $height = [single]($size * $ratio)
-            $graphics.FillRectangle([System.Drawing.Brushes]::White, $x, [single](($size - $height) / 2), $width, $height)
-            $x += $width + $gap
-        }
+        $lo = [single]($size * .06)
+        $diameter = [single]($size * .46)
+        $hi = [single]($size * .94 - $diameter)
+        $field.AddArc($lo, $lo, $diameter, $diameter, 180, 90)
+        $field.AddArc($hi, $lo, $diameter, $diameter, 270, 90)
+        $field.AddArc($hi, $hi, $diameter, $diameter, 0, 90)
+        $field.AddArc($lo, $hi, $diameter, $diameter, 90, 90)
+        $field.CloseFigure()
+        $graphics.FillPath($background, $field)
+        $points = [System.Drawing.PointF[]]@(
+            [System.Drawing.PointF]::new($size * 14/64, $size * 45/64),
+            [System.Drawing.PointF]::new($size * 14/64, $size * 19/64),
+            [System.Drawing.PointF]::new($size * 32/64, $size * 36/64),
+            [System.Drawing.PointF]::new($size * 50/64, $size * 19/64),
+            [System.Drawing.PointF]::new($size * 50/64, $size * 45/64)
+        )
+        $mark.AddLines($points)
+        $pen.StartCap = $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+        $pen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
+        $graphics.DrawPath($pen, $mark)
+        $graphics.FillEllipse($dot, [single]($size * 28/64), [single]($size * 42/64), [single]($size * 8/64), [single]($size * 8/64))
         $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
         $images += ,($stream.ToArray())
     } finally {
+        $field.Dispose(); $mark.Dispose(); $pen.Dispose(); $dot.Dispose()
         $background.Dispose(); $graphics.Dispose(); $bitmap.Dispose(); $stream.Dispose()
     }
 }
