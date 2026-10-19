@@ -72,7 +72,10 @@ public sealed class LivePreloadTests
             await Task.Delay(Timeout.Infinite, token);
         };
         await fixture.Live.RefreshAsync();
-        await secondLoad.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        // This waits for the fixture's Task.Run to be scheduled, not for
+        // cancellation. Cold shared CI runners can take more than two seconds.
+        // Keep the cancellation/release deadline below at two seconds.
+        await secondLoad.Task.WaitAsync(TimeSpan.FromSeconds(10));
         fixture.Settings.LiveTranscription.Enabled = false;
         await fixture.Live.RefreshAsync().WaitAsync(TimeSpan.FromSeconds(2));
         Assert.True(Assert.Single(fixture.Workers).Disposed);
