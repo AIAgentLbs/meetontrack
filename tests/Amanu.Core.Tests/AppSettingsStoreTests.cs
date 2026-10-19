@@ -15,7 +15,7 @@ public sealed class AppSettingsStoreTests
 
         var load = new AppSettingsStore(configPath, Documents).Load();
 
-        Assert.Equal(Path.Combine(Documents, "Amanu Recordings"), load.Settings.RecordingsDirectory);
+        Assert.Equal(Path.Combine(Documents, "MeetOnTrack Recordings"), load.Settings.RecordingsDirectory);
         Assert.True(load.Settings.AutoRecord.Enabled);
         Assert.Empty(load.Problems);
         Assert.False(File.Exists(configPath));

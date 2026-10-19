@@ -71,7 +71,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
             () => Settings.SystemAudio == "all");
         activityMonitor = new CallActivityMonitor(Matcher(settings));
         httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd($"Meeting Copilot-Windows/{AppVersion}");
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd($"MeetOnTrack-Windows/{AppVersion}");
         secrets = new SecretStore();
         models = new ModelManager(dataDirectory, httpClient);
         processing = new ProcessingCoordinator(() => Settings, () => !ConfigUnreadable, secrets, models, httpClient);
@@ -97,9 +97,9 @@ public sealed class AmanuRuntime : IAsyncDisposable
         {
             ProcessingStatusChanged?.Invoke(this, status);
             if (status.Stage == "complete" && status.SessionDirectory is not null)
-                Notify("Meeting Copilot", status.Message, NotificationKind.Information);
+                Notify("MeetOnTrack", status.Message, NotificationKind.Information);
             else if (status.Stage == "failed")
-                Notify(T("Meeting Copilot — processing failed", "Meeting Copilot — обработка не удалась"), status.Message, NotificationKind.Error);
+                Notify(T("MeetOnTrack — processing failed", "MeetOnTrack — обработка не удалась"), status.Message, NotificationKind.Error);
         };
         processing.SessionsChanged += (_, _) => SessionsChanged?.Invoke(this, EventArgs.Empty);
         models.Progress += (_, progress) => DownloadProgressChanged?.Invoke(this, progress);
@@ -246,9 +246,9 @@ public sealed class AmanuRuntime : IAsyncDisposable
         // second is no work for the thread that draws the windows.
         _ = Task.Run(() => ObserveCallsAsync(lifetime.Token));
         _ = Task.Run(() => RescanPeriodicallyAsync(lifetime.Token));
-        // This distribution is updated by Meeting Copilot's checksum-pinned installer.
+        // This distribution is updated by MeetOnTrack's checksum-pinned installer.
         if (ConfigUnreadable)
-            Notify("Meeting Copilot", ConfigProblems.First(problem => problem.Unreadable).Headline, NotificationKind.Warning);
+            Notify("MeetOnTrack", ConfigProblems.First(problem => problem.Unreadable).Headline, NotificationKind.Warning);
     }
 
     // MARK: settings
@@ -325,7 +325,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
         Apply(previous, Settings);
         if (wasUnreadable && !ConfigUnreadable) processing.Rescan();
         if (!wasUnreadable && ConfigUnreadable)
-            Notify("Meeting Copilot", ConfigProblems.First(problem => problem.Unreadable).Headline, NotificationKind.Warning);
+            Notify("MeetOnTrack", ConfigProblems.First(problem => problem.Unreadable).Headline, NotificationKind.Warning);
     }
 
     private void Apply(AppSettings previous, AppSettings next)

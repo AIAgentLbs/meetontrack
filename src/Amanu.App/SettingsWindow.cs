@@ -21,7 +21,7 @@ internal sealed class SettingsWindow : Window
     public SettingsWindow(AmanuRuntime runtime)
     {
         this.runtime = runtime;
-        Title = T("Meeting Copilot Settings", "Настройки Meeting Copilot");
+        Title = T("MeetOnTrack Settings", "Настройки MeetOnTrack");
         MinWidth = 700;
         MinHeight = 480;
         Ui.FitToWorkArea(this, 860, 820);
@@ -98,20 +98,25 @@ internal sealed class SetupWindow : Window
 
     public SetupWindow(AmanuRuntime runtime)
     {
-        Title = T("Setting up Meeting Copilot", "Первая настройка Meeting Copilot");
+        Title = T("Setting up MeetOnTrack", "Первая настройка MeetOnTrack");
         MinWidth = 700;
         MinHeight = 480;
         Ui.FitToWorkArea(this, 860, 820);
         Icon = App.WindowIcon;
 
-        form = new SetupForm(runtime);
+        form = new SetupForm(runtime, firstRun: true);
         var footer = new DockPanel { Margin = new Thickness(Ui.Gutter, 12, Ui.Gutter, 14) };
         var done = Ui.Button(T("Done", "Готово"), async () =>
         {
             await runtime.CompleteSetupAsync();
+            AmanuRuntime.Open("http://127.0.0.1:43121/");
             Close();
         }, accent: true);
-        var later = Ui.Button(T("Later", "Позже"), Close);
+        var later = Ui.Button(T("Open assistant", "Перейти в помощник"), () =>
+        {
+            AmanuRuntime.Open("http://127.0.0.1:43121/");
+            Close();
+        });
         later.Margin = new Thickness(8, 0, 0, 0);
         done.Margin = new Thickness(8, 0, 0, 0);
         DockPanel.SetDock(done, Dock.Right);
@@ -145,14 +150,14 @@ internal sealed class AboutWindow : Window
 {
     public AboutWindow()
     {
-        Title = T("About Meeting Copilot", "О программе Meeting Copilot");
+        Title = T("About MeetOnTrack", "О программе MeetOnTrack");
         SizeToContent = SizeToContent.WidthAndHeight;
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Icon = App.WindowIcon;
         var stack = new StackPanel { Margin = new Thickness(32, 24, 32, 24), MaxWidth = 380 };
         stack.Children.Add(new System.Windows.Controls.Image { Source = App.WindowIcon, Width = 64, Height = 64, HorizontalAlignment = HorizontalAlignment.Left });
-        var name = Ui.Title("Meeting Copilot");
+        var name = Ui.Title("MeetOnTrack");
         name.FontSize = 20;
         name.FontWeight = FontWeights.SemiBold;
         name.Margin = new Thickness(0, 12, 0, 0);
@@ -163,12 +168,13 @@ internal sealed class AboutWindow : Window
         about.Margin = new Thickness(0, 12, 0, 0);
         stack.Children.Add(about);
         var links = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
-        links.Children.Add(Ui.Link("Meeting Copilot", "https://aiagentlbs.github.io/meeting-copilot/"));
+        links.Children.Add(Ui.Link("MeetOnTrack", "https://meetontrack.com/"));
+        links.Children.Add(Ui.Link("by aiagentlbs.com", "https://aiagentlbs.com/"));
         var privacy = Ui.Link(T("Upstream licenses", "Лицензии оригинала"), "https://github.com/gsamat/amanu/blob/master/LICENSE");
         privacy.Margin = new Thickness(16, 0, 0, 0);
         links.Children.Add(privacy);
         stack.Children.Add(links);
-        stack.Children.Add(Ui.Detail(T("Capture is based on Amanu. Original license notices are included in the package.", "Capture основан на Amanu. Лицензии оригинала включены в пакет.")));
+        stack.Children.Add(Ui.Detail(T("Third-party license notices are included in the package.", "Лицензии сторонних компонентов включены в пакет.")));
         Content = stack;
     }
 }

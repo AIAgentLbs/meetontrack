@@ -64,10 +64,10 @@ internal sealed class StatusWindow : Window
     public StatusWindow(AmanuRuntime runtime)
     {
         this.runtime = runtime;
-        Title = "Meeting Copilot Capture";
+        Title = "MeetOnTrack Capture";
 #if DEBUG
         if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("AMANU_TEST_DATA")))
-            Title = "Meeting Copilot — Live transcript test";
+            Title = "MeetOnTrack — Live transcript test";
 #endif
         Width = 360;
         SizeToContent = SizeToContent.Height;

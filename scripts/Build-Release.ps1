@@ -48,7 +48,7 @@ $arguments = @(
     "--mainExe", "Amanu.exe",
     "--packTitle", "Amanu",
     "--packAuthors", "Amanu",
-    "--icon", (Join-Path $windowsRoot "src\Amanu.App\Assets\Amanu.ico"),
+    "--icon", (Join-Path $windowsRoot "src\Amanu.App\obj\MeetOnTrack.ico"),
     "--channel", "stable",
     "--runtime", "win-x64",
     "--releaseNotes", (Join-Path $windowsRoot "RELEASE_NOTES.md"),

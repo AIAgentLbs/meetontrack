@@ -72,7 +72,7 @@ public partial class App : System.Windows.Application
         DispatcherUnhandledException += (_, args) =>
         {
             args.Handled = true;
-            Ui.ShowError(null, "Meeting Copilot", args.Exception.Message);
+            Ui.ShowError(null, "MeetOnTrack", args.Exception.Message);
             WriteCrashLog(args.Exception);
         };
         TaskScheduler.UnobservedTaskException += (_, args) =>
@@ -99,7 +99,7 @@ public partial class App : System.Windows.Application
         if (!runtime.IsSetupComplete && !background) ShowSetup();
         else if (!background || !runtime.Settings.TrayIcon) status.Reveal();
         if (runtime.RecoveredSessionCount > 0)
-            runtime.Notify("Meeting Copilot", T($"Recovered {runtime.RecoveredSessionCount} interrupted recording(s); they will be transcribed.",
+            runtime.Notify("MeetOnTrack", T($"Recovered {runtime.RecoveredSessionCount} interrupted recording(s); they will be transcribed.",
                 $"Восстановлено прерванных записей: {runtime.RecoveredSessionCount}. Они будут расшифрованы."), NotificationKind.Information);
         _ = runtime.StartAsync();
     }
@@ -136,7 +136,7 @@ public partial class App : System.Windows.Application
     {
         try
         {
-            return BitmapFrame.Create(new Uri("pack://application:,,,/Assets/Amanu.ico"));
+            return BitmapFrame.Create(new Uri("pack://application:,,,/Assets/MeetOnTrack.ico"));
         }
         catch (Exception exception) when (exception is IOException or NotSupportedException or UriFormatException)
         {
@@ -222,7 +222,7 @@ public partial class App : System.Windows.Application
         if (result.Outcome == UpdateOutcome.Ready && !Busy())
         {
             var answer = System.Windows.MessageBox.Show(result.Message + Environment.NewLine + Environment.NewLine
-                + T("Restart Meeting Copilot now to install it?", "Перезапустить Meeting Copilot и установить сейчас?"),
+                + T("Restart MeetOnTrack now to install it?", "Перезапустить MeetOnTrack и установить сейчас?"),
                 T("Update ready", "Обновление готово"), MessageBoxButton.YesNo, MessageBoxImage.Information);
             if (answer == MessageBoxResult.Yes)
             {
@@ -232,7 +232,7 @@ public partial class App : System.Windows.Application
             return;
         }
         if (result.Message.Length > 0)
-            System.Windows.MessageBox.Show(result.Message, "Meeting Copilot", MessageBoxButton.OK,
+            System.Windows.MessageBox.Show(result.Message, "MeetOnTrack", MessageBoxButton.OK,
                 result.Outcome == UpdateOutcome.Failed ? MessageBoxImage.Warning : MessageBoxImage.Information);
     }
 

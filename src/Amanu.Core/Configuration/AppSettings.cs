@@ -77,7 +77,7 @@ public sealed class AppSettings
     /// travelling to a cloud nobody chose for them.
     /// </summary>
     public static string DefaultRecordingsDirectory(string homeDirectory) =>
-        Path.Combine(homeDirectory, "Amanu Recordings");
+        Path.Combine(homeDirectory, "MeetOnTrack Recordings");
 
     public static AppSettings CreateDefault(string homeDirectory) => new()
     {

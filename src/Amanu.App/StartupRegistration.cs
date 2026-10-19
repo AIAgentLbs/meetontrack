@@ -14,7 +14,7 @@ public static class StartupRegistration
         if (enabled)
         {
             var executable = Environment.ProcessPath
-                ?? throw new InvalidOperationException("Cannot determine the Meeting Copilot executable path.");
+                ?? throw new InvalidOperationException("Cannot determine the MeetOnTrack executable path.");
             key.SetValue(ValueName, $"\"{executable}\" --background", RegistryValueKind.String);
         }
         else

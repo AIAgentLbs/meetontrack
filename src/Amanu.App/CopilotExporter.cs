@@ -67,7 +67,7 @@ public sealed class CopilotExporter : IDisposable
                 text = line.Text, provisional = !line.IsFinal,
             }).ToArray();
             var payload = new { version = 1, source = "meeting-copilot-windows", meeting_id = meetingId,
-                title = "Meeting Copilot - " + Path.GetFileName(directory),
+                title = "MeetOnTrack - " + Path.GetFileName(directory),
                 status = state.IsRecording ? state.IsPaused ? "paused" : "recording" : "finished",
                 started_at = started.ToString("O"), updated_at = DateTimeOffset.Now.ToString("O"),
                 recording_dir = directory, segments };

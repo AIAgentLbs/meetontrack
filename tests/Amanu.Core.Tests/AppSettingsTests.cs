@@ -10,7 +10,7 @@ public sealed class AppSettingsTests
     {
         var settings = AppSettings.CreateDefault(@"C:\Users\Samat\Documents");
 
-        Assert.Equal(Path.Combine(@"C:\Users\Samat\Documents", "Amanu Recordings"), settings.RecordingsDirectory);
+        Assert.Equal(Path.Combine(@"C:\Users\Samat\Documents", "MeetOnTrack Recordings"), settings.RecordingsDirectory);
         Assert.Equal("summary", settings.SpeakerNames.Backend);
         Assert.True(settings.AutoRecord.Enabled);
         Assert.True(settings.AutoRecord.MicrophoneActivity);

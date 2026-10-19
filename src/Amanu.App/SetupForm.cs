@@ -96,9 +96,15 @@ internal sealed class SetupForm
     /// <summary>Anything a host shows about the form may have changed — what is left to do.</summary>
     public event EventHandler? StateChanged;
 
-    public SetupForm(AmanuRuntime runtime, bool showsConfigProblems = true)
+    private readonly bool firstRun;
+    private readonly TextBlock quickStatus = Ui.Detail("");
+    private Button? quickPrepare;
+    private bool quickPreparing;
+
+    public SetupForm(AmanuRuntime runtime, bool showsConfigProblems = true, bool firstRun = false)
     {
         this.runtime = runtime;
+        this.firstRun = firstRun;
         this.showsConfigProblems = showsConfigProblems;
         localDownload["nemotron-live"] = Ui.Button(T("Download live model…", "Скачать модель лайва…"), () => _ = DownloadAsync("nemotron-live"));
         micSettings = Ui.Button(T("Open settings", "Открыть параметры"), MicrophoneAccess.OpenSettings);
@@ -116,7 +122,7 @@ internal sealed class SetupForm
         View.Children.Add(Ui.Section(T("Access", "Доступ"), Ui.Box(
             Ui.Row(launch,
                 Ui.Title(T("Start when you sign in to Windows", "Запускать при входе в Windows")),
-                Ui.Detail(T("So a meeting is never missed because nobody opened Meeting Copilot.", "Чтобы встреча не пропала из-за того, что Meeting Copilot никто не открыл."))),
+                Ui.Detail(T("So a meeting is never missed because nobody opened MeetOnTrack.", "Чтобы встреча не пропала из-за того, что MeetOnTrack никто не открыл."))),
             Ui.Row(Ui.Symbol(""),
                 Ui.Title(T("Microphone", "Микрофон")),
                 Ui.Detail(T("Your side of the call. Windows asks for it under Privacy › Microphone.",
@@ -124,8 +130,8 @@ internal sealed class SetupForm
                 micStatus, micSettings),
             Ui.Row(Ui.Symbol(""),
                 Ui.Title(T("Call audio", "Звук звонка")),
-                Ui.Detail(T("Windows needs no permission for it. Meeting Copilot records only the call app’s own sound; in a browser, other tabs of the same browser can be heard too.",
-                    "Windows не спрашивает на него разрешения. Meeting Copilot записывает только звук самого приложения звонка; в браузере могут попасть и другие его вкладки."))))));
+                Ui.Detail(T("Windows needs no permission for it. MeetOnTrack records only the call app’s own sound; in a browser, other tabs of the same browser can be heard too.",
+                    "Windows не спрашивает на него разрешения. MeetOnTrack записывает только звук самого приложения звонка; в браузере могут попасть и другие его вкладки."))))));
 
         View.Children.Add(Ui.Section(T("Transcription", "Расшифровка"), Ui.Group(14,
             TranscriptionBox(cloudKeyView),
@@ -145,14 +151,14 @@ internal sealed class SetupForm
         View.Children.Add(Ui.Section(T("Summaries", "Саммари"), SummaryChoices(openAiBaseView, openAiModelView, ollamaBaseView, ollamaModelView), summaries));
 
         noIconsNote.Margin = new Thickness(0, Ui.HeaderGap, 0, 0);
-        View.Children.Add(Ui.Section(T("Where Meeting Copilot shows up", "Где видно Meeting Copilot"), Ui.Group(0,
+        View.Children.Add(Ui.Section(T("Where MeetOnTrack shows up", "Где видно MeetOnTrack"), Ui.Group(0,
             Ui.Box(
                 Ui.Row(tray, Ui.Title(T("In the notification area", "В области уведомлений")),
                     Ui.Detail(T("The icon by the clock, with a red dot while a meeting records — and the menu with everything in it.",
                         "Значок у часов, во время встречи на нём красная точка, и меню со всем остальным."))),
                 Ui.Row(taskbar, Ui.Title(T("On the taskbar", "На панели задач")),
-                    Ui.Detail(T("The Meeting Copilot window on the taskbar and in Alt+Tab, like any other program.",
-                        "Окно Meeting Copilot на панели задач и в Alt+Tab, как у любой программы.")))),
+                    Ui.Detail(T("The MeetOnTrack window on the taskbar and in Alt+Tab, like any other program.",
+                        "Окно MeetOnTrack на панели задач и в Alt+Tab, как у любой программы.")))),
             noIconsNote)));
 
         var autoBox = Ui.Box(Ui.Row(autoRecord,
@@ -161,12 +167,43 @@ internal sealed class SetupForm
         autoBox.Margin = new Thickness(0, 0, 0, Ui.SectionGap);
         View.Children.Add(autoBox);
 
+        if (firstRun)
+        {
+            // Keep Access and automatic-recording controls; advanced choices
+            // remain in Settings and are not presented as first-run blockers.
+            var accessSection = View.Children[1];
+            foreach (FrameworkElement section in View.Children)
+                if (section != configProblem && section != accessSection && section != autoBox)
+                    section.Visibility = Visibility.Collapsed;
+            quickPrepare = Ui.Button(T("Prepare local transcription", "Подготовить локальную расшифровку"), () => _ = PrepareLocalAsync(), accent: true);
+            View.Children.Add(Ui.Section(T("Local speech recognition", "Локальная расшифровка"), Ui.Group(12,
+                quickStatus, quickPrepare,
+                Ui.Button(T("Other options…", "Другие настройки…"), () => App.ShowSettings(0)))));
+        }
 
         Wire();
         runtime.SettingsChanged += OnSettingsChanged;
         runtime.DownloadProgressChanged += OnDownloadProgress;
         Refresh();
         _ = DetectToolsAsync();
+    }
+
+    private async Task PrepareLocalAsync()
+    {
+        if (quickPreparing) return;
+        quickPreparing = true;
+        Refresh();
+        try
+        {
+            ChangeTranscription(choice => choice with { Local = true, Cloud = false });
+            Change(settings => settings.LiveTranscription.Enabled = true);
+            foreach (var model in new[] { runtime.Settings.Transcription.LocalEngine, "nemotron-live" })
+            {
+                if (!runtime.IsLocalModelReady(model)) await DownloadAsync(model);
+                if (!runtime.IsLocalModelReady(model)) break;
+            }
+        }
+        finally { quickPreparing = false; Refresh(); }
     }
 
     public void Detach()
@@ -640,6 +677,16 @@ internal sealed class SetupForm
         try
         {
             var settings = runtime.Settings;
+            if (firstRun && quickPrepare is not null)
+            {
+                quickPrepare.IsEnabled = !quickPreparing;
+                var finalReady = runtime.IsLocalModelReady(settings.Transcription.LocalEngine);
+                var streamReady = runtime.IsLocalModelReady("nemotron-live");
+                quickStatus.Text = T(
+                    $"Final transcript model: {(finalReady ? "installed" : "download needed")}. Live model: {(streamReady ? "installed" : "separate download needed")}. Compatible files are reused. No paid API key is required.\n",
+                    $"Итоговая модель: {(finalReady ? "установлена" : "нужна загрузка")}. Потоковая модель: {(streamReady ? "установлена" : "нужна отдельная загрузка")}. Совместимые файлы используются повторно. Платный API-ключ не нужен.\n")
+                    + (quickPreparing ? downloadStatus.Text : string.Join("\n", downloadErrors.Values));
+            }
             var problems = runtime.ConfigProblems;
             configProblem.Visibility = showsConfigProblems && problems.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             configProblem.Text = string.Join(Environment.NewLine, problems.Select(problem => problem.Explanation));
@@ -662,7 +709,7 @@ internal sealed class SetupForm
             local.IsEnabled = runtime.LocalRuntimePresent;
             localDetail.Text = runtime.LocalRuntimePresent
                 ? T("Nothing leaves the computer; local transcripts label speakers as me / them.", "С компьютера ничего не уходит; локальные расшифровки помечают спикеров как «я»/«они».")
-                : T("This build of Meeting Copilot has no local transcription engine.", "В этой сборке Meeting Copilot нет локального движка расшифровки.");
+                : T("This build of MeetOnTrack has no local transcription engine.", "В этой сборке MeetOnTrack нет локального движка расшифровки.");
             var shown = ShownProvider;
             foreach (var (id, card) in providerCards)
             {
@@ -754,8 +801,8 @@ internal sealed class SetupForm
             tray.IsChecked = settings.TrayIcon;
             taskbar.IsChecked = settings.TaskbarIcon;
             noIconsNote.Text = settings.TrayIcon || settings.TaskbarIcon ? ""
-                : T("Meeting Copilot keeps recording with no icon anywhere. To bring the window back, open Meeting Copilot again from the Start menu.",
-                    "Meeting Copilot продолжит записывать, но её нигде не будет видно. Чтобы вернуть окно, откройте Meeting Copilot ещё раз из меню «Пуск».");
+                : T("MeetOnTrack keeps recording with no icon anywhere. To bring the window back, open MeetOnTrack again from the Start menu.",
+                    "MeetOnTrack продолжит записывать, но её нигде не будет видно. Чтобы вернуть окно, откройте MeetOnTrack ещё раз из меню «Пуск».");
             noIconsNote.Visibility = noIconsNote.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             autoRecord.IsChecked = settings.AutoRecord.Enabled;
             autoRecordDetail.Text = T($"And stop when it lets go. A call shorter than {settings.AutoRecord.MinimumDurationSeconds} seconds is thrown away.",
@@ -788,7 +835,11 @@ internal sealed class SetupForm
                 HasKey, runtime.IsLocalModelReady);
             if (!plan.Usable) left.Add(T("a transcription key or model", "ключ или модель для расшифровки"));
         }
-        if (settings.Summary.Enabled && settings.Summary.Backend != "none" && runtime.LanguageModels.For(EgressPurpose.Summary).Count == 0)
+        if (settings.LiveTranscription.Enabled && !runtime.IsLocalModelReady("nemotron-live"))
+            left.Add(T("the live transcription model", "потоковая модель расшифровки"));
+        if (firstRun && !settings.LiveTranscription.Enabled)
+            left.Add(T("enable live transcription", "включить расшифровку звонка"));
+        if (!firstRun && settings.Summary.Enabled && settings.Summary.Backend != "none" && runtime.LanguageModels.For(EgressPurpose.Summary).Count == 0)
             left.Add(T("a model for summaries", "модель для саммари"));
         return left;
     }
