@@ -101,6 +101,21 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
         finally { lock (queueLock) preparing.Remove(directory); }
     }
 
+    private bool closed;
+
+    /// <summary>
+    /// For quitting: true when nothing is queued or preparing, and from then on nothing is queued,
+    /// retries and rescans included. What is left stays on disk; the next start's rescan queues it.
+    /// </summary>
+    public bool TryClose()
+    {
+        lock (queueLock)
+        {
+            if (queued.Count > 0 || preparing.Count > 0) return false;
+            return closed = true;
+        }
+    }
+
     public bool IsBusy
     {
         get { lock (queueLock) return queued.Count > 0 || preparing.Count > 0; }
@@ -160,7 +175,7 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
         var directory = Path.GetFullPath(sessionDirectory).TrimEnd(Path.DirectorySeparatorChar);
         lock (queueLock)
         {
-            if (preparing.Contains(directory)) return;
+            if (closed || preparing.Contains(directory)) return;
             if (!queued.Add(directory))
             {
                 // Asked for while it is being worked on: go round once more after,

@@ -169,7 +169,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
     /// imports or retranscriptions then stay closed, so it is safe to quit for an update.
     /// </summary>
     public Task<bool> TryCloseWhenIdleAsync() =>
-        coordinator.TryCloseWhenIdleAsync(() => { lock (workLock) return closed = starting == 0 && !IsProcessing; });
+        coordinator.TryCloseWhenIdleAsync(() => { lock (workLock) return closed = starting == 0 && processing.TryClose(); });
     private readonly object workLock = new();
     private int starting;
     private bool closed;
