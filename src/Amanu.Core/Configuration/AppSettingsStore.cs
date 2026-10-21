@@ -181,21 +181,19 @@ public sealed class AppSettingsStore(string configPath, string homeDirectory)
             if (JsonNode.DeepEquals(old, value)) continue;
             JsonNode? fallback = null;
             defaults?.TryGetPropertyValue(key, out fallback);
-            // Settings load case-insensitively, so the file's own spelling is the one to change.
-            var name = target.FirstOrDefault(entry => string.Equals(entry.Key, key, StringComparison.OrdinalIgnoreCase)).Key ?? key;
-            if (value is JsonObject newObject)
+            // Settings load case-insensitively, so every spelling of the key in the file is this key.
+            var names = target.Where(entry => string.Equals(entry.Key, key, StringComparison.OrdinalIgnoreCase)).Select(entry => entry.Key).ToList();
+            if (value is JsonObject || (value is null && old is JsonObject))
             {
-                if (target[name] is not JsonObject child)
-                {
-                    child = new JsonObject();
-                    target[name] = child;
-                }
-                ApplyChanges(child, old as JsonObject ?? new JsonObject(), newObject, fallback as JsonObject);
+                // Merge leaf by leaf, so keys this program never had in the object stay.
+                var child = names.Select(name => target[name]).OfType<JsonObject>().FirstOrDefault() ?? new JsonObject();
+                foreach (var name in names) target.Remove(name);
+                ApplyChanges(child, old as JsonObject ?? new JsonObject(), value as JsonObject ?? new JsonObject(), fallback as JsonObject);
+                if (value is not null || child.Count > 0) target[key] = child;
+                continue;
             }
-            else if (value is null || JsonNode.DeepEquals(value, fallback))
-                target.Remove(name);
-            else
-                target[name] = value.DeepClone();
+            foreach (var name in names) target.Remove(name);
+            if (value is not null && !JsonNode.DeepEquals(value, fallback)) target[key] = value.DeepClone();
         }
     }
 

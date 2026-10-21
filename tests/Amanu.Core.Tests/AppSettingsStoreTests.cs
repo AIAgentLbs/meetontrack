@@ -243,6 +243,41 @@ public sealed class AppSettingsStoreTests
     }
 
     [Fact]
+    public void Clearing_an_object_keeps_the_keys_another_program_put_in_it()
+    {
+        using var temporary = new TemporaryDirectory();
+        var configPath = Path.Combine(temporary.Path, "config.json");
+        File.WriteAllText(configPath, """{ "on_stop": { "executable": "hook.exe", "web_only": 1 } }""");
+        var store = new AppSettingsStore(configPath, Documents);
+        var previous = store.Load().Settings;
+        var settings = previous.Clone();
+
+        settings.OnStop = null;
+        store.Save(settings, previous);
+
+        var written = JsonNode.Parse(File.ReadAllText(configPath))!;
+        Assert.Null(written["on_stop"]!["executable"]);
+        Assert.Equal(1, written["on_stop"]!["web_only"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void Every_spelling_of_a_changed_key_is_replaced()
+    {
+        using var temporary = new TemporaryDirectory();
+        var configPath = Path.Combine(temporary.Path, "config.json");
+        File.WriteAllText(configPath, """{ "KEEP_AUDIO": true, "keep_audio": true }""");
+        var store = new AppSettingsStore(configPath, Documents);
+        var previous = store.Load().Settings;
+        var settings = previous.Clone();
+
+        settings.KeepAudio = false;
+        store.Save(settings, previous);
+
+        Assert.False(store.Load().Settings.KeepAudio);
+        Assert.Empty(JsonNode.Parse(File.ReadAllText(configPath))!.AsObject());
+    }
+
+    [Fact]
     public void Clearing_a_value_by_path_restores_its_default()
     {
         var settings = AppSettings.CreateDefault(Documents);
