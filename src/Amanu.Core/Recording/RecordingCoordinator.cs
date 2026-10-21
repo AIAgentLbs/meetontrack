@@ -50,6 +50,8 @@ public sealed class RecordingCoordinator(
 
     public RecordingState State { get; private set; } = RecordingState.Ready;
     public AutoRecordPolicy Policy => autoRecord;
+    /// <summary>A start, stop or tick holds the gate; a stop is settled (meta written, transcription queued) only once it is released.</summary>
+    public bool IsChanging => gate.CurrentCount == 0;
 
     public event EventHandler<RecordingState>? StateChanged;
     public event EventHandler<CompletedRecording>? RecordingCompleted;

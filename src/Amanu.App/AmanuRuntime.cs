@@ -164,6 +164,8 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public RecordingState State => coordinator.State;
     public AutoRecordPolicy AutoRecord => coordinator.Policy;
     public bool IsProcessing => processing.IsBusy;
+    /// <summary>Nothing records, settles a recording or transcribes: safe to quit for an update.</summary>
+    public bool IsIdle => !State.IsRecording && !coordinator.IsChanging && !IsProcessing;
     public string LiveStatus => liveTranscription.Status;
     public LanguageModels LanguageModels => processing.LanguageModels;
     public HttpClient Http => httpClient;
@@ -190,14 +192,19 @@ public sealed class AmanuRuntime : IAsyncDisposable
         // and uninstalling removes the folder with everything in it.
         var dataDirectory = Path.Combine(home, ".local", "share", "meeting-copilot", "capture-data");
         var configDirectory = Path.Combine(home, ".config", "meeting-copilot");
+        var settingsHome = home;
 #if DEBUG
-        // A live test instance never reads or writes the real settings, recordings folder included.
+        // A live test instance never reads or writes the real settings, and its default
+        // recordings folder is inside the test folder too.
         if (Environment.GetEnvironmentVariable("AMANU_TEST_DATA") is { Length: > 0 } testDirectory)
-            (dataDirectory, configDirectory) = (Path.GetFullPath(testDirectory), Path.Combine(Path.GetFullPath(testDirectory), "config"));
+        {
+            settingsHome = dataDirectory = Path.GetFullPath(testDirectory);
+            configDirectory = Path.Combine(dataDirectory, "config");
+        }
 #endif
         Directory.CreateDirectory(dataDirectory);
         Directory.CreateDirectory(configDirectory);
-        var store = new AppSettingsStore(Path.Combine(configDirectory, "config.json"), home);
+        var store = new AppSettingsStore(Path.Combine(configDirectory, "config.json"), settingsHome);
         Current = Choose(store.Load().Settings.InterfaceLanguage, CultureInfo.CurrentUICulture.Name);
         // Read again now the language is settled, so what the file's problems
         // say is said in it.
