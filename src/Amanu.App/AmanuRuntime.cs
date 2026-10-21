@@ -165,12 +165,31 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public AutoRecordPolicy AutoRecord => coordinator.Policy;
     public bool IsProcessing => processing.IsBusy;
     /// <summary>
-    /// True once nothing records, settles a recording, imports or transcribes; recording then stays
-    /// closed, so it is safe to quit for an update. An import is queued before it stops counting.
+    /// True once nothing records, settles a recording, imports or transcribes; recording and new
+    /// imports or retranscriptions then stay closed, so it is safe to quit for an update.
     /// </summary>
     public Task<bool> TryCloseWhenIdleAsync() =>
-        coordinator.TryCloseWhenIdleAsync(() => Volatile.Read(ref imports) == 0 && !IsProcessing);
-    private int imports;
+        coordinator.TryCloseWhenIdleAsync(() => { lock (workLock) return closed = starting == 0 && !IsProcessing; });
+    private readonly object workLock = new();
+    private int starting;
+    private bool closed;
+
+    /// <summary>
+    /// Admitted under the lock the quit decision takes, so new work either counts as busy or is
+    /// refused; it counts until queued, which is when processing takes over as busy.
+    /// </summary>
+    private async Task AdmitAsync(Func<Task> work)
+    {
+        lock (workLock)
+        {
+            if (closed) throw new InvalidOperationException(T(
+                "MeetOnTrack is closing for an update; try again once it restarts.",
+                "MeetOnTrack закрывается для обновления — попробуйте после перезапуска."));
+            starting++;
+        }
+        try { await work(); }
+        finally { lock (workLock) starting--; }
+    }
     public string LiveStatus => liveTranscription.Status;
     public LanguageModels LanguageModels => processing.LanguageModels;
     public HttpClient Http => httpClient;
@@ -467,15 +486,14 @@ public sealed class AmanuRuntime : IAsyncDisposable
 
     public async Task<string> ImportAsync(string source, CancellationToken cancellationToken = default)
     {
-        // Counted until queued: quit-when-idle must not exit mid-copy.
-        Interlocked.Increment(ref imports);
-        try { return await processing.ImportAsync(source, cancellationToken); }
-        finally { Interlocked.Decrement(ref imports); }
+        var session = "";
+        await AdmitAsync(async () => session = await processing.ImportAsync(source, cancellationToken));
+        return session;
     }
 
     public void FinishProcessing(string directory) => processing.Finish(directory);
 
-    public Task RetranscribeAsync(string directory, string? engine) => processing.RetranscribeAsync(directory, engine);
+    public Task RetranscribeAsync(string directory, string? engine) => AdmitAsync(() => processing.RetranscribeAsync(directory, engine));
 
     public ProcessingStatus? ProcessingStatusFor(string directory) => processing.StatusFor(directory);
 

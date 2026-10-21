@@ -208,7 +208,7 @@ public partial class App : System.Windows.Application
         foreach (var file in dialog.FileNames)
         {
             try { await runtime.ImportAsync(file); }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
             {
                 Ui.ShowError(owner, T("Couldn’t import the file", "Не удалось импортировать файл"), exception.Message);
                 return;

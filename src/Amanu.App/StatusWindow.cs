@@ -356,7 +356,7 @@ internal sealed class StatusWindow : Window
         foreach (var file in files.Where(File.Exists))
         {
             try { await runtime.ImportAsync(file); }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
             {
                 Ui.ShowError(this, T("Couldn’t import the file", "Не удалось импортировать файл"), exception.Message);
             }
