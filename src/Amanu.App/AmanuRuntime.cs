@@ -165,7 +165,10 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public AutoRecordPolicy AutoRecord => coordinator.Policy;
     public bool IsProcessing => processing.IsBusy;
     /// <summary>Nothing records, settles a recording or transcribes: safe to quit for an update.</summary>
-    public bool IsIdle => !State.IsRecording && !coordinator.IsChanging && !IsProcessing;
+    /// Read in this order so work moving from one step to the next shows in the later read:
+    /// a start leaves Changing for Recording, an import is queued before it stops counting.
+    public bool IsIdle => !coordinator.IsChanging && !State.IsRecording && Volatile.Read(ref imports) == 0 && !IsProcessing;
+    private int imports;
     public string LiveStatus => liveTranscription.Status;
     public LanguageModels LanguageModels => processing.LanguageModels;
     public HttpClient Http => httpClient;
@@ -200,6 +203,14 @@ public sealed class AmanuRuntime : IAsyncDisposable
         {
             settingsHome = dataDirectory = Path.GetFullPath(testDirectory);
             configDirectory = Path.Combine(dataDirectory, "config");
+            // A fresh test folder starts with nothing automatic and nothing sent to a cloud
+            // engine: the test instance still sees this account's saved credentials.
+            var testConfig = Path.Combine(configDirectory, "config.json");
+            if (!File.Exists(testConfig))
+            {
+                Directory.CreateDirectory(configDirectory);
+                File.WriteAllText(testConfig, """{"auto_record":{"enabled":false},"live_transcription":{"enabled":false},"transcription":{"enabled":false}}""");
+            }
         }
 #endif
         Directory.CreateDirectory(dataDirectory);
@@ -452,8 +463,13 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public Task<IReadOnlyList<SessionListItem>> LoadSessionsAsync(CancellationToken cancellationToken = default) =>
         SessionInventory.ScanAsync(Settings.RecordingsDirectory, cancellationToken);
 
-    public Task<string> ImportAsync(string source, CancellationToken cancellationToken = default) =>
-        processing.ImportAsync(source, cancellationToken);
+    public async Task<string> ImportAsync(string source, CancellationToken cancellationToken = default)
+    {
+        // Counted until queued: quit-when-idle must not exit mid-copy.
+        Interlocked.Increment(ref imports);
+        try { return await processing.ImportAsync(source, cancellationToken); }
+        finally { Interlocked.Decrement(ref imports); }
+    }
 
     public void FinishProcessing(string directory) => processing.Finish(directory);
 
