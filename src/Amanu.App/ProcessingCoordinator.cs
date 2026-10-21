@@ -103,7 +103,7 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
 
     public bool IsBusy
     {
-        get { lock (queueLock) return queued.Count > 0; }
+        get { lock (queueLock) return queued.Count > 0 || preparing.Count > 0; }
     }
 
     public void Start()
@@ -169,6 +169,11 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
                 return;
             }
         }
+        Announce(directory);
+    }
+
+    private void Announce(string directory)
+    {
         Publish(directory, "queued", T("Queued for processing", "В очереди на обработку"), true);
         queue.Writer.TryWrite(directory);
     }
@@ -244,6 +249,7 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
                     "This recording is being processed right now; try again when it finishes.",
                     "Эта запись сейчас обрабатывается — попробуйте, когда закончится."));
         }
+        var ready = false;
         try
         {
             var audio = await LoadAudioAsync(directory, cancellationToken).ConfigureAwait(false);
@@ -261,12 +267,19 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
             // on_stop has had its run for this session; a new transcript does not earn another.
             WriteLedger(directory, new ProcessingLedger(HookRan: ReadLedger(directory).HookRan));
             await AtomicFiles.WriteTextAsync(Path.Combine(directory, TranscriptVersions.RequestFile), engine, cancellationToken).ConfigureAwait(false);
+            ready = true;
         }
         finally
         {
-            lock (queueLock) preparing.Remove(directory);
+            // Preparing hands straight to the queue under one lock: never idle in between.
+            // Nothing else queues a session while it is preparing, so the add succeeds.
+            lock (queueLock)
+            {
+                preparing.Remove(directory);
+                if (ready) queued.Add(directory);
+            }
         }
-        Enqueue(directory);
+        Announce(directory);
     }
 
     public async Task SetSpeakerNameAsync(string directory, string label, string name, CancellationToken cancellationToken = default, string? title = null)
@@ -324,12 +337,13 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
                     bool repeat;
                     lock (queueLock)
                     {
-                        queued.Remove(directory);
                         current = null;
+                        // A repeat stays queued throughout, so the queue never looks idle in between.
                         repeat = again.Remove(directory);
+                        if (!repeat) queued.Remove(directory);
                     }
                     SessionsChanged?.Invoke(this, EventArgs.Empty);
-                    if (repeat) Enqueue(directory);
+                    if (repeat) Announce(directory);
                 }
             }
         }

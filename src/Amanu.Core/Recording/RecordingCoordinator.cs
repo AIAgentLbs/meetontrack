@@ -56,6 +56,19 @@ public sealed class RecordingCoordinator(
     /// <summary>An automatic start failed; the argument is how long until the next try.</summary>
     public event EventHandler<(Exception Error, TimeSpan RetryIn)>? AutomaticStartFailed;
 
+    /// <summary>
+    /// For quitting: waits for any start, stop or tick, then keeps the gate for good when nothing
+    /// records and <paramref name="idle"/> agrees, so nothing can begin after the decision.
+    /// Otherwise it lets go and answers false.
+    /// </summary>
+    public async Task<bool> TryCloseWhenIdleAsync(Func<bool> idle, CancellationToken cancellationToken = default)
+    {
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (current is null && idle()) return true;
+        gate.Release();
+        return false;
+    }
+
     public void SetSessionsRoot(string rootDirectory) => sessions.RootDirectory = rootDirectory;
 
     public async Task StartManualAsync(DateTimeOffset now, CancellationToken cancellationToken = default)

@@ -24,6 +24,13 @@ public partial class App : System.Windows.Application
 
     public static ImageSource? WindowIcon { get; private set; }
 
+    /// <summary>A live test instance runs beside the real one: its own window, doorbell and control pipe.</summary>
+    internal static string Scope =>
+#if DEBUG
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AMANU_TEST_DATA")) ? ".LiveTest" :
+#endif
+        "";
+
     [STAThread]
     private static void Main()
     {
@@ -49,12 +56,8 @@ public partial class App : System.Windows.Application
         // One Amanu per person. Opening it again — from Start, or the installer's
         // shortcut — rings the running one, which shows its window: with both
         // icons off, that is the only way back to it.
-        var scope = "";
-#if DEBUG
-        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AMANU_TEST_DATA"))) scope = ".LiveTest";
-#endif
-        instance = new Mutex(initiallyOwned: true, InstanceName + scope, out var first);
-        doorbell = new EventWaitHandle(false, EventResetMode.AutoReset, DoorbellName + scope);
+        instance = new Mutex(initiallyOwned: true, InstanceName + Scope, out var first);
+        doorbell = new EventWaitHandle(false, EventResetMode.AutoReset, DoorbellName + Scope);
         if (!first)
         {
             // Opened from Start or Explorer, this process may bring a window to
@@ -205,7 +208,7 @@ public partial class App : System.Windows.Application
         foreach (var file in dialog.FileNames)
         {
             try { await runtime.ImportAsync(file); }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
             {
                 Ui.ShowError(owner, T("Couldn’t import the file", "Не удалось импортировать файл"), exception.Message);
                 return;
@@ -247,6 +250,21 @@ public partial class App : System.Windows.Application
         await TearDownAsync();
         status?.AllowClose();
         Current.Shutdown();
+    }
+
+    private static bool quitWhenIdle;
+
+    /// <summary>
+    /// An update replaces this version (MEETONTRACK-88): quit once nothing records or transcribes,
+    /// so a meeting in progress is finished first. The first wait lets the control pipe answer.
+    /// </summary>
+    public static async Task QuitWhenIdleAsync()
+    {
+        if (quitWhenIdle) return;
+        quitWhenIdle = true;
+        do await Task.Delay(TimeSpan.FromSeconds(1));
+        while (runtime is { } current && !await current.TryCloseWhenIdleAsync());
+        if (runtime is not null) await QuitAsync();
     }
 
     private static async Task TearDownAsync()

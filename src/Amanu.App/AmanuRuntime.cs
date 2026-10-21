@@ -164,6 +164,32 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public RecordingState State => coordinator.State;
     public AutoRecordPolicy AutoRecord => coordinator.Policy;
     public bool IsProcessing => processing.IsBusy;
+    /// <summary>
+    /// True once nothing records, settles a recording, imports or transcribes; recording and new
+    /// imports or retranscriptions then stay closed, so it is safe to quit for an update.
+    /// </summary>
+    public Task<bool> TryCloseWhenIdleAsync() =>
+        coordinator.TryCloseWhenIdleAsync(() => { lock (workLock) return closed = starting == 0 && !IsProcessing; });
+    private readonly object workLock = new();
+    private int starting;
+    private bool closed;
+
+    /// <summary>
+    /// Admitted under the lock the quit decision takes, so new work either counts as busy or is
+    /// refused; it counts until queued, which is when processing takes over as busy.
+    /// </summary>
+    private async Task AdmitAsync(Func<Task> work)
+    {
+        lock (workLock)
+        {
+            if (closed) throw new InvalidOperationException(T(
+                "MeetOnTrack is closing for an update; try again once it restarts.",
+                "MeetOnTrack закрывается для обновления — попробуйте после перезапуска."));
+            starting++;
+        }
+        try { await work(); }
+        finally { lock (workLock) starting--; }
+    }
     public string LiveStatus => liveTranscription.Status;
     public LanguageModels LanguageModels => processing.LanguageModels;
     public HttpClient Http => httpClient;
@@ -189,14 +215,28 @@ public sealed class AmanuRuntime : IAsyncDisposable
         // Not %LOCALAPPDATA%\Amanu: that is where Velopack installs the program,
         // and uninstalling removes the folder with everything in it.
         var dataDirectory = Path.Combine(home, ".local", "share", "meeting-copilot", "capture-data");
+        var configDirectory = Path.Combine(home, ".config", "meeting-copilot");
+        var settingsHome = home;
 #if DEBUG
+        // A live test instance never reads or writes the real settings, and its default
+        // recordings folder is inside the test folder too.
         if (Environment.GetEnvironmentVariable("AMANU_TEST_DATA") is { Length: > 0 } testDirectory)
-            dataDirectory = Path.GetFullPath(testDirectory);
+        {
+            settingsHome = dataDirectory = Path.GetFullPath(testDirectory);
+            configDirectory = Path.Combine(dataDirectory, "config");
+            // A fresh test folder starts with nothing automatic and nothing sent to a cloud
+            // engine: the test instance still sees this account's saved credentials.
+            var testConfig = Path.Combine(configDirectory, "config.json");
+            if (!File.Exists(testConfig))
+            {
+                Directory.CreateDirectory(configDirectory);
+                File.WriteAllText(testConfig, """{"auto_record":{"enabled":false},"live_transcription":{"enabled":false},"transcription":{"enabled":false}}""");
+            }
+        }
 #endif
         Directory.CreateDirectory(dataDirectory);
-        var configDirectory = Path.Combine(home, ".config", "meeting-copilot");
         Directory.CreateDirectory(configDirectory);
-        var store = new AppSettingsStore(Path.Combine(configDirectory, "config.json"), home);
+        var store = new AppSettingsStore(Path.Combine(configDirectory, "config.json"), settingsHome);
         Current = Choose(store.Load().Settings.InterfaceLanguage, CultureInfo.CurrentUICulture.Name);
         // Read again now the language is settled, so what the file's problems
         // say is said in it.
@@ -234,9 +274,9 @@ public sealed class AmanuRuntime : IAsyncDisposable
     {
         _ = CopilotControl.ServeAsync(this, lifetime.Token);
         _ = liveTranscription.RefreshAsync();
-        if (!ConfigUnreadable && !IsTestInstance)
+        if (!IsTestInstance)
         {
-            try { StartupRegistration.SetEnabled(Settings.StartAtLogin); }
+            try { StartupRegistration.RemoveLegacyEntry(); }
             catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or System.Security.SecurityException) { }
         }
         processing.Start();
@@ -341,11 +381,6 @@ public sealed class AmanuRuntime : IAsyncDisposable
             || previous.Transcription.Language != next.Transcription.Language)
             _ = liveTranscription.RefreshAsync();
         activityMonitor.Matcher = Matcher(next);
-        if (previous.StartAtLogin != next.StartAtLogin && !ConfigUnreadable && !IsTestInstance)
-        {
-            try { StartupRegistration.SetEnabled(next.StartAtLogin); }
-            catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or System.Security.SecurityException) { }
-        }
         Task.Run(processing.Rescan);
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -449,12 +484,16 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public Task<IReadOnlyList<SessionListItem>> LoadSessionsAsync(CancellationToken cancellationToken = default) =>
         SessionInventory.ScanAsync(Settings.RecordingsDirectory, cancellationToken);
 
-    public Task<string> ImportAsync(string source, CancellationToken cancellationToken = default) =>
-        processing.ImportAsync(source, cancellationToken);
+    public async Task<string> ImportAsync(string source, CancellationToken cancellationToken = default)
+    {
+        var session = "";
+        await AdmitAsync(async () => session = await processing.ImportAsync(source, cancellationToken));
+        return session;
+    }
 
     public void FinishProcessing(string directory) => processing.Finish(directory);
 
-    public Task RetranscribeAsync(string directory, string? engine) => processing.RetranscribeAsync(directory, engine);
+    public Task RetranscribeAsync(string directory, string? engine) => AdmitAsync(() => processing.RetranscribeAsync(directory, engine));
 
     public ProcessingStatus? ProcessingStatusFor(string directory) => processing.StatusFor(directory);
 
