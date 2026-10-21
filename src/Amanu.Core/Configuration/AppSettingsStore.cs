@@ -186,7 +186,8 @@ public sealed class AppSettingsStore(string configPath, string homeDirectory)
             if (value is JsonObject || (value is null && old is JsonObject))
             {
                 // Merge leaf by leaf, so keys this program never had in the object stay.
-                var child = names.Select(name => target[name]).OfType<JsonObject>().FirstOrDefault() ?? new JsonObject();
+                // The last spelling is the one the load reads.
+                var child = names.Select(name => target[name]).OfType<JsonObject>().LastOrDefault() ?? new JsonObject();
                 foreach (var name in names) target.Remove(name);
                 ApplyChanges(child, old as JsonObject ?? new JsonObject(), value as JsonObject ?? new JsonObject(), fallback as JsonObject);
                 if (value is not null || child.Count > 0) target[key] = child;
