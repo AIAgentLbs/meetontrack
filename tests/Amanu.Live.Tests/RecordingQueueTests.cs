@@ -106,6 +106,23 @@ public sealed class RecordingQueueTests
     private static async Task<TranscriptDocument> ReadDocumentAsync(string directory) =>
         System.Text.Json.JsonSerializer.Deserialize<TranscriptDocument>(await File.ReadAllTextAsync(Path.Combine(directory, "transcript.json")))!;
 
+    [Fact]
+    public async Task After_closing_for_quit_nothing_is_queued_and_the_next_version_processes_it()
+    {
+        await using var fixture = await QueueFixture.CreateAsync();
+        Assert.True(fixture.Processor.TryClose());
+        fixture.Processor.Rescan(); // a rescan or retry that fires after the quit decision
+        fixture.Processor.Enqueue(fixture.First);
+        Assert.False(fixture.Processor.IsBusy);
+        Assert.NotEqual("queued", fixture.Processor.StatusFor(fixture.First)?.Stage);
+
+        await using var next = fixture.NextVersion();
+        next.Start();
+        await fixture.Engine.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("transcribing", next.StatusFor(fixture.First)?.Stage);
+        fixture.Engine.Release.TrySetResult();
+    }
+
     private sealed class QueueFixture : IAsyncDisposable
     {
         private readonly string root = Path.Combine(Path.GetTempPath(), "amanu-queue-tests", Guid.NewGuid().ToString("N"));
@@ -136,10 +153,13 @@ public sealed class RecordingQueueTests
             Directory.CreateDirectory(Path.Combine(fixture.root, "local-runtime"));
             await File.WriteAllBytesAsync(Path.Combine(fixture.root, "local-runtime", "transcribe-cli.exe"), []);
             await File.WriteAllBytesAsync(models.ModelPath("parakeet"), []);
-            fixture.Processor = new(() => settings, () => true, new SecretStore(), models, fixture.http,
+            fixture.NextVersion = () => new(() => settings, () => true, new SecretStore(), models, fixture.http,
                 (_, _) => fixture.Engine);
+            fixture.Processor = fixture.NextVersion();
             return fixture;
         }
+        /// <summary>A fresh coordinator over the same folders: what an updated version starts with.</summary>
+        public Func<ProcessingCoordinator> NextVersion { get; private set; } = null!;
         public async ValueTask DisposeAsync()
         {
             Engine.Release.TrySetResult();
