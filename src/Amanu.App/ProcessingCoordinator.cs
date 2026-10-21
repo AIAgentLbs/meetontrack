@@ -337,12 +337,13 @@ public sealed class ProcessingCoordinator : IAsyncDisposable
                     bool repeat;
                     lock (queueLock)
                     {
-                        queued.Remove(directory);
                         current = null;
+                        // A repeat stays queued throughout, so the queue never looks idle in between.
                         repeat = again.Remove(directory);
+                        if (!repeat) queued.Remove(directory);
                     }
                     SessionsChanged?.Invoke(this, EventArgs.Empty);
-                    if (repeat) Enqueue(directory);
+                    if (repeat) Announce(directory);
                 }
             }
         }
