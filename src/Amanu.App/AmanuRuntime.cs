@@ -264,7 +264,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
             previous = settings;
             next = settings.Clone();
             change(next);
-            store.Save(next);
+            store.Save(next, previous);
             settings = next;
         }
         Apply(previous, next);

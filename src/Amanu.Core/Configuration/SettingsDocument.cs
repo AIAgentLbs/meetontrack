@@ -45,35 +45,4 @@ public static class SettingsDocument
         parent[keys[^1]] = replacement?.DeepClone();
         return FromNode(root);
     }
-
-    /// <summary>
-    /// Only what differs from the defaults. The file then reads as a list of the
-    /// person's decisions, and a default that improves in a later version
-    /// reaches them instead of being frozen into their file the first time a
-    /// window saved it — the rule the macOS app follows.
-    /// </summary>
-    public static JsonObject Changes(AppSettings settings, AppSettings defaults)
-    {
-        var result = new JsonObject();
-        Collect(ToNode(settings), ToNode(defaults), result);
-        return result;
-    }
-
-    private static void Collect(JsonObject current, JsonObject defaults, JsonObject into)
-    {
-        foreach (var (key, value) in current)
-        {
-            defaults.TryGetPropertyValue(key, out var fallback);
-            if (value is JsonObject nested && fallback is JsonObject nestedDefaults)
-            {
-                var child = new JsonObject();
-                Collect(nested, nestedDefaults, child);
-                if (child.Count > 0) into[key] = child;
-            }
-            else if (!JsonNode.DeepEquals(value, fallback))
-            {
-                into[key] = value?.DeepClone();
-            }
-        }
-    }
 }
