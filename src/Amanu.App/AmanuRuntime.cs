@@ -164,10 +164,12 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public RecordingState State => coordinator.State;
     public AutoRecordPolicy AutoRecord => coordinator.Policy;
     public bool IsProcessing => processing.IsBusy;
-    /// <summary>Nothing records, settles a recording or transcribes: safe to quit for an update.</summary>
-    /// Read in this order so work moving from one step to the next shows in the later read:
-    /// a start leaves Changing for Recording, an import is queued before it stops counting.
-    public bool IsIdle => !coordinator.IsChanging && !State.IsRecording && Volatile.Read(ref imports) == 0 && !IsProcessing;
+    /// <summary>
+    /// True once nothing records, settles a recording, imports or transcribes; recording then stays
+    /// closed, so it is safe to quit for an update. An import is queued before it stops counting.
+    /// </summary>
+    public Task<bool> TryCloseWhenIdleAsync() =>
+        coordinator.TryCloseWhenIdleAsync(() => Volatile.Read(ref imports) == 0 && !IsProcessing);
     private int imports;
     public string LiveStatus => liveTranscription.Status;
     public LanguageModels LanguageModels => processing.LanguageModels;

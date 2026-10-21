@@ -42,7 +42,10 @@ public sealed class RetranscriptionTests
         processor.StatusChanged += (_, status) => { if (status.Stage == (fail ? "deferred" : "complete")) settled.TrySetResult(); };
         try
         {
+            Assert.True(processor.TryUseIdleSession(directory, () => Assert.True(processor.IsBusy))); // preparing counts as busy
+            Assert.False(processor.IsBusy);
             await processor.RetranscribeAsync(directory, "parakeet");
+            Assert.True(processor.IsBusy);
             Assert.Equal("queued", processor.StatusFor(directory)?.Stage);
             Assert.True(updates > 0);
             Assert.Equal(original.Engine, (await ReadDocumentAsync(directory)).Engine);

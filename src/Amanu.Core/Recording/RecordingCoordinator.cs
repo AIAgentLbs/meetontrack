@@ -50,13 +50,24 @@ public sealed class RecordingCoordinator(
 
     public RecordingState State { get; private set; } = RecordingState.Ready;
     public AutoRecordPolicy Policy => autoRecord;
-    /// <summary>A start, stop or tick holds the gate; a stop is settled (meta written, transcription queued) only once it is released.</summary>
-    public bool IsChanging => gate.CurrentCount == 0;
 
     public event EventHandler<RecordingState>? StateChanged;
     public event EventHandler<CompletedRecording>? RecordingCompleted;
     /// <summary>An automatic start failed; the argument is how long until the next try.</summary>
     public event EventHandler<(Exception Error, TimeSpan RetryIn)>? AutomaticStartFailed;
+
+    /// <summary>
+    /// For quitting: waits for any start, stop or tick, then keeps the gate for good when nothing
+    /// records and <paramref name="idle"/> agrees, so nothing can begin after the decision.
+    /// Otherwise it lets go and answers false.
+    /// </summary>
+    public async Task<bool> TryCloseWhenIdleAsync(Func<bool> idle, CancellationToken cancellationToken = default)
+    {
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (current is null && idle()) return true;
+        gate.Release();
+        return false;
+    }
 
     public void SetSessionsRoot(string rootDirectory) => sessions.RootDirectory = rootDirectory;
 

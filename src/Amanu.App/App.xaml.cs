@@ -263,7 +263,7 @@ public partial class App : System.Windows.Application
         if (quitWhenIdle) return;
         quitWhenIdle = true;
         do await Task.Delay(TimeSpan.FromSeconds(1));
-        while (runtime is { IsIdle: false });
+        while (runtime is { } current && !await current.TryCloseWhenIdleAsync());
         if (runtime is not null) await QuitAsync();
     }
 

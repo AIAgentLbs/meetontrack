@@ -209,6 +209,31 @@ public sealed class RecordingCoordinatorTests
 
     private static AudioObservation Released(DateTimeOffset at) => new(at, false, null, false, false);
 
+    [Fact]
+    public async Task Closing_for_quit_waits_for_a_stop_and_then_lets_nothing_start()
+    {
+        using var root = new TemporaryDirectory();
+        var stopGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var capture = new InspectableCapture { StopGate = stopGate };
+        var coordinator = Coordinator(root.Path, capture);
+        await coordinator.StartManualAsync(Started);
+        Assert.False(await coordinator.TryCloseWhenIdleAsync(() => true));
+
+        var stop = coordinator.StopAsync(Started.AddMinutes(1), "manual");
+        var close = coordinator.TryCloseWhenIdleAsync(() => true);
+        await Task.Delay(200);
+        Assert.False(close.IsCompleted); // the stop is still settling
+        stopGate.SetResult();
+        await stop;
+        Assert.True(await close.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(File.Exists(Path.Combine(capture.StartedSession!.Directory, "meta.json")));
+
+        var start = coordinator.StartManualAsync(Started.AddMinutes(2));
+        await Task.Delay(200);
+        Assert.False(start.IsCompleted);
+        Assert.False(coordinator.State.IsRecording);
+    }
+
     private static RecordingCoordinator Coordinator(string root, InspectableCapture capture)
     {
         var options = new AutoRecordOptions(
@@ -251,10 +276,13 @@ public sealed class RecordingCoordinatorTests
             return Task.CompletedTask;
         }
 
-        public Task<CaptureStopResult> StopAsync(CancellationToken cancellationToken)
+        public TaskCompletionSource? StopGate { get; init; }
+
+        public async Task<CaptureStopResult> StopAsync(CancellationToken cancellationToken)
         {
+            if (StopGate is not null) await StopGate.Task;
             Stopped = true;
-            return Task.FromResult(new CaptureStopResult(0, 0));
+            return new CaptureStopResult(0, 0);
         }
 
         public Task SetPausedAsync(bool paused, CancellationToken cancellationToken)
