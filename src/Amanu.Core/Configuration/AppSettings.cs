@@ -55,9 +55,6 @@ public sealed class AppSettings
     [JsonPropertyName("speaker_names")]
     public SpeakerNameSettings SpeakerNames { get; set; } = new();
 
-    [JsonPropertyName("start_at_login")]
-    public bool StartAtLogin { get; set; } = true;
-
     [JsonPropertyName("tray_icon")]
     public bool TrayIcon { get; set; } = true;
 

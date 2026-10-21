@@ -35,7 +35,6 @@ internal sealed class SetupForm
 
     private readonly TextBlock configProblem = Ui.Status("", Ui.Caution);
 
-    private readonly CheckBox launch = Ui.Switch(T("Start when you sign in", "Запускать при входе в Windows"));
     private readonly TextBlock micStatus = Ui.Status();
     private readonly System.Windows.Controls.Button micSettings;
 
@@ -120,9 +119,6 @@ internal sealed class SetupForm
         View.Children.Add(configProblem);
 
         View.Children.Add(Ui.Section(T("Access", "Доступ"), Ui.Box(
-            Ui.Row(launch,
-                Ui.Title(T("Start when you sign in to Windows", "Запускать при входе в Windows")),
-                Ui.Detail(T("So a meeting is never missed because nobody opened MeetOnTrack.", "Чтобы встреча не пропала из-за того, что MeetOnTrack никто не открыл."))),
             Ui.Row(Ui.Symbol(""),
                 Ui.Title(T("Microphone", "Микрофон")),
                 Ui.Detail(T("Your side of the call. Windows asks for it under Privacy › Microphone.",
@@ -363,7 +359,6 @@ internal sealed class SetupForm
 
     private void Wire()
     {
-        launch.Click += (_, _) => Change(settings => settings.StartAtLogin = launch.IsChecked == true);
         cloud.Click += (_, _) => ChangeTranscription(choice => choice with { Cloud = cloud.IsChecked == true });
         local.Click += (_, _) =>
         {
@@ -691,7 +686,6 @@ internal sealed class SetupForm
             configProblem.Visibility = showsConfigProblems && problems.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             configProblem.Text = string.Join(Environment.NewLine, problems.Select(problem => problem.Explanation));
 
-            launch.IsChecked = settings.StartAtLogin;
             var mic = MicrophoneAccess.Read();
             micStatus.Text = mic switch
             {

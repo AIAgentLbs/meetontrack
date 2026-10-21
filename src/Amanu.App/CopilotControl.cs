@@ -10,7 +10,7 @@ namespace Amanu.App;
 /// <summary>Same-user named pipe. Contains commands and health metadata, never credentials.</summary>
 public static class CopilotControl
 {
-    private static string PipeName => "MeetingCopilot-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(WindowsIdentity.GetCurrent().User!.Value)))[..16];
+    private static string PipeName => "MeetingCopilot-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(WindowsIdentity.GetCurrent().User!.Value)))[..16] + App.Scope;
 
     public static async Task ServeAsync(AmanuRuntime runtime, CancellationToken lifetime)
     {
@@ -40,6 +40,8 @@ public static class CopilotControl
                         case "resume":
                             if (!runtime.State.IsRecording) throw new InvalidOperationException("No active recording");
                             await runtime.ResumeRecognitionAsync(); break;
+                        case "quit-when-idle":
+                            _ = System.Windows.Application.Current.Dispatcher.InvokeAsync(App.QuitWhenIdleAsync); break;
                         default: throw new InvalidOperationException("Unknown capture command");
                     }
                     result = new { ok=true, recording=runtime.State.IsRecording, paused=runtime.State.IsPaused,

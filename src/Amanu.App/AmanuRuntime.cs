@@ -189,12 +189,13 @@ public sealed class AmanuRuntime : IAsyncDisposable
         // Not %LOCALAPPDATA%\Amanu: that is where Velopack installs the program,
         // and uninstalling removes the folder with everything in it.
         var dataDirectory = Path.Combine(home, ".local", "share", "meeting-copilot", "capture-data");
+        var configDirectory = Path.Combine(home, ".config", "meeting-copilot");
 #if DEBUG
+        // A live test instance never reads or writes the real settings, recordings folder included.
         if (Environment.GetEnvironmentVariable("AMANU_TEST_DATA") is { Length: > 0 } testDirectory)
-            dataDirectory = Path.GetFullPath(testDirectory);
+            (dataDirectory, configDirectory) = (Path.GetFullPath(testDirectory), Path.Combine(Path.GetFullPath(testDirectory), "config"));
 #endif
         Directory.CreateDirectory(dataDirectory);
-        var configDirectory = Path.Combine(home, ".config", "meeting-copilot");
         Directory.CreateDirectory(configDirectory);
         var store = new AppSettingsStore(Path.Combine(configDirectory, "config.json"), home);
         Current = Choose(store.Load().Settings.InterfaceLanguage, CultureInfo.CurrentUICulture.Name);
@@ -234,9 +235,9 @@ public sealed class AmanuRuntime : IAsyncDisposable
     {
         _ = CopilotControl.ServeAsync(this, lifetime.Token);
         _ = liveTranscription.RefreshAsync();
-        if (!ConfigUnreadable && !IsTestInstance)
+        if (!IsTestInstance)
         {
-            try { StartupRegistration.SetEnabled(Settings.StartAtLogin); }
+            try { StartupRegistration.RemoveLegacyEntry(); }
             catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or System.Security.SecurityException) { }
         }
         processing.Start();
@@ -341,11 +342,6 @@ public sealed class AmanuRuntime : IAsyncDisposable
             || previous.Transcription.Language != next.Transcription.Language)
             _ = liveTranscription.RefreshAsync();
         activityMonitor.Matcher = Matcher(next);
-        if (previous.StartAtLogin != next.StartAtLogin && !ConfigUnreadable && !IsTestInstance)
-        {
-            try { StartupRegistration.SetEnabled(next.StartAtLogin); }
-            catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or System.Security.SecurityException) { }
-        }
         Task.Run(processing.Rescan);
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
