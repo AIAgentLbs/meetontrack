@@ -121,6 +121,70 @@ public sealed class AppSettingsStoreTests
     }
 
     [Fact]
+    public void Keys_other_programs_own_survive_a_save_nested_ones_included()
+    {
+        using var temporary = new TemporaryDirectory();
+        var configPath = Path.Combine(temporary.Path, "config.json");
+        File.WriteAllText(configPath, """
+            { "ai": { "choice": { "provider": "codex", "model": "m" } },
+              "summary": { "backend": "ollama", "web_only": "kept" },
+              "auto_record": { "enabled": true } }
+            """);
+        var store = new AppSettingsStore(configPath, Documents);
+        var previous = store.Load().Settings;
+        var settings = previous.Clone();
+
+        settings.KeepAudio = true;
+        store.Save(settings, previous);
+
+        var written = JsonNode.Parse(File.ReadAllText(configPath))!;
+        Assert.Equal("codex", written["ai"]!["choice"]!["provider"]!.GetValue<string>());
+        Assert.Equal("kept", written["summary"]!["web_only"]!.GetValue<string>());
+        Assert.Equal("ollama", written["summary"]!["backend"]!.GetValue<string>());
+        Assert.True(written["auto_record"]!["enabled"]!.GetValue<bool>());
+        Assert.True(written["keep_audio"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void A_newer_edit_by_another_program_is_not_reverted_by_a_save()
+    {
+        using var temporary = new TemporaryDirectory();
+        var configPath = Path.Combine(temporary.Path, "config.json");
+        File.WriteAllText(configPath, """{ "summary": { "backend": "ollama" } }""");
+        var store = new AppSettingsStore(configPath, Documents);
+        var previous = store.Load().Settings;
+        File.WriteAllText(configPath, """{ "summary": { "backend": "codex-cli" }, "stt": { "choice": { "engine": "parakeet" } } }""");
+        var settings = previous.Clone();
+
+        settings.AutoRecord.StartDelaySeconds = 4;
+        store.Save(settings, previous);
+
+        var written = JsonNode.Parse(File.ReadAllText(configPath))!;
+        Assert.Equal("codex-cli", written["summary"]!["backend"]!.GetValue<string>());
+        Assert.Equal("parakeet", written["stt"]!["choice"]!["engine"]!.GetValue<string>());
+        Assert.Equal(4, written["auto_record"]!["start_delay_seconds"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void Putting_a_value_back_to_its_default_removes_only_that_key()
+    {
+        using var temporary = new TemporaryDirectory();
+        var configPath = Path.Combine(temporary.Path, "config.json");
+        File.WriteAllText(configPath, """{ "keep_audio": true, "auto_record": { "stop_delay_seconds": 99, "other": 1 } }""");
+        var store = new AppSettingsStore(configPath, Documents);
+        var previous = store.Load().Settings;
+        var settings = previous.Clone();
+
+        settings.AutoRecord.StopDelaySeconds = 15;
+        store.Save(settings, previous);
+
+        var written = JsonNode.Parse(File.ReadAllText(configPath))!.AsObject();
+        Assert.True(written["keep_audio"]!.GetValue<bool>());
+        Assert.Null(written["auto_record"]!["stop_delay_seconds"]);
+        Assert.Equal(1, written["auto_record"]!["other"]!.GetValue<int>());
+    }
+
+    [Fact]
     public void Clearing_a_value_by_path_restores_its_default()
     {
         var settings = AppSettings.CreateDefault(Documents);
