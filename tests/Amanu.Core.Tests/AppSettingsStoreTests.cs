@@ -63,7 +63,7 @@ public sealed class AppSettingsStoreTests
         File.WriteAllText(configPath, "{ broken");
         var store = new AppSettingsStore(configPath, Documents);
 
-        Assert.Throws<ConfigUnreadableException>(() => store.Save(store.Defaults));
+        Assert.Throws<ConfigUnreadableException>(() => store.Save(store.Defaults, store.Defaults));
         Assert.Equal("{ broken", File.ReadAllText(configPath));
     }
 
@@ -93,7 +93,7 @@ public sealed class AppSettingsStoreTests
         settings.KeepAudio = true;
         settings.AutoRecord.StartDelaySeconds = 4;
 
-        store.Save(settings);
+        store.Save(settings, store.Defaults);
 
         var written = JsonNode.Parse(File.ReadAllText(configPath))!.AsObject();
         Assert.Equal(2, written.Count);
@@ -112,10 +112,11 @@ public sealed class AppSettingsStoreTests
         var configPath = Path.Combine(temporary.Path, "config.json");
         File.WriteAllText(configPath, """{ "from_a_newer_version": { "x": 1 } }""");
         var store = new AppSettingsStore(configPath, Documents);
-        var settings = store.Load().Settings;
+        var previous = store.Load().Settings;
+        var settings = previous.Clone();
 
         settings.KeepAudio = true;
-        store.Save(settings);
+        store.Save(settings, previous);
 
         Assert.Contains("from_a_newer_version", File.ReadAllText(configPath));
     }
@@ -182,6 +183,63 @@ public sealed class AppSettingsStoreTests
         Assert.True(written["keep_audio"]!.GetValue<bool>());
         Assert.Null(written["auto_record"]!["stop_delay_seconds"]);
         Assert.Equal(1, written["auto_record"]!["other"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void A_newly_set_object_keeps_the_keys_another_program_put_in_it()
+    {
+        using var temporary = new TemporaryDirectory();
+        var configPath = Path.Combine(temporary.Path, "config.json");
+        var store = new AppSettingsStore(configPath, Documents);
+        var previous = store.Load().Settings;
+        File.WriteAllText(configPath, """{ "on_stop": { "web_only": 1 } }""");
+        var settings = previous.Clone();
+
+        settings.OnStop = new CommandHook { Executable = "hook.exe" };
+        store.Save(settings, previous);
+
+        var written = JsonNode.Parse(File.ReadAllText(configPath))!;
+        Assert.Equal(1, written["on_stop"]!["web_only"]!.GetValue<int>());
+        Assert.Equal("hook.exe", written["on_stop"]!["executable"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void A_value_spelled_in_another_case_is_the_one_changed()
+    {
+        using var temporary = new TemporaryDirectory();
+        var configPath = Path.Combine(temporary.Path, "config.json");
+        File.WriteAllText(configPath, """{ "KEEP_AUDIO": true }""");
+        var store = new AppSettingsStore(configPath, Documents);
+        var previous = store.Load().Settings;
+        var settings = previous.Clone();
+
+        settings.KeepAudio = false;
+        store.Save(settings, previous);
+
+        Assert.False(store.Load().Settings.KeepAudio);
+    }
+
+    [Fact]
+    public async Task A_save_waits_for_the_lock_another_program_holds()
+    {
+        // Windows byte-range locks are per handle, as the web server's msvcrt.locking
+        // sees them; POSIX record locks are per process and never block this test.
+        if (!OperatingSystem.IsWindows()) return;
+        using var temporary = new TemporaryDirectory();
+        var configPath = Path.Combine(temporary.Path, "config.json");
+        var store = new AppSettingsStore(configPath, Documents);
+        var settings = store.Defaults;
+        settings.KeepAudio = true;
+        var held = new FileStream(configPath + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        held.Lock(0, 1);
+
+        var save = Task.Run(() => store.Save(settings, store.Defaults));
+        await Task.Delay(300);
+        Assert.False(save.IsCompleted);
+        held.Dispose();
+        await save.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(store.Load().Settings.KeepAudio);
     }
 
     [Fact]

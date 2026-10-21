@@ -95,12 +95,18 @@ public sealed class AppSettingsStore(string configPath, string homeDirectory)
     /// <paramref name="settings"/> into the file as it is on disk now, or refuses
     /// when that file cannot be read. config.json is shared with the web server
     /// and the Mac app, so every other key, nested ones included, and every newer
-    /// edit another program made since the last read, stays as it is.
+    /// edit another program made since the last read, stays as it is. The read
+    /// and the replace happen under config.json.lock, the lock the web server
+    /// takes for its own read-modify-write.
     /// </summary>
-    /// <param name="previous">The settings before this change; null means what the file holds now.</param>
+    /// <param name="previous">The settings this change started from.</param>
     /// <exception cref="ConfigUnreadableException">The file is there and is not JSON.</exception>
-    public void Save(AppSettings settings, AppSettings? previous = null)
+    public void Save(AppSettings settings, AppSettings previous)
     {
+        var directory = Path.GetDirectoryName(configPath);
+        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+        using var _ = ExclusiveLock(configPath + ".lock");
+
         var document = new JsonObject();
         if (File.Exists(configPath))
         {
@@ -119,11 +125,8 @@ public sealed class AppSettingsStore(string configPath, string homeDirectory)
                 throw new ConfigUnreadableException(ConfigProblem.UnreadableFile(T("the top level is not an object", "верхний уровень — не объект")));
         }
 
-        var before = previous ?? Load().Settings;
-        ApplyChanges(document, SettingsDocument.ToNode(before), SettingsDocument.ToNode(settings), SettingsDocument.ToNode(Defaults));
+        ApplyChanges(document, SettingsDocument.ToNode(previous), SettingsDocument.ToNode(settings), SettingsDocument.ToNode(Defaults));
 
-        var directory = Path.GetDirectoryName(configPath);
-        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
         var temporary = configPath + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
@@ -133,6 +136,34 @@ public sealed class AppSettingsStore(string configPath, string homeDirectory)
         finally
         {
             if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
+    /// <summary>
+    /// Byte 0 of the lock file, as the web server's msvcrt.locking takes it.
+    /// Waits about ten seconds, as msvcrt.locking does, then gives up.
+    /// </summary>
+    private static FileStream ExclusiveLock(string path)
+    {
+        var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+        // ponytail: .NET has no byte-range lock on macOS; this store only runs on Windows.
+        if (OperatingSystem.IsMacOS()) return stream;
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                stream.Lock(0, 1);
+                return stream;
+            }
+            catch (IOException) when (attempt < 100)
+            {
+                Thread.Sleep(100);
+            }
+            catch
+            {
+                stream.Dispose();
+                throw;
+            }
         }
     }
 
@@ -150,19 +181,21 @@ public sealed class AppSettingsStore(string configPath, string homeDirectory)
             if (JsonNode.DeepEquals(old, value)) continue;
             JsonNode? fallback = null;
             defaults?.TryGetPropertyValue(key, out fallback);
-            if (old is JsonObject oldObject && value is JsonObject newObject)
+            // Settings load case-insensitively, so the file's own spelling is the one to change.
+            var name = target.FirstOrDefault(entry => string.Equals(entry.Key, key, StringComparison.OrdinalIgnoreCase)).Key ?? key;
+            if (value is JsonObject newObject)
             {
-                if (target[key] is not JsonObject child)
+                if (target[name] is not JsonObject child)
                 {
                     child = new JsonObject();
-                    target[key] = child;
+                    target[name] = child;
                 }
-                ApplyChanges(child, oldObject, newObject, fallback as JsonObject);
+                ApplyChanges(child, old as JsonObject ?? new JsonObject(), newObject, fallback as JsonObject);
             }
             else if (value is null || JsonNode.DeepEquals(value, fallback))
-                target.Remove(key);
+                target.Remove(name);
             else
-                target[key] = value.DeepClone();
+                target[name] = value.DeepClone();
         }
     }
 
