@@ -306,7 +306,10 @@ hashes, Pages removed, and the Windows installer relocated to
   (12:59 vs 11:59 on 2026-10-26). Source fix 2026-10-26 in `archive.py` and
   `meeting_boundaries.py`. Close after the next release ships it.
 - [ ] MEETONTRACK-103: Two consecutive Telemost calls (goodbyes, 86 s audio gap, new person)
-  were recorded as one meeting, one report and one email. Boundary detection to fix.
+  were recorded as one meeting, one report and one email. Source fix 2026-10-26: while recording,
+  the server starts a new logical meeting at the end of a far-end audio gap of at least 75 s
+  with no transcribed speech in it, RU/EN goodbyes in the 60 s before it and speech after it
+  (`call_change_gap` in `meeting_boundaries.py`). Close after the next release ships it.
 - [ ] MEETONTRACK-104: Speaker roster named a participant "Sure" from the English word when AI
   naming was unavailable. Common words must never become names. Source fix 2026-10-26:
   "I am X"/"I'm X" counts as a self-introduction only when X is written capitalised

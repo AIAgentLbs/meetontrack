@@ -2443,6 +2443,12 @@ def archive_loop() -> None:
     last_history_check = 0.0
     while not TRANSCRIPT.stop.is_set():
         try:
+            # A call app that kept the mic between two calls must not merge them.
+            physical = TRANSCRIPT.physical_snapshot()
+            with TRANSCRIPT.lock:
+                if (TRANSCRIPT.meeting_id == physical.get("meeting_id") and TRANSCRIPT.status == "recording"
+                        and TRANSCRIPT.revision == physical.get("revision")):  # else retry next pass
+                    BOUNDARIES.split_at_call_change(physical)
             ARCHIVE.reconcile_boundaries(BOUNDARIES)
             # Old physical sessions can finish while this web service is down,
             # and a call followed right away by another finishes its final

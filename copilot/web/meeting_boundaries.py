@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import tempfile
 import threading
 import uuid
@@ -32,6 +33,53 @@ def epoch(value):
 def interval_contains(interval, value):
     stamp, start, end = epoch(value), epoch(interval.get("start")), epoch(interval.get("end"))
     return stamp is not None and start is not None and stamp >= start and (end is None or stamp < end)
+
+
+# A call app that keeps the microphone between two calls keeps one recording
+# running across both (MEETONTRACK-103). The far end of a finished call goes
+# digitally silent ("system-audio-lost" gap). Mid-call gaps in real recordings
+# lasted 45-69 s (remote side muted); the observed call change lasted 86 s.
+CALL_CHANGE_GAP_SECONDS = 75
+# The goodbyes must have been said this close before the far end went silent.
+FAREWELL_WINDOW_SECONDS = 60
+# Minimal RU/EN goodbyes; a call in another language is simply not split
+# automatically (the manual "new meeting" split still works). "пока" also
+# means "while/for now", so it counts only when it ends the phrase;
+# "take care of ..." is not a goodbye.
+FAREWELL = re.compile(
+    r"(?iu)(?<!\w)(?:до свидания|счастливо|всего доброго|всего хорошего"
+    r"|до встречи|до связи|bye|goodbye|take care(?!\s+of\b)"
+    r"|see you(?=\s+(?:later|soon|then|tomorrow|next)\b|[\s.!?…]*$)"
+    r"|пока(?=[\s.!?…,-]*(?:пока)?[\s.!?…]*$))(?!\w)"
+)
+
+
+def call_change_gap(physical: dict, after: float | None = None) -> dict | None:
+    """The far-end gap where one call ended and the next began, or None.
+
+    All of: the gap lasted CALL_CHANGE_GAP_SECONDS, nobody spoke into the
+    microphone during it, goodbyes were said just before it, and speech
+    followed it. A real capture loss mid-call fails the second condition.
+    """
+    stamped = [(epoch(s.get("timestamp")), s) for s in physical.get("segments", [])]
+    stamped = [(t, s) for t, s in stamped if t is not None]
+    for warning in physical.get("capture_warnings") or []:
+        start, end = epoch(warning.get("started_at")), epoch(warning.get("ended_at"))
+        if (warning.get("reason") != "system-audio-lost" or start is None or end is None
+                or end - start < CALL_CHANGE_GAP_SECONDS or (after is not None and start < after)):
+            continue  # A gap the current meeting did not fully contain is not ours to split.
+        # Any transcribed speech inside the gap (either side) means it was not silence.
+        if any(t < end and (epoch(s.get("end_timestamp")) > start if epoch(s.get("end_timestamp")) is not None
+                            else t >= start) for t, s in stamped):
+            continue
+        if not any(t >= end for t, _ in stamped):
+            continue
+        # Said in this logical meeting, ending within the window before the gap.
+        if any((after is None or t >= after) and t < start
+               and (epoch(s.get("end_timestamp")) or t) >= start - FAREWELL_WINDOW_SECONDS
+               and FAREWELL.search(str(s.get("text") or "")) for t, s in stamped):
+            return warning
+    return None
 
 
 class MeetingBoundaries:
@@ -110,6 +158,20 @@ class MeetingBoundaries:
             data["requests"][token] = {"input": request_key, "result": result}
             self._commit(data)
             return dict(result)
+
+    def split_at_call_change(self, physical: dict) -> dict | None:
+        """Start a new logical meeting where the call changed (MEETONTRACK-103)."""
+        physical_id = str(physical.get("meeting_id") or "")
+        with self.lock:
+            parts = self.data["sessions"].get(physical_id)
+            last_id, last_start = (parts[-1]["meeting_id"], parts[-1]["start"]) if parts else (physical_id, physical.get("started_at"))
+            gap = call_change_gap(physical, epoch(last_start))
+            if not gap or not physical_id:
+                return None
+            try:
+                return self.split(physical, last_id, f"call-change:{physical_id}:{gap['started_at']}", "", gap["ended_at"])
+            except (BoundaryConflict, BoundaryUnavailable):
+                return None
 
     def retry_result(self, physical_id: str, expected_id: str, token: str, title: str):
         with self.lock:
