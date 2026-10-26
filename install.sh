@@ -119,7 +119,7 @@ mkdir -p "$SHARE" "$CONFIG" "$BIN" "$AGENTS" "$SHARE/bin"
 replace "$tmp/release/payload/python" "$SHARE/python"
 python="$SHARE/python/bin/python3"
 replace "$tmp/release/payload/web" "$SHARE/web"
-install -m 0644 "$tmp/release/release.json" "$SHARE/release.json"
+replace "$tmp/release/release.json" "$SHARE/release.json"
 install -m 0755 "$tmp/release/payload/bin/meeting-copilot" "$BIN/meeting-copilot"
 install -m 0755 "$tmp/release/payload/config/refresh-repos.py" "$CONFIG/refresh-repos.py"
 # One-time removal of retired usage-reporting state; preserve all other settings.
