@@ -7,8 +7,9 @@ speech models. AI answers are optional and use an AI tool you already have.
 - When the AI service is briefly overloaded, MeetOnTrack no longer says that
   your AI account limit is reached. It now says: "The AI service is busy and
   turned the request away for now. This is not your plan limit. Retry in a
-  minute." ("Сервис ИИ сейчас перегружен и временно отклоняет запросы. Это не
-  лимит вашего тарифа. Повторите через минуту." in Russian). The limit message
+  minute. Audio recording is independent." ("Сервис ИИ сейчас перегружен и
+  временно отклоняет запросы. Это не лимит вашего тарифа. Повторите через
+  минуту. Запись звука работает независимо." in Russian). The limit message
   appears only when the plan limit or credit is really used up.
 - In the meeting report, the time of every phrase and every screenshot is
   your local time, the same as in the report header. Before, they were shown
@@ -53,8 +54,9 @@ Application source: `6d81643a85388e81ae46f597a5c480850d821fd6`.
 Native source: `50e7448c880538ab96b57e093b4f7214a7a51de0`
 ([recorder run 39649348946](https://github.com/AIAgentLbs/meetontrack-recorder/actions/runs/39649348946)).
 ZIP SHA-256: `686897a8e788cf18ea876cc095e8751ad5a2955f457b9a5cf6bb2656d5527e93`.
-The integrated package version is 0.1.17; its independently versioned native
-component retains 0.6.6. The web update checker compares integrated versions.
+The integrated package version is 0.1.17 (`0.1.17-windows-beta.1`); its
+independently versioned native component retains 0.6.6. The web update
+checker compares integrated versions.
 
 ## Limits
 

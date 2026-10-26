@@ -18,7 +18,7 @@ The command currently installs the checked, pinned **v0.1.17** package, not
 unreleased features from `main`. It requires Apple Silicon, macOS 15+, no separate Python or Apple SDK. AI is optional; you choose the tool and model once, for every task. Google Chrome
 is required for PDF reports. Quit Capture before reinstalling.
 
-v0.1.17 includes the freshly compiled Swift app, the matched web payload and a
+v0.1.17 includes the checked Swift app (unchanged from 0.1.16), the matched web payload and a
 source/hash manifest. It is ad-hoc signed, not notarized; automatic installation is deferred; update notifications are included. See [release notes](docs/releases/v0.1.17.md) for scope and gates.
 
 ```sh

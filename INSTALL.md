@@ -15,7 +15,7 @@ curl -fsSL https://meetontrack.com/install.sh | bash
 The command installs the checksum-pinned v0.1.17 archive. Read
 [install.sh](install.sh) before running it if desired. An existing installation
 must finish its call and quit Capture first. The installer checks again before
-replacement and restores the previous version if the update fails.
+replacement and puts the previous version back if replacing the files fails.
 
 1. Choose English or Russian on first launch.
 2. Approve Microphone and Screen & System Audio Recording for MeetOnTrack in
