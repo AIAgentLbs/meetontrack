@@ -2051,8 +2051,10 @@ class MeetingArchive:
         spoken_text = " ".join(str(item.get("text") or "") for item in detail.get("transcript", []))
         for entry in people.values():
             first_name = entry["name"].split()[0]
+            # Case-sensitive: a name is written capitalised; "sure"/"mark(et)"
+            # in ordinary speech does not attest a name (MEETONTRACK-104).
             if (len(first_name) >= 4 and first_name[:1].isupper()
-                    and re.search(rf"(?<!\w){re.escape(first_name)}\w*", spoken_text, re.IGNORECASE)):
+                    and re.search(rf"(?<!\w){re.escape(first_name)}\w*", spoken_text)):
                 entry["seen"].add("имя звучит в разговоре")
 
         ranked = sorted(people.values(), key=lambda item: (-item["speech"], item["name"].casefold()))

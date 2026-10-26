@@ -133,11 +133,15 @@ AI = AIService(CAPTURE_CONFIG_FILE, PROCESS_ENV)  # lazy: no discovery until ask
 AI_READINESS = AIReadiness(AI)
 STT = STTService(CAPTURE_CONFIG_FILE, RECOGNITION_GUARD.binary, RECORDING_LOCATIONS.roots)  # lazy, like AI
 
+# (pattern, written_capitalised). "I am X" / "I'm X" mostly precede ordinary
+# words ("I'm sure", "I'm going"), so there the word only counts as a name
+# when the transcript writes it capitalised, as speech-to-text writes names
+# (MEETONTRACK-104). The unambiguous phrases accept any casing.
 SELF_INTRO_PATTERNS = (
-    re.compile(r"(?iu)\bменя\s+зовут\s+([^\s,.;:!?]{2,40})"),
-    re.compile(r"(?iu)\bmy\s+name\s+is\s+([^\s,.;:!?]{2,40})"),
-    re.compile(r"(?iu)\bi\s+am\s+([^\s,.;:!?]{2,40})"),
-    re.compile(r"(?iu)\bi['’]m\s+([^\s,.;:!?]{2,40})"),
+    (re.compile(r"(?iu)\bменя\s+зовут\s+([^\s,.;:!?]{2,40})"), False),
+    (re.compile(r"(?iu)\bmy\s+name\s+is\s+([^\s,.;:!?]{2,40})"), False),
+    (re.compile(r"(?iu)\bi\s+am\s+([^\s,.;:!?]{2,40})"), True),
+    (re.compile(r"(?iu)\bi['’]m\s+([^\s,.;:!?]{2,40})"), True),
 )
 INVALID_SPOKEN_NAMES = {
     "это", "вот", "просто", "сейчас", "тут", "здесь", "работаю",
@@ -154,12 +158,14 @@ ADDRESS_NAME_PATTERNS = (
 
 def spoken_name(text: str) -> str:
     """Return only an explicitly spoken self-introduction name."""
-    for pattern in SELF_INTRO_PATTERNS:
+    for pattern, written_capitalised in SELF_INTRO_PATTERNS:
         match = pattern.search(text)
         if not match:
             continue
         candidate = match.group(1).strip(" «»\"'()[]{}—–-")
         if not candidate or len(candidate) > 40 or candidate.casefold() in INVALID_SPOKEN_NAMES:
+            continue
+        if written_capitalised and not candidate[:1].isupper():
             continue
         if any(char.isdigit() for char in candidate):
             continue

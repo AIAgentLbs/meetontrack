@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from server import MeetingFrames
+from server import MeetingFrames, spoken_name
 from speaker_edits import SpeakerEdits
 
 
@@ -65,6 +65,16 @@ class VisualSpeakerTests(unittest.TestCase):
             [phrase("00:00", until="00:04"), phrase("00:58", until="01:03"),
              phrase("01:05", text="My name is Carol")])
         self.assertEqual(names, ["Alice", "Bob", "Carol"])
+
+    def test_common_words_after_im_are_not_names(self):
+        # MEETONTRACK-104: "I'm sure" named the whole remote voice "Sure".
+        texts = ["Ah, okay, so", "Yeah.", "I'm sure that's a good one.",
+                 "I am okay with that", "Sure, okay."]
+        names = self.annotate([], [phrase(f"00:0{i}", text=t) for i, t in enumerate(texts)])
+        self.assertEqual(names, [None] * len(texts))
+        self.assertEqual(spoken_name("I'm sure that's a good one."), "")
+        self.assertEqual(spoken_name("I'm Carol, I lead product"), "Carol")
+        self.assertEqual(spoken_name("my name is carol"), "Carol")
 
     def test_diarized_voices_keep_one_name_per_voice(self):
         names = self.annotate(

@@ -112,6 +112,14 @@ class ReportBriefTests(unittest.TestCase):
         self.assertIn("имя звучит в разговоре", emerson["seen"])
         self.assertEqual(main, "Не определен по записи")
 
+    def test_ordinary_word_does_not_attest_a_name(self):
+        people, _main = MeetingArchive._front_participants({
+            "participants": [], "meeting_chat": [],
+            "frames": [{"participant_labels": ["Mark Stone"]}] * 2,
+            "transcript": [{"speaker": "Спикер 1", "text": "I'm sure the market is fine."}],
+        })
+        self.assertNotIn("имя звучит в разговоре", people[0]["seen"])
+
     def test_followup_requires_actual_action(self):
         self.assertEqual(
             MeetingArchive._followup_sentence("Майк уточнил: аутрич по Бразилии будет на португальском."),
