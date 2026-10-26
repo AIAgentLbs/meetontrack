@@ -32,6 +32,7 @@ class AIFailureTests(unittest.TestCase):
         self.assertTrue(ai_failure(busy).startswith("AI_BUSY:"))
         self.assertTrue(ai_failure("You've hit your usage limit. Try again later.").startswith("AI_LIMIT:"))
         self.assertTrue(ai_failure("429 insufficient_quota").startswith("AI_LIMIT:"))
+        self.assertTrue(ai_failure("exceeded retry limit, last status: 401 Unauthorized").startswith("AI_LOGIN:"))
 
     def test_windows_sandbox_refusal_says_why_and_what_to_do(self):
         # MEETONTRACK-86: Codex's own words, as Windows printed them without its elevated sandbox.

@@ -36,7 +36,7 @@ def ai_failure(detail: str) -> str:
         return 'AI_LIMIT: The AI account limit is reached. Check your plan or wait for the limit to reset, then retry. Audio recording is independent.'
     # A bare 429 is the provider throttling or overloaded for a moment, not the plan limit:
     # Codex reports it as "exceeded retry limit, last status: 429" with weekly usage untouched (MEETONTRACK-101).
-    if any(word in text for word in ('429', 'too many requests', 'rate limit', 'overloaded', 'exceeded retry limit')):
+    if any(word in text for word in ('429', 'too many requests', 'rate limit', 'overloaded')):
         return 'AI_BUSY: The AI service is busy and turned the request away for now. This is not your plan limit. Retry in a minute. Audio recording is independent.'
     if any(word in text for word in ('unauthorized', '401', 'login', 'log in', 'authentication', 'sign in', 'token expired')):
         return 'AI_LOGIN: Sign in to the chosen AI provider, then run Check AI again. Audio recording is independent.'
