@@ -293,6 +293,11 @@ hashes, Pages removed, and the Windows installer relocated to
 
 ## MeetOnTrack updates and distribution
 
+- [ ] MEETONTRACK-100: Every Mac `install.sh` run left `Meeting Copilot Capture.backup-*.app`
+  in /Applications (10 extra "Meeting Copilot" in Launchpad on the owner's Mac) plus
+  `{python,web}.backup-*` in the share dir. Source fix 2026-10-26: backups live only in the
+  installer temp dir until commit, and the next install moves old leftovers to the Trash.
+  Close after the next public Mac package ships it.
 - Deferred by owner (2026-10-19): automatic installation is not required for the
   current release. Current acceptance is a working newer-version indicator,
   release notes and a copyable platform-specific update command. No automatic

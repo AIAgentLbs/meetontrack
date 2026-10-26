@@ -32,7 +32,33 @@ require_capture_closed() {
 require_capture_closed
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/meeting-copilot.XXXXXX")"
-trap 'rm -rf "$tmp"' EXIT
+# The previous app/python/web are kept only in "$tmp/rollback" while this script
+# runs (never as a second .app: Launchpad and Spotlight listed every leftover
+# "Meeting Copilot Capture.backup-*.app" as another MeetOnTrack). A failure
+# before the commit point puts them back; success deletes them with "$tmp".
+rollback="$tmp/rollback"
+replaced=()
+committed=false
+finish() {
+  local status=$? index target
+  if [[ $status -ne 0 && "$committed" != true && ${#replaced[@]} -gt 0 ]]; then
+    for ((index=${#replaced[@]}-1; index>=0; index--)); do
+      target="${replaced[$index]}"
+      rm -rf "$target"
+      [[ ! -e "$rollback/$index" ]] || mv "$rollback/$index" "$target"
+    done
+    printf 'MeetOnTrack · the previous version was restored\n' >&2
+  fi
+  rm -rf "$tmp"
+}
+trap finish EXIT
+# replace SOURCE TARGET: swap in a complete copy, keeping TARGET until commit.
+replace() {
+  mkdir -p "$rollback"
+  [[ ! -e "$2" ]] || mv "$2" "$rollback/${#replaced[@]}"
+  replaced+=("$2")
+  cp -R "$1" "$2"
+}
 url="${MEETING_COPILOT_ASSET_URL:-https://github.com/$REPO/releases/download/$VERSION/$ASSET}"
 expected="${MEETING_COPILOT_ASSET_SHA256:-$SHA256}"
 if [[ -n "${MEETING_COPILOT_ASSET_URL:-}" && -z "${MEETING_COPILOT_ASSET_SHA256:-}" ]]; then
@@ -61,7 +87,25 @@ for helper in zoom-window-finder zoom-frame-inspector detect-speech-language; do
   install -m 0755 "$tmp/release/payload/bin/$helper" "$tmp/helpers/$helper"
 done
 require_capture_closed
-backup_stamp="$(date +%Y%m%d-%H%M%S)-$$"
+
+# Installers up to 0.1.16 left a backup of every previous version behind. Move
+# those leftovers to the Trash (reversible), never the installed app itself.
+trash="${MEETING_COPILOT_TRASH_ROOT:-$HOME/.Trash}"
+stamp="$(date +%Y%m%d-%H%M%S)-$$"
+if [[ -n "${MEETING_COPILOT_APP_ROOT:-}" ]]; then
+  app_roots=("$MEETING_COPILOT_APP_ROOT")
+else
+  app_roots=(/Applications "$HOME/Applications")
+fi
+leftovers=("$SHARE"/*.backup-* "$SHARE"/backups/*/*.app)
+for root in "${app_roots[@]}"; do leftovers+=("$root/Meeting Copilot Capture.backup-"*.app); done
+for item in "${leftovers[@]}"; do
+  [[ -e "$item" ]] || continue
+  mkdir -p "$trash"
+  target="$trash/${item##*/}" n=0
+  while [[ -e "$target" ]]; do n=$((n + 1)); target="$trash/$stamp-$n ${item##*/}"; done
+  if mv "$item" "$target"; then say "moved an old copy to the Trash: $item"; else say "could not move $item to the Trash"; fi
+done
 
 app_root="${MEETING_COPILOT_APP_ROOT:-/Applications}"
 if [[ ! -w "$app_root" ]]; then
@@ -69,21 +113,12 @@ if [[ ! -w "$app_root" ]]; then
   mkdir -p "$app_root"
 fi
 app="$app_root/Meeting Copilot Capture.app"
-if [[ -e "$app" ]]; then
-  backup="$app_root/Meeting Copilot Capture.backup-$backup_stamp.app"
-  mv "$app" "$backup"
-  say "previous app preserved at $backup"
-fi
-cp -R "$tmp/release/Meeting Copilot Capture.app" "$app"
+replace "$tmp/release/Meeting Copilot Capture.app" "$app"
 
 mkdir -p "$SHARE" "$CONFIG" "$BIN" "$AGENTS" "$SHARE/bin"
-[[ ! -e "$SHARE/python" ]] || mv "$SHARE/python" "$SHARE/python.backup-$backup_stamp"
-cp -R "$tmp/release/payload/python" "$SHARE/python"
+replace "$tmp/release/payload/python" "$SHARE/python"
 python="$SHARE/python/bin/python3"
-for dir in web; do
-  [[ ! -e "$SHARE/$dir" ]] || mv "$SHARE/$dir" "$SHARE/$dir.backup-$backup_stamp"
-  cp -R "$tmp/release/payload/$dir" "$SHARE/$dir"
-done
+replace "$tmp/release/payload/web" "$SHARE/web"
 install -m 0644 "$tmp/release/release.json" "$SHARE/release.json"
 install -m 0755 "$tmp/release/payload/bin/meeting-copilot" "$BIN/meeting-copilot"
 install -m 0755 "$tmp/release/payload/config/refresh-repos.py" "$CONFIG/refresh-repos.py"
@@ -143,6 +178,8 @@ value = {
 with pathlib.Path(target).open("wb") as handle:
     plistlib.dump(value, handle)
 PY
+# Commit: every file is in place. The previous copies are deleted with "$tmp".
+committed=true
 
 if [[ "${MEETING_COPILOT_SKIP_LAUNCH:-0}" != "1" ]]; then
   # bootout can return before launchd has removed the old job; bootstrapping the

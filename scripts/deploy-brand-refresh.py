@@ -96,16 +96,20 @@ def main():
             assert (web / name).read_bytes() == (ROOT / 'copilot/web' / name).read_bytes()
         state()
     except Exception:
-        # Keep the rejected bundle recoverable, and restore the old installation.
+        # Restore the old installation; the rejected bundle stays at --app.
         subprocess.run(['pkill', '-TERM', '-f', '^' + str(APP) + '/Contents/MacOS/MeetingCopilotCapture$'])
         time.sleep(2)
         if APP.exists():
-            os.rename(APP, backup / 'failed.app')
+            shutil.rmtree(APP)
         os.rename(previous, APP)
+        shutil.rmtree(stage)
         for name in FILES:
             shutil.copy2(backup / name, web / name)
         run('open', str(APP))
         raise
+    # Never leave a second .app behind: Launchpad and Spotlight list every copy.
+    shutil.rmtree(previous)
+    shutil.rmtree(stage)
     print(json.dumps({'app_running': True, 'web_healthy': True, 'config_unchanged': True,
                       'backup': str(backup), 'automatic_installer': False}))
 
