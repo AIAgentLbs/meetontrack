@@ -49,6 +49,7 @@ class InstallerTests(unittest.TestCase):
             "MEETING_COPILOT_CONFIG_ROOT": str(self.root / "config"),
             "MEETING_COPILOT_BIN_ROOT": str(self.root / "bin"),
             "MEETING_COPILOT_AGENTS_ROOT": str(self.root / "agents"),
+            "MEETING_COPILOT_TRASH_ROOT": str(self.root / "Trash"),
             "MEETING_COPILOT_SKIP_LAUNCH": "1",
             "FIXTURE_PACKAGE": str(self.package), "FIXTURE_ROOT": str(self.root),
             "TEST_PYTHON": sys.executable,
@@ -206,17 +207,47 @@ exit 2
         preferences = Path(self.env["MEETING_COPILOT_CONFIG_ROOT"]) / "active-repos.json"
         self.assertEqual(json.loads(preferences.read_text())["repositories"], [])
 
-    def test_reinstall_preserves_data_and_backups(self):
+    def assert_single_app_and_no_backups(self, app, share):
+        self.assertEqual([path.name for path in app.parent.iterdir()], [app.name])
+        self.assertEqual(list(share.glob("*.backup-*")) + list(share.glob("backups/*/*.app")), [])
+
+    def test_reinstall_preserves_data_and_leaves_no_app_copies(self):
         app, share, config = self.seed_existing()
-        result = self.run_install()
-        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        for _ in range(2):
+            result = self.run_install()
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertTrue((app / "Contents/MacOS/MeetingCopilotCapture").is_file())
-        self.assertEqual(len(list(app.parent.glob("Meeting Copilot Capture.backup-*.app/previous"))), 1)
-        self.assertEqual(len(list(share.glob("web.backup-*/previous"))), 1)
+        self.assertFalse((app / "previous").exists())
+        self.assert_single_app_and_no_backups(app, share)
         self.assertEqual((share / "recordings/keep.txt").read_text(), "synthetic-recording")
         self.assertEqual((config / "delivery.json").read_text(), "synthetic-private-settings")
         self.assertEqual((config / "SESSION.md").read_text(), "keep-session")
         self.assertEqual(json.loads((config / "active-repos.json").read_text())["repositories"], ["keep-selection"])
+
+    def test_old_leftovers_move_to_trash(self):
+        app, share, _ = self.seed_existing()
+        stale = [app.parent / "Meeting Copilot Capture.backup-20261001-1.app", share / "web.backup-20261001-1",
+                 share / "python.backup-20261001-1", share / "backups/20261020T1-brand-refresh/previous.app"]
+        for path in stale:
+            path.mkdir(parents=True)
+            (path / "old").write_text("old")
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assert_single_app_and_no_backups(app, share)
+        self.assertEqual(sorted(path.name for path in (self.root / "Trash").iterdir()),
+                         sorted(path.name for path in stale))
+
+    def test_failure_partway_restores_previous_version(self):
+        app, share, _ = self.seed_existing()
+        # The LaunchAgent is written after app, python and web were replaced.
+        (Path(self.env["MEETING_COPILOT_AGENTS_ROOT"]) / "com.aiagentlbs.meeting-copilot.plist").mkdir(parents=True)
+        result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("previous version was restored", result.stderr)
+        self.assertEqual((app / "previous").read_text(), "previous-app")
+        self.assertEqual((share / "web/previous").read_text(), "previous-web")
+        self.assertFalse((share / "python").exists())
+        self.assert_single_app_and_no_backups(app, share)
 
     def test_checksum_failure_never_replaces_app(self):
         app, share, _ = self.seed_existing()
