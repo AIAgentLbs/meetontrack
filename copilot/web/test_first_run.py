@@ -26,6 +26,13 @@ class AIFailureTests(unittest.TestCase):
         self.assertTrue(ai_failure(str(error)).startswith("AI_MISSING:"))
         self.assertTrue(ai_failure("zsh: command not found: codex").startswith("AI_MISSING:"))
 
+    def test_throttling_is_not_reported_as_plan_limit(self):
+        # Codex's own words on 2026-10-26 with 1% of the weekly limit used.
+        busy = '{"type":"turn.failed","error":{"message":"exceeded retry limit, last status: 429 Too Many Requests"}}'
+        self.assertTrue(ai_failure(busy).startswith("AI_BUSY:"))
+        self.assertTrue(ai_failure("You've hit your usage limit. Try again later.").startswith("AI_LIMIT:"))
+        self.assertTrue(ai_failure("429 insufficient_quota").startswith("AI_LIMIT:"))
+
     def test_windows_sandbox_refusal_says_why_and_what_to_do(self):
         # MEETONTRACK-86: Codex's own words, as Windows printed them without its elevated sandbox.
         refusal = ("failed to prepare windows sandbox wrapper: windows unelevated restricted-token sandbox cannot "

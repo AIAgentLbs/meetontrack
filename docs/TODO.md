@@ -298,6 +298,10 @@ hashes, Pages removed, and the Windows installer relocated to
   `{python,web}.backup-*` in the share dir. Source fix 2026-10-26: backups live only in the
   installer temp dir until commit, and the next install moves old leftovers to the Trash.
   Close after the next public Mac package ships it.
+- [ ] MEETONTRACK-101: A provider 429 (Codex "exceeded retry limit, last status: 429") was shown
+  as "The AI account limit is reached" while the weekly limit was about 1% used. Source fix
+  2026-10-26: throttling maps to AI_BUSY ("busy, not your plan limit"), AI_LIMIT only for real
+  usage-limit/quota text (`copilot/web/first_run.py`). Close after the next release ships it.
 - Deferred by owner (2026-10-19): automatic installation is not required for the
   current release. Current acceptance is a working newer-version indicator,
   release notes and a copyable platform-specific update command. No automatic
