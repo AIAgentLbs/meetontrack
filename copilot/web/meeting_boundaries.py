@@ -104,7 +104,7 @@ class MeetingBoundaries:
                 raise BoundaryConflict("Meeting changed; refresh and confirm again")
             last["end"] = boundary_at
             logical_id = str(uuid.uuid4())
-            title = title or "Meeting " + datetime.fromtimestamp(boundary, timezone.utc).strftime("%H:%M")
+            title = title or "Meeting " + datetime.fromtimestamp(boundary, timezone.utc).astimezone().strftime("%H:%M")
             parts.append({"meeting_id": logical_id, "title": title, "start": boundary_at, "end": None})
             result = {"meeting_id": logical_id, "physical_meeting_id": physical_id, "title": title, "started_at": boundary_at}
             data["requests"][token] = {"input": request_key, "result": result}

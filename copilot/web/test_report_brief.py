@@ -1,6 +1,7 @@
 """Executive report opening must be useful and source-grounded."""
 
 import tempfile
+from datetime import datetime
 import unittest
 from pathlib import Path
 
@@ -17,6 +18,16 @@ class ReportBriefTests(unittest.TestCase):
                 {"text": "unknown", "boundary_unassigned": True}], "journal": [], "meeting_chat": []}, [])
         self.assertIn("Реплика пересекает границу встреч", page)
         self.assertIn("Время неизвестно", page)
+    def test_transcript_times_match_the_local_header(self):
+        # MEETONTRACK-102: header said 12:59 (local), utterances 11:59 (UTC).
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = MeetingArchive(root / "recordings", root / "archive", root / "reports", root / "config")
+            page = archive._report_html({"meeting_id": "sample", "title": "Example", "started_at": "2026-01-01T10:00:00Z", "duration_seconds": 300, "transcript": [
+                {"timestamp": "2026-01-01T10:02:00Z", "text": "hello"}], "journal": [], "meeting_chat": []}, [])
+        local = datetime.fromisoformat("2026-01-01T10:02:00+00:00").astimezone().strftime("%H:%M:%S")
+        self.assertIn(f"<time>{local}</time>", page)
+
     def test_people_summary_topics_and_actions_precede_toc(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

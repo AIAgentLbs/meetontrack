@@ -2216,12 +2216,12 @@ class MeetingArchive:
         frames_html = "".join(
             f'<figure><img src="{esc(item["asset"])}" alt="Кадр встречи">'
             f'<figcaption>{esc(item.get("speaker") or item.get("window_title") or "Кадр встречи")} · '
-            f'{esc((_date(item.get("captured_at")) or datetime.now().astimezone()).strftime("%H:%M:%S"))}'
+            f'{esc((_date(item.get("captured_at")) or datetime.now()).astimezone().strftime("%H:%M:%S"))}'
             f'</figcaption></figure>' for item in frames
         )
         transcript_html = "".join(
             f'<article class="utterance"><div><strong>{esc(item.get("speaker") or ("Я" if item.get("source") == "microphone" else "Собеседник"))}</strong>'
-            f'<time>{esc(_date(item.get("timestamp")).strftime("%H:%M:%S") if _date(item.get("timestamp")) else "Время неизвестно")}</time></div>'
+            f'<time>{esc(_date(item.get("timestamp")).astimezone().strftime("%H:%M:%S") if _date(item.get("timestamp")) else "Время неизвестно")}</time></div>'
             f'<p>{esc(item.get("text"))}</p>'
             f'{provenance(item)}'
             f'{"<p class=\"translated\"><strong>EN:</strong> " + esc(item.get("translation_en")) + "</p>" if item.get("translation_en") else ""}'

@@ -302,6 +302,13 @@ hashes, Pages removed, and the Windows installer relocated to
   as "The AI account limit is reached" while the weekly limit was about 1% used. Source fix
   2026-10-26: throttling maps to AI_BUSY ("busy, not your plan limit"), AI_LIMIT only for real
   usage-limit/quota text (`copilot/web/first_run.py`). Close after the next release ships it.
+- [ ] MEETONTRACK-102: Report utterance and frame times were UTC while the header was local
+  (12:59 vs 11:59 on 2026-10-26). Source fix 2026-10-26 in `archive.py` and
+  `meeting_boundaries.py`. Close after the next release ships it.
+- [ ] MEETONTRACK-103: Two consecutive Telemost calls (goodbyes, 86 s audio gap, new person)
+  were recorded as one meeting, one report and one email. Boundary detection to fix.
+- [ ] MEETONTRACK-104: Speaker roster named a participant "Sure" from the English word when AI
+  naming was unavailable. Common words must never become names.
 - Deferred by owner (2026-10-19): automatic installation is not required for the
   current release. Current acceptance is a working newer-version indicator,
   release notes and a copyable platform-specific update command. No automatic
