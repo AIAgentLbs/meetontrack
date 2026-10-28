@@ -230,7 +230,12 @@ def _discovery(adapter, body):
     try:
         return body(binary)
     except (OSError, subprocess.SubprocessError, TimeoutError, RuntimeError, ValueError, KeyError, TypeError) as error:
-        return _unavailable(adapter, f"{adapter.label} {error}".strip())
+        reason = f"{adapter.label} {error}".strip()
+        if ai_failure(reason).startswith("AI_LOGIN:"):
+            # A revoked or expired sign-in (Codex: "token_revoked", 2026-10-28) read as raw 401 text.
+            reason = (f"the provider rejected the saved sign-in ({error}). "
+                      f"{getattr(adapter, 'sign_in', 'Sign in again')}, then press Check AI.")
+        return _unavailable(adapter, reason)
 
 
 def _workdir():
@@ -268,6 +273,7 @@ def _toml(text):
 
 class CodexAdapter:
     name, label, reads_files, web_search = "codex", "Codex", True, True
+    sign_in = "Open Terminal and run: codex login"
 
     def __init__(self, binary=None):
         self.binary = binary or CODEX
@@ -377,6 +383,7 @@ class CodexAdapter:
 
 class ClaudeAdapter:
     name, label, reads_files, web_search = "claude", "Claude Code", True, True
+    sign_in = "Open Terminal, run claude and type /login"
     # --restricted confines file tools to the working directories (cwd and --add-dir).
     ISOLATED = ["--restricted", "--setting-sources", "", "--strict-mcp-config"]
     FAST_OPT_IN = {None, "", "sdk_opt_in_required"}  # opt-in is what --settings fastMode does

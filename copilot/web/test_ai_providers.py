@@ -861,6 +861,18 @@ class RestoredAnalysisErrorTests(unittest.TestCase):
                 "state": "signal", "at": "x", "message": ""}}))
             self.assertEqual(CodexSession(path).analysis["state"], "signal")
 
+class RejectedSignInTests(unittest.TestCase):
+    def test_revoked_sign_in_says_how_to_sign_in_again(self):
+        # 2026-10-28: Codex printed "workspace routing discovery unauthorized (401)" for a revoked token.
+        def body(binary):
+            raise RuntimeError("workspace routing discovery unauthorized (401)")
+        adapter = ai_providers.CodexAdapter(binary=lambda: sys.executable)
+        found = ai_providers._discovery(adapter, body)
+        self.assertEqual(found["state"], "unavailable")
+        self.assertIn("rejected the saved sign-in", found["reason"])
+        self.assertIn("codex login", found["reason"])
+
+
 if __name__ == "__main__":
     unittest.main()
 
