@@ -80,8 +80,8 @@ class AIReadiness:
         self.results = {}  # purpose -> (ticket key, result)
 
     def snapshot(self):
-        purposes = {}
-        for purpose, ticket in self.service.tickets().items():
+        purposes, tickets = {}, self.service.tickets()
+        for purpose, ticket in tickets.items():
             done = self.results.get(purpose)
             if ticket.state != 'ready':
                 purposes[purpose] = {'state': ticket.state, 'message': ticket.reason, 'model': ''}
@@ -90,8 +90,10 @@ class AIReadiness:
             else:
                 purposes[purpose] = {'state': 'unchecked', 'model': '',
                                      'message': 'Not checked with this choice yet. Run Check AI.'}
+        sign_in = self._sign_in(tickets, purposes)
         if self.lock.locked():
-            return {'state': 'checking', 'purposes': purposes, 'message': 'Checking AI access for each task...'}
+            return {'state': 'checking', 'purposes': purposes, 'message': 'Checking AI access for each task...',
+                    'sign_in': sign_in}
         states = {item['state'] for item in purposes.values()}
         # partial: the choice works, and some tasks it cannot do are unavailable on their own
         state = ('ready' if states == {'ready'} else 'partial' if states == {'ready', 'unavailable'}
@@ -101,7 +103,18 @@ class AIReadiness:
         message = ('AI answered successfully for every task. Account limits still apply.' if state == 'ready'
                    else UNCHECKED if state == 'unchecked'
                    else next(item['message'] for item in purposes.values() if item['state'] in bad))
-        return {'state': state, 'purposes': purposes, 'message': message}
+        return {'state': state, 'purposes': purposes, 'message': message, 'sign_in': sign_in}
+
+    def _sign_in(self, tickets, purposes):
+        """{provider, label} of the chosen provider when it needs a sign-in (its discovery says so, or a
+        check was refused as AI_LOGIN), else None. The app then offers its sign-in button."""
+        choice = next(iter(tickets.values())).choice if tickets else None
+        provider = choice.get('provider') if isinstance(choice, dict) else None
+        adapter = self.service.adapters.get(provider)
+        if adapter is None or not hasattr(adapter, 'sign_in_command'):
+            return None
+        refused = any(str(item.get('message', '')).startswith('AI_LOGIN:') for item in purposes.values())
+        return {'provider': provider, 'label': adapter.label} if refused or self.service.needs_sign_in(provider) else None
 
     def check(self):
         if not self.lock.acquire(blocking=False):

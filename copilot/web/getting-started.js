@@ -15,7 +15,7 @@
     "startup-ai-help": ["Choose the AI tool, model, effort and speed once. Every AI task uses this choice. The lists come from the tools installed on this computer and your plan. Check AI then sends a short test for each task, without meeting data, using a small part of your allowance.", "Выберите инструмент ИИ, модель, уровень рассуждений и скорость один раз. Все задачи ИИ используют этот выбор. Списки берутся из установленных на компьютере инструментов и вашего тарифа. Проверка ИИ отправит короткий тест для каждой задачи, без встреч и документов, и использует небольшую часть лимита."],
     "startup-ai-check": ["Check AI", "Проверить ИИ"],
     "ai-refresh": ["Refresh lists", "Обновить списки"],
-    "startup-ai-login": ["Tool missing or unavailable? Install it, sign in there, then press Refresh lists.", "Инструмента нет или он недоступен? Установите его, войдите в него и нажмите «Обновить списки»."],
+    "startup-ai-login": ["Tool missing? Install it, then press Refresh lists. A tool that needs a sign-in shows a sign-in button.", "Инструмента нет? Установите его и нажмите «Обновить списки». Если в инструмент нужно войти, появится кнопка входа."],
     "startup-context-heading": ["3. Add your context", "3. Добавьте свой контекст"],
     "startup-context-help": ["Connect a folder on your computer (Git is optional), or Google Drive. Files stay at the source; search uses current data when you ask. Calendar and Gmail can be enabled separately.", "Подключите папку на компьютере (Git не нужен) или Google Drive. Файлы остаются у источника; поиск читает актуальные данные при запросе. Календарь и почта включаются отдельно."],
     "startup-context": ["Connect context sources", "Подключить источники контекста"],
@@ -106,7 +106,10 @@
     if (draft.provider && !found) void providerOptions(draft.provider).then(redraw);
     let ready = false;
     if (found?.state === "loading" || (draft.provider && !found)) box.append(node("p", word("Reading what this tool offers…", "Читаю, что предлагает инструмент…")));
-    else if (found?.state === "unavailable") box.append(node("p", word("Unavailable: ", "Недоступно: ") + plainError(found.reason)));
+    else if (found?.state === "unavailable") {
+      box.append(node("p", word("Unavailable: ", "Недоступно: ") + plainError(found.reason)));
+      if (found.needs_sign_in) box.append(signInButton(draft.provider, found.label));
+    }
     else if (found) {
       const model = found.models.find(item => item.id === draft.model && !item.problem);
       const name = item => item.problem ? `${item.label} (${item.problem})` : item.image === true ? item.label : `${item.label} (${word("no screenshots", "без снимков экрана")})`;
@@ -148,6 +151,27 @@
     return box;
   }
   function renderAI() {$("ai-card").replaceChildren(aiCard());}
+  /* Sign-in: the app starts the tool's own sign-in (it opens the browser, or a Terminal window for
+     Antigravity), then polls until it ends and reads the tool again. No command to type. */
+  let signInTimer = 0;
+  const signingIn = provider => (blockerState.setup?.sign_in?.running || aiState.sign_in?.running || []).includes(provider);
+  function signInButton(provider, label) {
+    const busy = signingIn(provider), button = node("button", busy ? word("Finish signing in in the window that opened…", "Завершите вход в открывшемся окне…") : word(`Sign in to ${label}`, `Войти в ${label}`));
+    button.type = "button"; button.className = "quiet-button"; button.disabled = busy; button.onclick = () => signIn(provider);
+    return button;
+  }
+  async function signIn(provider) {
+    try {blockerState.setup = {...blockerState.setup, sign_in: (await api("/api/ai/sign-in", {provider})).sign_in};}
+    catch (error) {$("ai-choice-message").textContent = plainError(error);}
+    renderBlockers(); renderAI();
+    clearInterval(signInTimer);
+    signInTimer = setInterval(async () => {
+      await refreshBlockers();
+      if (signingIn(provider) && blockerState.setup) return;
+      clearInterval(signInTimer);
+      delete options[provider]; await providerOptions(provider); await loadAI(true); renderBlockers();  // the server already read the tool again
+    }, 3000);
+  }
   async function loadAI(saved) {try {aiState = await api("/api/ai"); if (aiState.check) current.ai = aiState.check; if (saved) edited = false; renderAI(); render();} catch (error) {$("ai-choice-message").textContent = plainError(error);}}
   $("ai-refresh").onclick = async () => {
     $("ai-refresh").disabled = true;
@@ -207,19 +231,22 @@
     else if (speech?.state === "unavailable") found.push([word("Speech recognition does not work: ", "Распознавание речи не работает: ") + speech.reason + word(". There is no transcript and no AI help.", ". Стенограммы и подсказок ИИ не будет."), word("Fix speech recognition", "Исправить распознавание"), () => openStep("speech-step")]);
     // A choice that transcribes after the call can still be one the live recognizer cannot run.
     else if (live?.status === "unavailable") found.push([word("Live transcript is off: ", "Расшифровка во время звонка выключена: ") + (live.status_reason || "?") + word(". There is no AI help during the call.", ". Подсказок ИИ во время звонка не будет."), word("Fix speech recognition", "Исправить распознавание"), () => openStep("speech-step")]);
-    const ai = setup?.ai || {};
-    if (ai.state === "needs_choice") found.push([word("AI is not chosen. There is no AI help during calls.", "ИИ не выбран. Подсказок ИИ во время звонка не будет."), word("Choose AI", "Выбрать ИИ"), () => openStep("startup-ai-heading")]);
+    const ai = setup?.ai || {}, login = ai.sign_in;
+    if (login) found.push([word(`You are not signed in to ${login.label}. There is no AI help until you sign in.`, `Вы не вошли в ${login.label}. Пока вы не войдете, подсказок ИИ не будет.`) + (setup.sign_in?.failed?.[login.provider] ? word(" The last sign-in did not finish.", " Прошлый вход не завершен.") : ""), signInButton(login.provider, login.label)]);
+    else if (ai.state === "needs_choice") found.push([word("AI is not chosen. There is no AI help during calls.", "ИИ не выбран. Подсказок ИИ во время звонка не будет."), word("Choose AI", "Выбрать ИИ"), () => openStep("startup-ai-heading")]);
     else if (ai.state === "error") found.push([word("AI check failed: ", "Проверка ИИ не прошла: ") + plainError(ai.message || ""), word("Fix AI", "Исправить ИИ"), () => openStep("startup-ai-heading")]);
     else if (aiFailure) found.push([word("AI help failed: ", "Подсказки ИИ не работают: ") + plainError(aiFailure), word("Fix AI", "Исправить ИИ"), () => openStep("startup-ai-heading")]);
     return found;
   }
   function renderBlockers() {
-    const found = blockers(), signature = JSON.stringify(found.map(([text, label]) => [text, label]));
+    const found = blockers(), signature = JSON.stringify(found.map(([text, label]) => [text, typeof label === "string" ? label : label.textContent]));
     if (signature === blockerSignature) return;  // keeps the button under the pointer between polls
     blockerSignature = signature;
     $("blocker-banner").replaceChildren(...found.map(([text, label, fix]) => {
-      const row = document.createElement("div"), strong = document.createElement("strong"), button = document.createElement("button");
-      row.className = "blocker"; strong.textContent = text; button.type = "button"; button.textContent = label; button.onclick = fix;
+      const row = document.createElement("div"), strong = document.createElement("strong");
+      const button = typeof label === "string" ? document.createElement("button") : label;  // or a ready sign-in button
+      row.className = "blocker"; strong.textContent = text;
+      if (button !== label) {button.type = "button"; button.textContent = label; button.onclick = fix;} else button.className = "";
       row.append(strong, button);
       return row;
     }));

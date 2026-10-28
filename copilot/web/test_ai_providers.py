@@ -77,6 +77,25 @@ if sys.argv[1:] == ["models"]:
     print("fam-one-lo\tFam One (Lo)"); print("fam-one-hi\tFam One (Hi)"); print("solo\tSolo Model")
 '''
 
+FAKE_AGY_CALL = r'''
+import json, os, sys
+from pathlib import Path
+args = sys.argv[1:]
+home = Path(os.environ["HOME"]) / ".gemini/antigravity-cli"
+rules = json.loads((home / "settings.json").read_text())
+assert (home / "antigravity-oauth-token").exists(), "sign-in not linked"
+prompt = json.loads(sys.stdin.readline())["message"]["content"]
+(home / "conversations").mkdir(exist_ok=True)
+(home / "conversations" / "c1.db").write_text("meeting data")
+if "write" in prompt:
+    result = {"conversation_id": "c1", "status": "SUCCESS", "response": "", "denied_actions": [{"action": "write_file"}]}
+else:
+    result = {"conversation_id": "c1", "status": "SUCCESS",
+              "response": json.dumps({"args": args, "rules": rules, "cwd": os.getcwd()})}
+print(json.dumps({"event": "step_update"}))
+print(json.dumps({"event": "result", "result": result}))
+'''
+
 FLOOD = r'''
 import json, sys
 sys.stdin.readline()
@@ -299,25 +318,72 @@ class ClaudeTests(unittest.TestCase):
 
 
 class AntigravityTests(unittest.TestCase):
-    def test_models_are_listed_but_every_purpose_is_refused(self):
-        with tempfile.TemporaryDirectory() as tmp:
+    @contextmanager
+    def signed_in(self, signed=True):
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.dict(os.environ, {"MEETING_COPILOT_AI_WORKDIR": str(Path(tmp) / "cache/ai-workdir")}):
+            home = Path(tmp) / "home"
+            if signed:
+                token = home / AntigravityAdapter.TOKEN
+                token.parent.mkdir(parents=True)
+                token.write_text(json.dumps({"token": {}, "id_token_email": "person@example.test"}))
+            yield Path(tmp), {"HOME": str(home), "PATH": os.environ.get("PATH", "")}
+
+    def test_models_are_listed_and_every_purpose_is_available(self):
+        with self.signed_in() as (tmp, env):
             binary = fake_cli(tmp, "agy", FAKE_AGY)
             adapter = AntigravityAdapter(lambda: binary)
-            found = adapter.discover()
+            found = adapter.discover(env)
             self.assertEqual([(m["id"], m["label"], m["efforts"]) for m in found["models"]],
                              [("fam-one", "Fam One", ["lo", "hi"]), ("solo", "Solo Model", [])])
-            self.assertEqual(found["state"], "unavailable")
-            self.assertIn("always-proceed", found["reason"])
-            path = Path(tmp) / "config.json"
+            self.assertEqual((found["state"], found["needs_sign_in"]), ("available", False))
+            path = tmp / "config.json"
             path.write_text(json.dumps({"ai": {"choice": {"provider": "antigravity", "model": "solo", "effort": "",
                                                           "speed": ""}}}))
-            service = AIService(path, {}, adapters=[adapter])
-            for purpose in ai_providers.PURPOSES:
-                status = service.status(purpose)
-                self.assertEqual(status["state"], "unavailable", purpose)
-                self.assertIn("always-proceed", status["reason"])
-        with self.assertRaises(AIChoiceError):
-            adapter.call({"provider": "antigravity", "model": "solo", "effort": "", "speed": ""}, "p")
+            service = AIService(path, env, adapters=[adapter])
+            states = {purpose: service.status(purpose)["state"] for purpose in ai_providers.PURPOSES}
+        self.assertEqual(states.pop("frame_relevance"), "unavailable")  # agy reads no files, so no screenshots
+        for purpose in ai_providers.RECORDER_TASKS:  # the Swift recorder cannot run agy yet
+            self.assertEqual(states.pop(purpose), "unavailable", purpose)
+        self.assertEqual(set(states.values()), {"ready"})
+
+    def test_without_a_saved_sign_in_it_asks_for_one_without_running_agy(self):
+        with self.signed_in(False) as (tmp, env):
+            binary = fake_cli(tmp, "agy", "raise SystemExit('agy must not run')")
+            found = AntigravityAdapter(lambda: binary).discover(env)
+        self.assertEqual((found["state"], found["needs_sign_in"]), ("unavailable", True))
+
+    def test_call_runs_isolated_strict_and_forgets_the_conversation(self):
+        with self.signed_in() as (tmp, env):
+            binary = fake_cli(tmp, "agy", FAKE_AGY_CALL)
+            adapter = AntigravityAdapter(lambda: binary)
+            choice = {"provider": "antigravity", "model": "fam-one", "effort": "hi", "speed": ""}
+            reply = adapter.call(choice, "/plan hello", executable=str(binary), env=env, timeout=20)
+            seen = json.loads(reply.text)
+            self.assertEqual(seen["args"][seen["args"].index("--model") + 1], "fam-one-hi")
+            for flag in ("--sandbox", "--disable-slash-commands"):
+                self.assertIn(flag, seen["args"])
+            self.assertNotIn("/plan hello", seen["args"])  # the prompt goes through stdin
+            self.assertEqual(seen["rules"]["toolPermission"], "strict")
+            self.assertEqual(set(seen["rules"]["permissions"]["deny"]), {"command(*)", "read_url(*)"})
+            self.assertEqual(Path(seen["cwd"]).resolve(), (tmp / "cache/ai-workdir").resolve())
+            self.assertEqual(reply.session, "")
+            self.assertFalse(list((tmp / "cache/antigravity").rglob("c1.*")))  # no meeting data kept
+            web = json.loads(adapter.call(choice, "p", executable=str(binary), env=env, timeout=20, web=True,
+                                          keep_session=True).text)
+            self.assertEqual(web["rules"]["permissions"]["allow"], ["read_url(*)"])
+            self.assertTrue(list((tmp / "cache/antigravity-web").rglob("c1.*")))  # kept for the session
+            with self.assertRaisesRegex(RuntimeError, r"blocked action \(write_file\)"):
+                adapter.call(choice, "write a file", executable=str(binary), env=env, timeout=20)
+            with self.assertRaises(AIChoiceError):
+                adapter.call(choice, "p", executable=str(binary), env=env, timeout=20, roots=[str(tmp)])
+        self.assertFalse((Path(env["HOME"]) / ".gemini/antigravity-cli/settings.json").exists())  # theirs untouched
+
+    def test_signed_out_call_asks_for_sign_in(self):
+        with self.signed_in(False) as (tmp, env):
+            with self.assertRaisesRegex(RuntimeError, "^AI_LOGIN:"):
+                AntigravityAdapter(lambda: "/fake/agy").call({"model": "solo", "effort": ""}, "p",
+                                                              executable="/fake/agy", env=env, timeout=5)
 
 
 class BinaryLookupTests(unittest.TestCase):
@@ -862,15 +928,66 @@ class RestoredAnalysisErrorTests(unittest.TestCase):
             self.assertEqual(CodexSession(path).analysis["state"], "signal")
 
 class RejectedSignInTests(unittest.TestCase):
-    def test_revoked_sign_in_says_how_to_sign_in_again(self):
+    def test_revoked_sign_in_is_flagged_for_the_sign_in_button(self):
         # 2026-10-28: Codex printed "workspace routing discovery unauthorized (401)" for a revoked token.
         def body(binary):
             raise RuntimeError("workspace routing discovery unauthorized (401)")
         adapter = ai_providers.CodexAdapter(binary=lambda: sys.executable)
         found = ai_providers._discovery(adapter, body)
-        self.assertEqual(found["state"], "unavailable")
-        self.assertIn("rejected the saved sign-in", found["reason"])
-        self.assertIn("codex login", found["reason"])
+        self.assertEqual((found["state"], found["needs_sign_in"]), ("unavailable", True))
+        self.assertIn("rejected the saved one", found["reason"])
+        self.assertNotIn("login", found["reason"])  # a button signs in, no command to type
+        def offline(binary):
+            raise RuntimeError("connection refused")
+        self.assertFalse(ai_providers._discovery(adapter, offline)["needs_sign_in"])
+
+    def test_sign_in_commands_use_the_resolved_binary(self):
+        self.assertEqual(CodexAdapter(lambda: "/x/codex").sign_in_command(), ["/x/codex", "login"])
+        self.assertEqual(ClaudeAdapter(lambda: "/x/claude").sign_in_command(), ["/x/claude", "auth", "login"])
+        self.assertIsNone(CodexAdapter(lambda: None).sign_in_command())
+        if sys.platform == "darwin":
+            self.assertEqual(AntigravityAdapter(lambda: "/x/agy").sign_in_command(),
+                             ["/usr/bin/open", "-a", "Terminal", "/x/agy"])
+
+
+class SignInTests(unittest.TestCase):
+    class Process:
+        def __init__(self):
+            self.released, self.code = threading.Event(), 0
+
+        def wait(self):
+            self.released.wait(5)
+            return self.code
+
+    def test_one_detached_sign_in_per_provider_then_discovery_and_done(self):
+        adapter = FakeAdapter()
+        adapter.sign_in_command = lambda: ["/x/fake", "login"]
+        done, process = [], self.Process()
+        with tempfile.TemporaryDirectory() as tmp:
+            service = AIService(Path(tmp) / "config.json", {}, adapters=[adapter])
+            sign_ins = ai_providers.SignIns(service, Path(tmp) / "logs", done.append)
+            with patch.object(ai_providers.subprocess, "Popen", return_value=process) as popen:
+                self.assertTrue(sign_ins.start("fake"))
+                self.assertFalse(sign_ins.start("fake"))  # the first one is still open
+                self.assertEqual(popen.call_count, 1)
+                argv, options = popen.call_args.args[0], popen.call_args.kwargs
+                self.assertEqual(argv, ["/x/fake", "login"])
+                self.assertTrue(options.get("start_new_session") or options.get("creationflags"))
+                self.assertNotIn("shell", options)
+                self.assertEqual(sign_ins.state()["running"], ["fake"])
+                discovered = adapter.discoveries
+                process.released.set()
+                for _ in range(100):
+                    if done:
+                        break
+                    time.sleep(0.05)
+            self.assertEqual(done, ["fake"])
+            self.assertGreater(adapter.discoveries, discovered)  # read again after the sign-in
+            self.assertEqual(sign_ins.state(), {"running": [], "failed": {}})
+            with self.assertRaises(ValueError):
+                sign_ins.start("nobody")
+            with self.assertRaises(ValueError):
+                ai_providers.SignIns(AIService(Path(tmp) / "c.json", {}, adapters=[FakeAdapter()]), tmp).start("fake")
 
 
 if __name__ == "__main__":

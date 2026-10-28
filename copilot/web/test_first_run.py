@@ -132,6 +132,23 @@ class CheckAITests(unittest.TestCase):
             self.assertEqual(result["state"], "partial")
 
 
+    def test_snapshot_names_the_chosen_provider_that_needs_a_sign_in(self):
+        from test_ai_providers import FakeAdapter, M2
+        with tempfile.TemporaryDirectory() as root:
+            adapter = FakeAdapter()
+            adapter.sign_in_command = lambda: ["/x/fake", "login"]
+            service = AIService(Path(root) / "config.json", {}, adapters=[adapter])
+            service.save(M2)
+            readiness = AIReadiness(service)
+            self.assertIsNone(readiness.snapshot()["sign_in"])
+            adapter.call = lambda *args, **options: (_ for _ in ()).throw(RuntimeError(ai_failure("401 Unauthorized")))
+            self.assertEqual(readiness.check()["sign_in"], {"provider": "fake", "label": "Fake"})
+            adapter.discover = lambda env=None: {"provider": "fake", "label": "Fake", "state": "unavailable",
+                                                 "reason": "not signed in", "models": [], "needs_sign_in": True}
+            adapter.version = "v2"  # a new identity: discovery runs again
+            self.assertEqual(AIReadiness(service).snapshot()["sign_in"], {"provider": "fake", "label": "Fake"})
+
+
 class LazyResolutionTests(unittest.TestCase):
     def test_importing_server_runs_no_subprocess(self):
         import sys

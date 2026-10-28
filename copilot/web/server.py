@@ -42,7 +42,7 @@ from recording_health import default_guard
 from meet_participants import meet_active_speaker, meet_participant_labels
 from teams_participants import teams_one_to_one_name, teams_participant_labels
 from first_run import AIReadiness
-from ai_providers import AIChoiceError, AIService
+from ai_providers import AIChoiceError, AIService, SignIns
 from fact_check import FactChecks, extraction_rules, fetch_text, parse_claims, strip_claims, verify as verify_fact, with_speakers
 from stt import STTService
 from local_context import LocalContext
@@ -131,6 +131,15 @@ ENTITY_MENTIONS = (
 PROCESS_ENV = os.environ | ({"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"} if os.name != "nt" else {})
 AI = AIService(CAPTURE_CONFIG_FILE, PROCESS_ENV)  # lazy: no discovery until asked
 AI_READINESS = AIReadiness(AI)
+
+
+def _signed_in(provider):
+    """After a sign-in from the app succeeds: Check AI again when it is the saved choice's provider."""
+    if (AI.settings.choice() or {}).get("provider") == provider:
+        AI_READINESS.check()
+
+
+SIGN_INS = SignIns(AI, HOME / ".cache/meeting-copilot", _signed_in)
 STT = STTService(CAPTURE_CONFIG_FILE, RECOGNITION_GUARD.binary, RECORDING_LOCATIONS.roots)  # lazy, like AI
 
 # (pattern, written_capitalised). "I am X" / "I'm X" mostly precede ordinary
@@ -2626,7 +2635,7 @@ class Handler(BaseHTTPRequestHandler):
                 config = json.loads(CAPTURE_CONFIG_FILE.read_text())
             except (OSError, ValueError):
                 config = {}
-            self._json({"ok": True, "ai": AI_READINESS.snapshot(),
+            self._json({"ok": True, "ai": AI_READINESS.snapshot(), "sign_in": SIGN_INS.state(),
                         "capture_installed": RECOGNITION_GUARD.binary.is_file(),
                         "capture_running": recorder_running(),
                         "live_enabled": bool(config.get("live_transcription", {}).get("enabled", False)),
@@ -2635,7 +2644,7 @@ class Handler(BaseHTTPRequestHandler):
             # The one choice, each task's state with it (a task the choice cannot do is
             # unavailable with its reason) and the last Check AI result per task.
             self._json({"ok": True, "providers": AI.providers(), "choice": AI.status(),
-                        "purposes": AI.status_all(), "check": AI_READINESS.snapshot()})
+                        "purposes": AI.status_all(), "check": AI_READINESS.snapshot(), "sign_in": SIGN_INS.state()})
         elif path == "/api/ai/options":
             query = parse_qs(urlparse(self.path).query)
             self._json({"ok": True, "options": AI.options(query.get("provider", [""])[0],
@@ -2743,6 +2752,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "ai": AI_READINESS.check()})
             elif path == "/api/ai/choice":
                 self._json({"ok": True, "status": AI.save(payload.get("choice"))})
+            elif path == "/api/ai/sign-in":
+                # Starts the provider's own sign-in (browser, or a terminal for Antigravity) and returns.
+                if SIGN_INS.start(str(payload.get("provider") or "")):
+                    self._json({"ok": True, "sign_in": SIGN_INS.state()})
+                else:
+                    self._json({"ok": False, "error": "A sign-in for this AI tool is already open."}, HTTPStatus.CONFLICT)
             elif path == "/api/preferences":
                 self._json({"ok": True, "preferences": save_preferences(CAPTURE_CONFIG_FILE, payload)})
             elif path == "/api/stt/choice":

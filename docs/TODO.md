@@ -79,6 +79,10 @@ hashes, Pages removed, and the Windows installer relocated to
   (`permission_mode: always-proceed`, read-only/no-tools not enforceable). Reopen
   when agy offers a read-only/no-tools mode and stdin input
   (`ai_providers.AntigravityAdapter`, `capture/.../Summary/AIChoice.swift`).
+  2026-10-28: the web app runs agy with HOME set to its own folder holding strict
+  settings (headless denies files and writes, commands denied, web pages only for
+  web calls) and the prompt on stdin (`--input-format stream-json`). The Swift
+  recorder still refuses it, so summaries and speaker names show unavailable.
 - [x] Shared config writers (Python `ai_providers._file_lock`/`AISettings`,
   Swift `ConfigFile.swift`): `flock` on `config.json.lock` across
   read-modify-replace, malformed file blocks saves, 0600 temp + fsync + rename.

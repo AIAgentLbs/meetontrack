@@ -39,6 +39,7 @@ from private_dirs import private_dir
 PURPOSES = ("live_analysis", "live_translation", "frame_relevance", "summary_rewrite", "summary", "speaker_names",
             "fact_check")
 NEEDS_IMAGE = {"frame_relevance"}
+RECORDER_TASKS = {"summary", "speaker_names"}  # run by the Swift recorder (Summary/LLMBackend.swift)
 CHOICE_KEYS = ("provider", "model", "effort", "speed")
 STANDARD = "standard"  # an explicit "no speed tier" when a model offers tiers
 WINDOWS = os.name == "nt"
@@ -107,14 +108,20 @@ CLAUDE = _Binary("MEETING_COPILOT_CLAUDE", "claude")
 AGY = _Binary("MEETING_COPILOT_AGY", "agy")
 
 
-def _unavailable(adapter, reason):
-    return {"provider": adapter.name, "label": adapter.label, "state": "unavailable",
-            "reason": reason, "plan": "", "models": [], "executable": ""}
+def _unavailable(adapter, reason, needs_sign_in=False):
+    """`needs_sign_in`: the tool is installed but has no working sign-in; the app offers its sign-in."""
+    return {"provider": adapter.name, "label": adapter.label, "state": "unavailable", "reason": reason,
+            "plan": "", "models": [], "executable": "", "needs_sign_in": needs_sign_in}
 
 
 def _available(adapter, models, plan="", executable=""):
     return {"provider": adapter.name, "label": adapter.label, "state": "available", "reason": "",
-            "plan": plan or "", "models": models, "executable": str(executable or "")}
+            "plan": plan or "", "models": models, "executable": str(executable or ""), "needs_sign_in": False}
+
+
+def _home(env=None):
+    env = env or os.environ
+    return Path(env.get("USERPROFILE" if WINDOWS else "HOME") or Path.home())
 
 
 def _model(identity, label, efforts=(), speeds=(), speed_reason="", image=None, problem=""):
@@ -233,8 +240,8 @@ def _discovery(adapter, body):
         reason = f"{adapter.label} {error}".strip()
         if ai_failure(reason).startswith("AI_LOGIN:"):
             # A revoked or expired sign-in (Codex: "token_revoked", 2026-10-28) read as raw 401 text.
-            reason = (f"the provider rejected the saved sign-in ({error}). "
-                      f"{getattr(adapter, 'sign_in', 'Sign in again')}, then press Check AI.")
+            return _unavailable(adapter, f"{adapter.label} needs a new sign-in: it rejected the saved one ({error}).",
+                                needs_sign_in=True)
         return _unavailable(adapter, reason)
 
 
@@ -273,10 +280,14 @@ def _toml(text):
 
 class CodexAdapter:
     name, label, reads_files, web_search = "codex", "Codex", True, True
-    sign_in = "Open Terminal and run: codex login"
 
     def __init__(self, binary=None):
         self.binary = binary or CODEX
+
+    def sign_in_command(self):
+        """Opens the browser itself and exits when the sign-in is saved."""
+        binary = self.binary()
+        return [str(binary), "login"] if binary else None
 
     def identity(self, env=None):
         home = Path((env or os.environ).get("CODEX_HOME") or Path.home() / ".codex")
@@ -300,7 +311,7 @@ class CodexAdapter:
                 session.send({"method": "initialized"})
                 account = request("account/read").get("account")
                 if not account:
-                    return _unavailable(self, "Codex is installed but not signed in. Sign in, then refresh.")
+                    return _unavailable(self, "Codex is installed but not signed in.", needs_sign_in=True)
                 listed, cursor = [], None
                 for _ in range(50):
                     page = request("model/list", {"cursor": cursor} if cursor else {})
@@ -383,13 +394,17 @@ class CodexAdapter:
 
 class ClaudeAdapter:
     name, label, reads_files, web_search = "claude", "Claude Code", True, True
-    sign_in = "Open Terminal, run claude and type /login"
     # --restricted confines file tools to the working directories (cwd and --add-dir).
     ISOLATED = ["--restricted", "--setting-sources", "", "--strict-mcp-config"]
     FAST_OPT_IN = {None, "", "sdk_opt_in_required"}  # opt-in is what --settings fastMode does
 
     def __init__(self, binary=None):
         self.binary = binary or CLAUDE
+
+    def sign_in_command(self):
+        """`claude auth login` (claude.ai account) opens the browser and exits when signed in."""
+        binary = self.binary()
+        return [str(binary), "auth", "login"] if binary else None
 
     def identity(self, env=None):
         """Executable plus the signed-in account: switching accounts re-runs discovery and
@@ -416,7 +431,7 @@ class ClaudeAdapter:
             except ValueError:
                 auth = {}
             if not auth.get("loggedIn"):
-                return _unavailable(self, "Claude Code is installed but not signed in. Sign in, then refresh.")
+                return _unavailable(self, "Claude Code is installed but not signed in.", needs_sign_in=True)
             session = _Lines([binary, "-p", "--input-format", "stream-json", "--output-format", "stream-json",
                               "--verbose", *self.ISOLATED, "--tools", "", "--no-session-persistence"],
                              env=env, cwd=_workdir())
@@ -473,20 +488,45 @@ class ClaudeAdapter:
 
 
 class AntigravityAdapter:
-    """Discovery only: agy reports permission_mode always-proceed even with --mode plan --sandbox,
-    so a read-only, no-tools call cannot be enforced. Re-enable when agy can enforce it."""
-    name, label, reads_files, web_search = "antigravity", "Antigravity", False, False
-    BLOCKED = "cannot enforce read-only/no-tools: permission_mode always-proceed"
+    """Calls run with HOME (and USERPROFILE) set to a folder of this app, so agy reads strict settings
+    there and never the person's own ~/.gemini (which may say always-proceed): headless agy denies
+    every tool it would have to ask for (files, writes) and reports it in denied_actions; shell
+    commands are denied outright; reading web pages is allowed only for a call that asks for the web.
+    --mode plan only expands a prompt and enforces nothing. Only the saved sign-in file is linked in:
+    agy 1.4.9 found no sign-in without it. Verified 2026-10-28: a write_file attempt was denied and
+    nothing was written; read_file is denied too, so no repositories and no screenshots."""
+    name, label, reads_files, web_search = "antigravity", "Antigravity", False, True
+    recorder = False  # the Swift recorder (summaries, speaker names) has no Antigravity backend yet
+    sign_in_window = True  # no login subcommand: interactive agy shows its sign-in screen in a terminal
+    TOKEN = Path(".gemini/antigravity-cli/antigravity-oauth-token")
     SUFFIX = re.compile(r"^(.*) \(([^()]+)\)$")
 
     def __init__(self, binary=None):
         self.binary = binary or AGY
+        self.lock = threading.Lock()
+
+    def sign_in_command(self):
+        binary = self.binary()
+        if not binary:
+            return None
+        if WINDOWS:
+            return [str(binary)]  # started in its own console window (SignIns)
+        return ["/usr/bin/open", "-a", "Terminal", str(binary)] if os.uname().sysname == "Darwin" else None
 
     def identity(self, env=None):
-        return _stamp(self.binary())
+        """Executable plus the signed-in account. Not the token file's stamp: agy rewrites it on
+        every refresh, which would invalidate Check AI each hour."""
+        try:
+            email = json.loads((_home(env) / self.TOKEN).read_text(encoding="utf-8")).get("id_token_email") or "?"
+        except (OSError, ValueError, AttributeError):
+            email = ""
+        return _stamp(self.binary()) + "|" + (hashlib.sha256(email.encode()).hexdigest()[:16] if email else "")
 
     def discover(self, env=None):
         def body(binary):
+            if not (_home(env) / self.TOKEN).is_file():
+                # agy without a sign-in starts one and waits; ask the person instead
+                return _unavailable(self, "Antigravity is installed but not signed in.", needs_sign_in=True)
             run = _run([binary, "models"], None, env, DISCOVERY_TIMEOUT)
             if run.returncode:
                 raise RuntimeError((run.stderr or run.stdout).strip()[:300] or "could not list models")
@@ -504,14 +544,63 @@ class AntigravityAdapter:
                     entry["efforts"].append(effort)
             if not grouped:
                 raise RuntimeError("lists no models for this account; sign in, then refresh")
-            found = _available(self, [_model(base, item["label"], item["efforts"], (),
-                                             "Antigravity does not report speed tiers")
-                                      for base, item in grouped.items()], executable=binary)
-            return {**found, "state": "unavailable", "reason": f"Antigravity {self.BLOCKED}"}
+            return _available(self, [_model(base, item["label"], item["efforts"], (),
+                                            "Antigravity does not report speed tiers")
+                                     for base, item in grouped.items()], executable=binary)
         return _discovery(self, body)
 
-    def call(self, choice, prompt, **options):
-        raise AIChoiceError("unavailable", f"Antigravity {self.BLOCKED}")
+    def _home_for(self, web, env):
+        """This app's agy home for one kind of call: strict settings, linked to the person's sign-in."""
+        token = _home(env) / self.TOKEN
+        if not token.is_file():
+            raise RuntimeError(ai_failure("Antigravity login required: no saved sign-in"))
+        home = Path(_workdir()).parent / ("antigravity-web" if web else "antigravity")
+        folder = private_dir(home / self.TOKEN.parent)
+        rules = {"toolPermission": "strict", "allowNonWorkspaceAccess": False,
+                 "permissions": {"allow": ["read_url(*)"] if web else [],
+                                 "deny": ["command(*)"] + ([] if web else ["read_url(*)"])}}
+        with self.lock:
+            handle, temporary = tempfile.mkstemp(dir=folder, prefix=".settings.", suffix=".tmp")
+            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                json.dump(rules, stream)
+            os.replace(temporary, folder / "settings.json")  # agy rewrites it; ours wins on every call
+            link = folder / token.name
+            if not (link.is_symlink() and os.readlink(link) == str(token)):
+                link.unlink(missing_ok=True)
+                try:
+                    os.symlink(token, link)
+                except OSError:  # Windows without the symlink right
+                    os.link(token, link)
+        return home
+
+    def call(self, choice, prompt, *, executable, env, timeout, roots=(), image=None, resume="", keep_session=False,
+             web=False):
+        if roots or image:
+            raise AIChoiceError("unavailable", "Antigravity cannot read the selected repositories or screenshots. "
+                                               "Choose Codex or Claude Code for that, or disconnect the repositories.")
+        home = self._home_for(web, env)
+        run_env = {**(env or os.environ), "HOME": str(home), **({"USERPROFILE": str(home)} if WINDOWS else {})}
+        model = f"{choice['model']}-{choice['effort']}" if choice["effort"] else choice["model"]  # as `agy models` lists it
+        argv = [executable, "--sandbox", "--disable-slash-commands", "--model", model,
+                "--input-format", "stream-json", "--output-format", "stream-json"]
+        argv += ["--conversation", resume] if resume else []
+        message = json.dumps({"event": "user", "message": {"content": prompt}}) + "\n"  # stdin: no argv length limit
+        result = _invoke([*argv, "-p", ""], message, run_env, timeout, _workdir())
+        final = next((event.get("result") for event in reversed(list(_json_lines(result.stdout)))
+                      if event.get("event") == "result" and isinstance(event.get("result"), dict)), {})
+        session = str(final.get("conversation_id") or resume)
+        if session and not (keep_session or resume):  # agy has no ephemeral mode
+            for path in (home / self.TOKEN.parent).glob(f"*/{session}.*"):
+                path.unlink(missing_ok=True)
+        text = str(final.get("response") or "").strip()
+        denied = sorted({str(item.get("action")) for item in final.get("denied_actions") or [] if isinstance(item, dict)})
+        if not text and denied:
+            raise RuntimeError(f"AI_FAILED: Antigravity tried a blocked action ({', '.join(denied)}) instead of "
+                               "answering. MeetOnTrack lets it only answer in text. Retry or choose another model.")
+        if result.returncode or final.get("status") != "SUCCESS" or not text:
+            raise RuntimeError(ai_failure(str(final.get("error") or result.stderr or result.stdout or "").strip()
+                                          or f"exit {result.returncode}"))
+        return Reply(text, choice["model"], session if keep_session or resume else "")
 
 
 class OllamaAdapter:
@@ -836,6 +925,10 @@ class AIService:
                           "started." if partial else NO_CHOICE, stored, "", "")
         found = self.options(choice["provider"])
         state, reason = choice_problem(found, choice, purpose)
+        recorder = getattr(self.adapters[choice["provider"]], "recorder", True) if state == "ready" else True
+        if purpose in RECORDER_TASKS and not recorder:
+            state, reason = "unavailable", (f"The recorder writes meeting summaries and speaker names and cannot use "
+                                            f"{found.get('label')} for them yet.")
         key = json.dumps({"choice": choice, "identity": found.get("identity", "")}, sort_keys=True)
         return Ticket(purpose, state, reason, choice, key, found.get("executable", ""))
 
@@ -884,3 +977,77 @@ class AIService:
         options.setdefault("timeout", 120)
         return self.adapters[ticket.choice["provider"]].call(ticket.choice, prompt, executable=ticket.executable,
                                                               **options)
+
+    def needs_sign_in(self, provider):
+        """True when the last discovery of `provider` found it installed but not signed in. Cache only."""
+        with self.lock:
+            cached = self.cache.get(provider)
+        return bool(cached and cached[2].get("needs_sign_in"))
+
+
+class SignIns:
+    """Sign-in started from the app: one per provider at a time, detached (own session or process
+    group), output to a log file. When it ends well, that provider's discovery is refreshed and
+    `done(provider)` runs. A sign-in finished in a terminal window (`sign_in_window`) is noticed by
+    asking discovery again every POLL seconds for up to WINDOW seconds."""
+    POLL, WINDOW = 5, 600
+
+    def __init__(self, service, log_dir, done=None):
+        self.service, self.log_dir, self.done = service, Path(log_dir), done
+        self.lock, self.running, self.failed = threading.Lock(), set(), {}
+
+    def state(self):
+        with self.lock:
+            return {"running": sorted(self.running), "failed": dict(self.failed)}
+
+    def start(self, provider):
+        """False when a sign-in for this provider is already running."""
+        adapter = self.service.adapters.get(provider)
+        if adapter is None or not hasattr(adapter, "sign_in_command"):
+            raise ValueError(f"No sign-in for this AI provider: {provider}")
+        command = adapter.sign_in_command()
+        if not command:
+            raise ValueError(f"{adapter.label} is not installed here, or cannot be signed in to from this app")
+        with self.lock:
+            if provider in self.running:
+                return False
+            self.running.add(provider)
+            self.failed.pop(provider, None)
+        try:
+            process = self._spawn(adapter, command)
+        except OSError as error:
+            with self.lock:
+                self.running.discard(provider)
+            raise ValueError(f"Could not start the {adapter.label} sign-in: {error}") from None
+        threading.Thread(target=self._wait, args=(adapter, process), daemon=True).start()
+        return True
+
+    def _spawn(self, adapter, command):
+        window = getattr(adapter, "sign_in_window", False)
+        if WINDOWS and window:  # the person signs in inside this console window
+            return subprocess.Popen(command, cwd=_workdir(), env=self.service.env,
+                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
+        detached = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS \
+            else {"start_new_session": True}
+        private_dir(self.log_dir)
+        with open(self.log_dir / f"sign-in-{adapter.name}.log", "wb") as log:  # the CLI's own output, no tokens
+            return subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                    cwd=_workdir(), env=self.service.env, **detached)
+
+    def _wait(self, adapter, process):
+        code, signed_in = process.wait(), False
+        deadline = time.monotonic() + (self.WINDOW if getattr(adapter, "sign_in_window", False) else 0)
+        while code == 0:
+            try:
+                signed_in = not self.service.options(adapter.name, refresh=True).get("needs_sign_in")
+            except Exception:  # noqa: BLE001 - discovery reports its own failures; keep the thread alive
+                signed_in = False
+            if signed_in or time.monotonic() >= deadline:
+                break
+            time.sleep(self.POLL)
+        with self.lock:
+            self.running.discard(adapter.name)
+            if not signed_in:
+                self.failed[adapter.name] = f"exit {code}" if code else "sign-in did not finish"
+        if signed_in and self.done:
+            self.done(adapter.name)

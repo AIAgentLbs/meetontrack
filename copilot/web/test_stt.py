@@ -319,6 +319,29 @@ class BlockerBannerTests(unittest.TestCase):
         self.assertIn("Speech recognition is not set up", result["shown"]["rows"][0])
         self.assertEqual(result["after"], {"hidden": True, "rows": 0})
 
+    def test_a_provider_without_sign_in_gets_a_sign_in_button(self):
+        source = BANNER_PROBE.replace('ai: {state: "ready"}}', 'ai: {state: "error", message: "AI_LOGIN: x", '
+                                      'sign_in: {provider: "codex", label: "Codex"}}, sign_in: {running: []}}')
+        source = source.replace('choice: {state: "needs_choice", reason: ""}}};', 'choice: {state: "ready", reason: ""}}, '
+                                '"/api/ai": {ok: true, providers: [], purposes: {}}, '
+                                '"/api/ai/sign-in": {ok: true, sign_in: {running: ["codex"], failed: {}}}};')
+        source = source.replace('  responses["/api/stt"] = {ok: true, choice: {state: "ready", reason: ""}};\n  listeners.focus();',
+                                '  await banner.children[0].children[1].onclick();')
+        source = source.replace("after: {hidden: banner.hidden, rows: banner.children.length}",
+                                "after: banner.children[0].children[1].textContent, disabled: banner.children[0].children[1].disabled")
+        self.assertIn("onclick()", source)
+        with tempfile.TemporaryDirectory() as folder:
+            probe = Path(folder) / "probe.js"
+            probe.write_text(source, encoding="utf-8")
+            run = subprocess.run(["node", str(probe), str(WEB / "getting-started.js")],
+                                 capture_output=True, text=True, timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        result = json.loads(run.stdout)
+        self.assertEqual(len(result["shown"]["rows"]), 1)
+        self.assertIn("not signed in to Codex", result["shown"]["rows"][0])
+        self.assertIn("window that opened", result["after"])  # while the sign-in runs
+        self.assertTrue(result["disabled"])
+
 
 class VocabularyParityTests(unittest.TestCase):
     def test_constants_match_shared_vocabulary(self):
