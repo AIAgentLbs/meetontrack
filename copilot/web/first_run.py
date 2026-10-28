@@ -38,7 +38,9 @@ def ai_failure(detail: str) -> str:
     # Codex reports it as "exceeded retry limit, last status: 429" with weekly usage untouched (MEETONTRACK-101).
     if any(word in text for word in ('429', 'too many requests', 'rate limit', 'overloaded')):
         return 'AI_BUSY: The AI service is busy and turned the request away for now. This is not your plan limit. Retry in a minute. Audio recording is independent.'
-    if any(word in text for word in ('unauthorized', '401', 'login', 'log in', 'authentication', 'sign in', 'token expired')):
+    # 401 as a status, not inside a port or a number (127.0.0.1:40123, 4015 ms)
+    if any(word in text for word in ('unauthorized', 'login', 'log in', 'authentication', 'sign in', 'token expired')) \
+            or re.search(r'(?<![\d:.])\b401\b(?![\d:.])', text):
         return 'AI_LOGIN: Sign in to the chosen AI provider, then run Check AI again. Audio recording is independent.'
     if 'refusing to run unsandboxed' in text:
         return ('AI_SANDBOX: Codex refused to read files because it cannot limit reading to your selected '
@@ -111,8 +113,8 @@ class AIReadiness:
         choice = next(iter(tickets.values())).choice if tickets else None
         provider = choice.get('provider') if isinstance(choice, dict) else None
         adapter = self.service.adapters.get(provider)
-        if adapter is None or not hasattr(adapter, 'sign_in_command'):
-            return None
+        if adapter is None or not getattr(adapter, 'sign_in_command', lambda: None)():
+            return None  # nothing the app could start here
         refused = any(str(item.get('message', '')).startswith('AI_LOGIN:') for item in purposes.values())
         return {'provider': provider, 'label': adapter.label} if refused or self.service.needs_sign_in(provider) else None
 

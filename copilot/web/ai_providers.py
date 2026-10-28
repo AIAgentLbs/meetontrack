@@ -24,6 +24,7 @@ from pathlib import Path
 import queue
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -109,9 +110,11 @@ AGY = _Binary("MEETING_COPILOT_AGY", "agy")
 
 
 def _unavailable(adapter, reason, needs_sign_in=False):
-    """`needs_sign_in`: the tool is installed but has no working sign-in; the app offers its sign-in."""
+    """`needs_sign_in`: the tool is installed but has no working sign-in, and the app can start its
+    sign-in here (a tool without a sign-in command on this system is never offered one)."""
+    can = needs_sign_in and bool(getattr(adapter, "sign_in_command", lambda: None)())
     return {"provider": adapter.name, "label": adapter.label, "state": "unavailable", "reason": reason,
-            "plan": "", "models": [], "executable": "", "needs_sign_in": needs_sign_in}
+            "plan": "", "models": [], "executable": "", "needs_sign_in": can}
 
 
 def _available(adapter, models, plan="", executable=""):
@@ -487,6 +490,9 @@ class ClaudeAdapter:
         return Reply(text.strip(), model, session)
 
 
+RUN_LOCK = threading.Lock()  # one agy call at a time: one home, one shared sign-in file
+
+
 class AntigravityAdapter:
     """Calls run with HOME (and USERPROFILE) set to a folder of this app, so agy reads strict settings
     there and never the person's own ~/.gemini (which may say always-proceed): headless agy denies
@@ -503,7 +509,6 @@ class AntigravityAdapter:
 
     def __init__(self, binary=None):
         self.binary = binary or AGY
-        self.lock = threading.Lock()
 
     def sign_in_command(self):
         binary = self.binary()
@@ -549,49 +554,77 @@ class AntigravityAdapter:
                                      for base, item in grouped.items()], executable=binary)
         return _discovery(self, body)
 
-    def _home_for(self, web, env):
-        """This app's agy home for one kind of call: strict settings, linked to the person's sign-in."""
+    def _prepare(self, web, env):
+        """This app's agy home, set for one call: strict settings, linked to the person's sign-in.
+        Runs under RUN_LOCK, so nothing else touches it meanwhile."""
         token = _home(env) / self.TOKEN
         if not token.is_file():
             raise RuntimeError(ai_failure("Antigravity login required: no saved sign-in"))
-        home = Path(_workdir()).parent / ("antigravity-web" if web else "antigravity")
+        home = Path(_workdir()).parent / "antigravity"
         folder = private_dir(home / self.TOKEN.parent)
-        rules = {"toolPermission": "strict", "allowNonWorkspaceAccess": False,
-                 "permissions": {"allow": ["read_url(*)"] if web else [],
-                                 "deny": ["command(*)"] + ([] if web else ["read_url(*)"])}}
-        with self.lock:
-            handle, temporary = tempfile.mkstemp(dir=folder, prefix=".settings.", suffix=".tmp")
-            with os.fdopen(handle, "w", encoding="utf-8") as stream:
-                json.dump(rules, stream)
-            os.replace(temporary, folder / "settings.json")  # agy rewrites it; ours wins on every call
-            link = folder / token.name
-            if not (link.is_symlink() and os.readlink(link) == str(token)):
+        # as agy writes it back (empty lists and the default allowNonWorkspaceAccess=false dropped)
+        rules = {"toolPermission": "strict", "permissions": {"deny": ["command(*)"] + ([] if web else ["read_url(*)"]),
+                                                             **({"allow": ["read_url(*)"]} if web else {})}}
+        try:
+            current = json.loads((folder / "settings.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            current = None
+        if current != rules:
+            (folder / "settings.json").write_text(json.dumps(rules), encoding="utf-8")
+        link = folder / token.name
+        try:
+            linked = os.path.samefile(link, token)  # a symlink or (Windows) a hard link to it
+        except OSError:
+            linked = False
+        if not linked:
+            try:
                 link.unlink(missing_ok=True)
-                try:
-                    os.symlink(token, link)
-                except OSError:  # Windows without the symlink right
-                    os.link(token, link)
+            except OSError:
+                return home  # in use: the existing link stays
+            try:
+                os.symlink(token, link)
+            except OSError:  # Windows without the symlink right
+                os.link(token, link)
         return home
+
+    def _wipe(self, home):
+        """Leave only settings.json and the sign-in link: agy keeps conversations, summaries, history
+        and per-conversation brain folders, and has no ephemeral mode."""
+        keep = {home / self.TOKEN.parent / "settings.json", home / self.TOKEN}
+        for path in sorted(home.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+            if path in keep or any(kept.is_relative_to(path) for kept in keep):
+                continue
+            try:
+                path.unlink() if path.is_symlink() or not path.is_dir() else path.rmdir()
+            except OSError:
+                pass  # ponytail: a file agy still holds open stays until the next call wipes it
 
     def call(self, choice, prompt, *, executable, env, timeout, roots=(), image=None, resume="", keep_session=False,
              web=False):
+        """No sessions: every call starts fresh (the caller then sends its full rules each time) and
+        leaves no meeting text behind. Calls run one at a time: they share the home and the sign-in."""
         if roots or image:
             raise AIChoiceError("unavailable", "Antigravity cannot read the selected repositories or screenshots. "
                                                "Choose Codex or Claude Code for that, or disconnect the repositories.")
-        home = self._home_for(web, env)
-        run_env = {**(env or os.environ), "HOME": str(home), **({"USERPROFILE": str(home)} if WINDOWS else {})}
         model = f"{choice['model']}-{choice['effort']}" if choice["effort"] else choice["model"]  # as `agy models` lists it
         argv = [executable, "--sandbox", "--disable-slash-commands", "--model", model,
-                "--input-format", "stream-json", "--output-format", "stream-json"]
-        argv += ["--conversation", resume] if resume else []
+                "--input-format", "stream-json", "--output-format", "stream-json", "-p", ""]
         message = json.dumps({"event": "user", "message": {"content": prompt}}) + "\n"  # stdin: no argv length limit
-        result = _invoke([*argv, "-p", ""], message, run_env, timeout, _workdir())
+        with RUN_LOCK:
+            home = self._prepare(web, env)
+            # none of the person's agy/Gemini overrides (accounts, API keys, endpoints) reach the call
+            run_env = {key: value for key, value in (env or os.environ).items()
+                       if not key.upper().startswith(("ANTIGRAVITY_", "AGY_", "GEMINI_", "GOOGLE_GEMINI_"))}
+            run_env["HOME"] = str(home)
+            if WINDOWS:
+                run_env.update(USERPROFILE=str(home), APPDATA=str(home / "AppData/Roaming"),
+                               LOCALAPPDATA=str(home / "AppData/Local"))
+            try:
+                result = _invoke(argv, message, run_env, timeout, _workdir())
+            finally:
+                self._wipe(home)
         final = next((event.get("result") for event in reversed(list(_json_lines(result.stdout)))
                       if event.get("event") == "result" and isinstance(event.get("result"), dict)), {})
-        session = str(final.get("conversation_id") or resume)
-        if session and not (keep_session or resume):  # agy has no ephemeral mode
-            for path in (home / self.TOKEN.parent).glob(f"*/{session}.*"):
-                path.unlink(missing_ok=True)
         text = str(final.get("response") or "").strip()
         denied = sorted({str(item.get("action")) for item in final.get("denied_actions") or [] if isinstance(item, dict)})
         if not text and denied:
@@ -600,7 +633,7 @@ class AntigravityAdapter:
         if result.returncode or final.get("status") != "SUCCESS" or not text:
             raise RuntimeError(ai_failure(str(final.get("error") or result.stderr or result.stdout or "").strip()
                                           or f"exit {result.returncode}"))
-        return Reply(text, choice["model"], session if keep_session or resume else "")
+        return Reply(text, choice["model"], "")
 
 
 class OllamaAdapter:
@@ -1015,9 +1048,10 @@ class SignIns:
             self.failed.pop(provider, None)
         try:
             process = self._spawn(adapter, command)
-        except OSError as error:
+        except Exception as error:  # noqa: BLE001 - whatever failed, the provider must not stay "running"
             with self.lock:
                 self.running.discard(provider)
+                self.failed[provider] = str(error)
             raise ValueError(f"Could not start the {adapter.label} sign-in: {error}") from None
         threading.Thread(target=self._wait, args=(adapter, process), daemon=True).start()
         return True
@@ -1035,19 +1069,33 @@ class SignIns:
                                     cwd=_workdir(), env=self.service.env, **detached)
 
     def _wait(self, adapter, process):
-        code, signed_in = process.wait(), False
-        deadline = time.monotonic() + (self.WINDOW if getattr(adapter, "sign_in_window", False) else 0)
+        """Everything ends within WINDOW: a browser tab closed without signing in leaves the CLI
+        waiting forever, so it is stopped then (its whole process group) and reported as failed."""
+        deadline, signed_in = time.monotonic() + self.WINDOW, False
+        try:
+            code = process.wait(timeout=self.WINDOW)
+        except subprocess.TimeoutExpired:
+            code = None
+            try:
+                if WINDOWS:
+                    process.kill()  # ponytail: the CLI only, not a browser helper it may have started
+                else:
+                    os.killpg(process.pid, signal.SIGKILL)  # its own session, see _spawn
+            except OSError:
+                pass
+        window = getattr(adapter, "sign_in_window", False)
         while code == 0:
             try:
-                signed_in = not self.service.options(adapter.name, refresh=True).get("needs_sign_in")
+                signed_in = self.service.options(adapter.name, refresh=True).get("state") == "available"
             except Exception:  # noqa: BLE001 - discovery reports its own failures; keep the thread alive
                 signed_in = False
-            if signed_in or time.monotonic() >= deadline:
+            if signed_in or not window or time.monotonic() >= deadline:
                 break
             time.sleep(self.POLL)
         with self.lock:
             self.running.discard(adapter.name)
             if not signed_in:
-                self.failed[adapter.name] = f"exit {code}" if code else "sign-in did not finish"
+                self.failed[adapter.name] = ("timed out" if code is None else f"exit {code}" if code
+                                             else "sign-in did not finish")
         if signed_in and self.done:
             self.done(adapter.name)

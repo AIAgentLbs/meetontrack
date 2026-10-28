@@ -147,6 +147,8 @@ class CheckAITests(unittest.TestCase):
                                                  "reason": "not signed in", "models": [], "needs_sign_in": True}
             adapter.version = "v2"  # a new identity: discovery runs again
             self.assertEqual(AIReadiness(service).snapshot()["sign_in"], {"provider": "fake", "label": "Fake"})
+            adapter.sign_in_command = lambda: None  # e.g. Antigravity on Linux: nothing to start, no button
+            self.assertIsNone(AIReadiness(service).snapshot()["sign_in"])
 
 
 class LazyResolutionTests(unittest.TestCase):

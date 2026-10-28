@@ -66,7 +66,9 @@ class AISettingsAPITests(unittest.TestCase):
         release = threading.Event()
 
         class Process:
-            def wait(self):
+            pid = 4242
+
+            def wait(self, timeout=None):
                 release.wait(5)
                 return 1  # the person closed the sign-in
 

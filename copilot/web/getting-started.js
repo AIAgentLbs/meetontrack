@@ -167,7 +167,7 @@
     clearInterval(signInTimer);
     signInTimer = setInterval(async () => {
       await refreshBlockers();
-      if (signingIn(provider) && blockerState.setup) return;
+      if (signingIn(provider) && blockerState.setup && !blockerState.setup.sign_in?.failed?.[provider]) return;  // ends with done or failed
       clearInterval(signInTimer);
       delete options[provider]; await providerOptions(provider); await loadAI(true); renderBlockers();  // the server already read the tool again
     }, 3000);

@@ -85,13 +85,14 @@ home = Path(os.environ["HOME"]) / ".gemini/antigravity-cli"
 rules = json.loads((home / "settings.json").read_text())
 assert (home / "antigravity-oauth-token").exists(), "sign-in not linked"
 prompt = json.loads(sys.stdin.readline())["message"]["content"]
-(home / "conversations").mkdir(exist_ok=True)
-(home / "conversations" / "c1.db").write_text("meeting data")
+for name in ("conversations/c1.db", "brain/c1/notes.md", "history.jsonl", "conversation_summaries.db-wal"):
+    (home / name).parent.mkdir(parents=True, exist_ok=True)
+    (home / name).write_text("meeting data")
 if "write" in prompt:
     result = {"conversation_id": "c1", "status": "SUCCESS", "response": "", "denied_actions": [{"action": "write_file"}]}
 else:
     result = {"conversation_id": "c1", "status": "SUCCESS",
-              "response": json.dumps({"args": args, "rules": rules, "cwd": os.getcwd()})}
+              "response": json.dumps({"args": args, "rules": rules, "cwd": os.getcwd(), "env": sorted(os.environ)})}
 print(json.dumps({"event": "step_update"}))
 print(json.dumps({"event": "result", "result": result}))
 '''
@@ -353,12 +354,16 @@ class AntigravityTests(unittest.TestCase):
             found = AntigravityAdapter(lambda: binary).discover(env)
         self.assertEqual((found["state"], found["needs_sign_in"]), ("unavailable", True))
 
-    def test_call_runs_isolated_strict_and_forgets_the_conversation(self):
+    def test_call_runs_isolated_strict_and_leaves_no_meeting_text(self):
         with self.signed_in() as (tmp, env):
             binary = fake_cli(tmp, "agy", FAKE_AGY_CALL)
             adapter = AntigravityAdapter(lambda: binary)
+            home = tmp / "cache/antigravity"
+            left = lambda: sorted(str(path.relative_to(home)) for path in home.rglob("*") if not path.is_dir())
+            clean = [".gemini/antigravity-cli/antigravity-oauth-token", ".gemini/antigravity-cli/settings.json"]
             choice = {"provider": "antigravity", "model": "fam-one", "effort": "hi", "speed": ""}
-            reply = adapter.call(choice, "/plan hello", executable=str(binary), env=env, timeout=20)
+            env = {**env, "AGY_ACCOUNT": "other", "ANTIGRAVITY_PROJECT_ID": "p", "GEMINI_API_KEY": "k"}
+            reply = adapter.call(choice, "/plan hello", executable=str(binary), env=env, timeout=20, keep_session=True)
             seen = json.loads(reply.text)
             self.assertEqual(seen["args"][seen["args"].index("--model") + 1], "fam-one-hi")
             for flag in ("--sandbox", "--disable-slash-commands"):
@@ -366,17 +371,26 @@ class AntigravityTests(unittest.TestCase):
             self.assertNotIn("/plan hello", seen["args"])  # the prompt goes through stdin
             self.assertEqual(seen["rules"]["toolPermission"], "strict")
             self.assertEqual(set(seen["rules"]["permissions"]["deny"]), {"command(*)", "read_url(*)"})
+            self.assertNotIn("allow", seen["rules"]["permissions"])
             self.assertEqual(Path(seen["cwd"]).resolve(), (tmp / "cache/ai-workdir").resolve())
-            self.assertEqual(reply.session, "")
-            self.assertFalse(list((tmp / "cache/antigravity").rglob("c1.*")))  # no meeting data kept
-            web = json.loads(adapter.call(choice, "p", executable=str(binary), env=env, timeout=20, web=True,
-                                          keep_session=True).text)
+            self.assertFalse({"AGY_ACCOUNT", "ANTIGRAVITY_PROJECT_ID", "GEMINI_API_KEY"} & set(seen["env"]))
+            self.assertEqual(reply.session, "")  # no sessions: nothing is kept to resume
+            self.assertEqual(left(), clean)  # conversations, brain, history and summaries are gone
+            web = json.loads(adapter.call(choice, "p", executable=str(binary), env=env, timeout=20, web=True).text)
             self.assertEqual(web["rules"]["permissions"]["allow"], ["read_url(*)"])
-            self.assertTrue(list((tmp / "cache/antigravity-web").rglob("c1.*")))  # kept for the session
+            self.assertEqual(left(), clean)
             with self.assertRaisesRegex(RuntimeError, r"blocked action \(write_file\)"):
                 adapter.call(choice, "write a file", executable=str(binary), env=env, timeout=20)
             with self.assertRaises(AIChoiceError):
                 adapter.call(choice, "p", executable=str(binary), env=env, timeout=20, roots=[str(tmp)])
+
+            def crash(argv, prompt, run_env, timeout, cwd):
+                (Path(run_env["HOME"]) / ".gemini/antigravity-cli/conversations").mkdir(parents=True)
+                (Path(run_env["HOME"]) / ".gemini/antigravity-cli/conversations/c2.db").write_text("meeting data")
+                raise RuntimeError("AI_NETWORK: x")
+            with patch.object(ai_providers, "_invoke", crash), self.assertRaises(RuntimeError):
+                adapter.call(choice, "p", executable=str(binary), env=env, timeout=20)
+            self.assertEqual(left(), clean)  # wiped even when the call fails
         self.assertFalse((Path(env["HOME"]) / ".gemini/antigravity-cli/settings.json").exists())  # theirs untouched
 
     def test_signed_out_call_asks_for_sign_in(self):
@@ -940,6 +954,14 @@ class RejectedSignInTests(unittest.TestCase):
         def offline(binary):
             raise RuntimeError("connection refused")
         self.assertFalse(ai_providers._discovery(adapter, offline)["needs_sign_in"])
+        self.assertFalse(ai_providers._unavailable(FakeAdapter(), "signed out", needs_sign_in=True)["needs_sign_in"])
+
+    def test_401_counts_only_as_a_status(self):
+        from first_run import ai_failure
+        self.assertTrue(ai_failure("HTTP 401 Unauthorized").startswith("AI_LOGIN:"))
+        self.assertTrue(ai_failure("discovery failed (401)").startswith("AI_LOGIN:"))
+        for text in ("connect to 127.0.0.1:40123 refused", "port 1401 busy", "took 4015 ms", "build 2.401.3"):
+            self.assertFalse(ai_failure(text).startswith("AI_LOGIN:"), text)
 
     def test_sign_in_commands_use_the_resolved_binary(self):
         self.assertEqual(CodexAdapter(lambda: "/x/codex").sign_in_command(), ["/x/codex", "login"])
@@ -953,11 +975,34 @@ class RejectedSignInTests(unittest.TestCase):
 class SignInTests(unittest.TestCase):
     class Process:
         def __init__(self):
-            self.released, self.code = threading.Event(), 0
+            self.released, self.code, self.pid, self.killed = threading.Event(), 0, 4242, False
 
-        def wait(self):
-            self.released.wait(5)
+        def wait(self, timeout=None):
+            if not self.released.wait(timeout):
+                raise subprocess.TimeoutExpired("fake", timeout)
             return self.code
+
+    def test_an_abandoned_sign_in_times_out_is_stopped_and_can_start_again(self):
+        adapter = FakeAdapter()
+        adapter.sign_in_command = lambda: ["/x/fake", "login"]
+        with tempfile.TemporaryDirectory() as tmp:
+            sign_ins = ai_providers.SignIns(AIService(Path(tmp) / "c.json", {}, adapters=[adapter]), tmp)
+            sign_ins.WINDOW = 0.2
+            with patch.object(ai_providers.subprocess, "Popen", side_effect=lambda *a, **k: self.Process()) as popen, \
+                    patch.object(ai_providers.os, "killpg") as killpg:
+                self.assertTrue(sign_ins.start("fake"))
+                for _ in range(100):
+                    if not sign_ins.state()["running"]:
+                        break
+                    time.sleep(0.05)
+                self.assertEqual(sign_ins.state(), {"running": [], "failed": {"fake": "timed out"}})
+                if not ai_providers.WINDOWS:
+                    killpg.assert_called_once_with(4242, ai_providers.signal.SIGKILL)
+                self.assertTrue(sign_ins.start("fake"))  # a new request starts fresh
+                self.assertEqual((popen.call_count, sign_ins.state()["failed"]), (2, {}))
+            with patch.object(ai_providers.subprocess, "Popen", side_effect=TypeError("bad argument")):
+                with self.assertRaises(ValueError):
+                    ai_providers.SignIns(AIService(Path(tmp) / "d.json", {}, adapters=[adapter]), tmp).start("fake")
 
     def test_one_detached_sign_in_per_provider_then_discovery_and_done(self):
         adapter = FakeAdapter()
