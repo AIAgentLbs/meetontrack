@@ -319,6 +319,14 @@ hashes, Pages removed, and the Windows installer relocated to
   "I am X"/"I'm X" counts as a self-introduction only when X is written capitalised
   (`spoken_name` in `server.py`), and the roster's "имя звучит в разговоре" hint matches
   the name case-sensitively (`archive.py`). Close after the next release ships it.
+- [ ] MEETONTRACK-105: Codex lost its sign-in (`token_revoked`, 2026-10-28) and the banner
+  showed raw "workspace routing discovery unauthorized (401)". Source fix: "Sign in to
+  <tool>" buttons for Codex, Claude Code and Antigravity (`POST /api/ai/sign-in`) and
+  Antigravity enabled with an isolated strict agy home (commits c54397b, 337ebd9).
+  Close after the next release ships it.
+- [ ] MEETONTRACK-106: The Mac recorder still refuses Antigravity
+  (`capture/.../Summary/AIChoice.swift`), so summaries and speaker names are unavailable
+  with that choice. Add a Swift backend with the same isolation; check the Windows recorder.
 - Deferred by owner (2026-10-19): automatic installation is not required for the
   current release. Current acceptance is a working newer-version indicator,
   release notes and a copyable platform-specific update command. No automatic
