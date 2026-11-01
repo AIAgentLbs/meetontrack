@@ -650,7 +650,10 @@ Object.assign(translations.en, {
   "library.open_audio": "Open recording", "library.open_folder": "Open meeting folder",
   "library.rewrite_help": "Processes the selected meeting in a separate session of the AI chosen for summary rewrites in Getting started. Updates the summary here, not the live assistant, PDFs or delivered reports.",
   "library.rewriting": "Updating this meeting's summary…", "library.rewrite_failed": "Could not update the summary. Check AI access in Getting started and try again. The previous result is unchanged.",
-  "library.browsing": "You are viewing a past meeting. Current recording and assistant context are unchanged."
+  "library.browsing": "You are viewing a past meeting. Current recording and assistant context are unchanged.",
+  "library.rebuild": "Rebuild analysis", "library.rebuild_missing": "The analysis of this meeting is missing or failed. Build it from the stored transcript.",
+  "library.rebuilding": "Building the analysis… {done} of {total}", "library.rebuild_done": "Analysis rebuilt from the transcript.",
+  "library.rebuild_failed": "Could not build the analysis. Check AI access in Getting started; it is retried automatically."
 });
 Object.assign(translations.ru, {
   "nav.meetings": "Встречи", "archive.title": "Встречи",
@@ -670,7 +673,10 @@ Object.assign(translations.ru, {
   "library.open_audio": "Открыть запись", "library.open_folder": "Открыть папку встречи",
   "library.rewrite_help": "Обрабатывает выбранную встречу в отдельной сессии ИИ, выбранного для переписывания итога в разделе «Начать работу». Меняет итог здесь, не затрагивает живого помощника, PDF и отправленные отчеты.",
   "library.rewriting": "Обновляю итог этой встречи…", "library.rewrite_failed": "Не удалось обновить итог. Проверьте доступ к ИИ в разделе «Начать работу» и повторите. Предыдущий результат сохранен.",
-  "library.browsing": "Вы просматриваете прошлую встречу. Текущая запись и контекст помощника не изменились."
+  "library.browsing": "Вы просматриваете прошлую встречу. Текущая запись и контекст помощника не изменились.",
+  "library.rebuild": "Построить разбор", "library.rebuild_missing": "Разбора этой встречи нет или он не удался. Постройте его по сохраненной стенограмме.",
+  "library.rebuilding": "Строю разбор… {done} из {total}", "library.rebuild_done": "Разбор построен по стенограмме.",
+  "library.rebuild_failed": "Не удалось построить разбор. Проверьте доступ к ИИ в разделе «Начать работу»; повтор будет автоматически."
 });
 let archiveMeetings = [];
 let selectedArchiveMeeting = "";
@@ -2497,6 +2503,42 @@ function renderArchiveDetail(meeting) {
     again.addEventListener("click", () => void generateArchiveReport(meeting.meeting_id, again));
     failure.append(again);
     overview.append(failure);
+  }
+  const rebuild = meeting.analysis_rebuild || {};
+  if (meeting.transcript?.length && !["recording", "loading", "overloaded"].includes(meeting.status) && rebuild.state !== "done") {
+    // Rebuild analysis: the live analysis prompt over the stored transcript; never sends a report.
+    const block = document.createElement("div"); block.className = "archive-rebuild";
+    if (rebuild.suggested) block.append(textNode("p", "archive-quality-note", t("library.rebuild_missing")));
+    const start = textNode("button", rebuild.suggested ? "primary-button" : "quiet-button", t("library.rebuild")); start.type = "button";
+    const status = textNode("p", "", ""); status.setAttribute("role", "status");
+    const show = state => {
+      start.disabled = state.state === "running";
+      status.textContent = state.state === "running" ? t("library.rebuilding", {done: state.done || 0, total: state.total || "…"})
+        : state.state === "error" ? t("library.rebuild_failed") : "";
+    };
+    const watch = async () => {
+      while (stillRebuild()) {
+        try {
+          const data = await getJSON(`/api/archive/analyze?meeting_id=${encodeURIComponent(meeting.meeting_id)}`);
+          if (!stillRebuild()) return;
+          show(data.analysis_rebuild);
+          if (data.analysis_rebuild.state === "done") { status.textContent = t("library.rebuild_done"); await loadArchiveMeeting(meeting.meeting_id); return; }
+          if (data.analysis_rebuild.state !== "running") return;
+        } catch (error) { if (stillRebuild()) { start.disabled = false; status.textContent = plainError(error); } return; }
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    };
+    const rebuildVersion = archiveDetailRequest;
+    const stillRebuild = () => rebuildVersion === archiveDetailRequest && !elements.archiveDialog.hidden && selectedArchiveMeeting === meeting.meeting_id;
+    start.addEventListener("click", async () => {
+      start.disabled = true;
+      try { show((await post("/api/archive/analyze", {meeting_id: meeting.meeting_id})).analysis_rebuild); void watch(); }
+      catch (error) { start.disabled = false; status.textContent = plainError(error); }
+    });
+    show(rebuild);
+    if (rebuild.state === "running") void watch();
+    block.append(start, status);
+    overview.append(block);
   }
   if (meeting.overview?.insufficient) overview.append(textNode("p", "archive-quality-note", t("library.short")));
   const points = meeting.overview?.points || [];
