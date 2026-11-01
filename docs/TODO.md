@@ -324,6 +324,8 @@ hashes, Pages removed, and the Windows installer relocated to
   <tool>" buttons for Codex, Claude Code and Antigravity (`POST /api/ai/sign-in`) and
   Antigravity enabled with an isolated strict agy home (commits c54397b, 337ebd9).
   Close after the next release ships it.
+- [ ] MEETONTRACK-107: analysis lost when the AI fails mid-meeting; rebuild endpoint + auto-retry
+  (commit c499d54). Close after release.
 - [ ] MEETONTRACK-106: The Mac recorder still refuses Antigravity
   (`capture/.../Summary/AIChoice.swift`), so summaries and speaker names are unavailable
   with that choice. Add a Swift backend with the same isolation; check the Windows recorder.
