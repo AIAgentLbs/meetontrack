@@ -393,6 +393,28 @@ class AntigravityTests(unittest.TestCase):
             self.assertEqual(left(), clean)  # wiped even when the call fails
         self.assertFalse((Path(env["HOME"]) / ".gemini/antigravity-cli/settings.json").exists())  # theirs untouched
 
+    def test_a_link_to_the_previous_account_is_replaced_or_the_call_refused(self):
+        with self.signed_in() as (tmp, env):
+            adapter = AntigravityAdapter(lambda: "/fake/agy")
+            choice = {"provider": "antigravity", "model": "solo", "effort": "", "speed": ""}
+            old = tmp / "account-a-token"
+            old.write_text("{}")
+            link = tmp / "cache/antigravity" / AntigravityAdapter.TOKEN
+            link.parent.mkdir(parents=True)
+            link.symlink_to(old)
+            token = Path(env["HOME"]) / AntigravityAdapter.TOKEN
+            runs = []
+            invoke = lambda argv, prompt, run_env, timeout, cwd: runs.append(1) or Result(1, "", "stop")
+            with patch.object(ai_providers, "_invoke", invoke), \
+                    patch.object(Path, "unlink", side_effect=PermissionError("in use")):
+                with self.assertRaisesRegex(RuntimeError, "^AI_FAILED: Antigravity could not use the current sign-in"):
+                    adapter.call(choice, "p", executable="/fake/agy", env=env, timeout=5)
+            self.assertEqual(runs, [], "never run under the previous account")
+            with patch.object(ai_providers, "_invoke", invoke), self.assertRaises(RuntimeError):
+                adapter.call(choice, "p", executable="/fake/agy", env=env, timeout=5)
+            self.assertEqual(runs, [1])
+            self.assertTrue(os.path.samefile(link, token))
+
     def test_signed_out_call_asks_for_sign_in(self):
         with self.signed_in(False) as (tmp, env):
             with self.assertRaisesRegex(RuntimeError, "^AI_LOGIN:"):

@@ -572,20 +572,27 @@ class AntigravityAdapter:
         if current != rules:
             (folder / "settings.json").write_text(json.dumps(rules), encoding="utf-8")
         link = folder / token.name
-        try:
-            linked = os.path.samefile(link, token)  # a symlink or (Windows) a hard link to it
-        except OSError:
-            linked = False
-        if not linked:
+        if not self._linked(link, token):
+            # an old link may still point at another account: never run on it
             try:
                 link.unlink(missing_ok=True)
-            except OSError:
-                return home  # in use: the existing link stays
-            try:
-                os.symlink(token, link)
-            except OSError:  # Windows without the symlink right
-                os.link(token, link)
+                try:
+                    os.symlink(token, link)
+                except OSError:  # Windows without the symlink right
+                    os.link(token, link)
+            except OSError as error:
+                raise RuntimeError(f"AI_FAILED: Antigravity could not use the current sign-in ({error}). "
+                                   "Close any open Antigravity window and retry.") from None
+            if not self._linked(link, token):
+                raise RuntimeError("AI_FAILED: Antigravity could not use the current sign-in. Retry.")
         return home
+
+    @staticmethod
+    def _linked(link, token):
+        try:
+            return os.path.samefile(link, token)  # a symlink or (Windows) a hard link to it
+        except OSError:
+            return False
 
     def _wipe(self, home):
         """Leave only settings.json and the sign-in link: agy keeps conversations, summaries, history
