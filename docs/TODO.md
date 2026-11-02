@@ -326,6 +326,11 @@ hashes, Pages removed, and the Windows installer relocated to
   Close after the next release ships it.
 - [ ] MEETONTRACK-107: analysis lost when the AI fails mid-meeting; rebuild endpoint + auto-retry
   (commit c499d54; review fixes d44c72e, 842c84d, aa861a7). Close after release.
+  Open P2s from the 2026-11-02 re-review: a rebuild started with the button does not pause
+  when a recording starts (`analysis_rebuild.py` `start()` passes no busy predicate), and
+  `done` records saved before aa861a7 carry no transcript signature, so a later transcript
+  change does not reoffer the rebuild. Pass the recording predicate through `start()`;
+  treat a missing signature as stale once a current one is available.
 - [ ] MEETONTRACK-106: The Mac recorder still refuses Antigravity
   (`capture/.../Summary/AIChoice.swift`), so summaries and speaker names are unavailable
   with that choice. Add a Swift backend with the same isolation; check the Windows recorder.
