@@ -617,7 +617,10 @@ class AntigravityAdapter:
         argv = [executable, "--sandbox", "--disable-slash-commands", "--model", model,
                 "--input-format", "stream-json", "--output-format", "stream-json", "-p", ""]
         message = json.dumps({"event": "user", "message": {"content": prompt}}) + "\n"  # stdin: no argv length limit
-        with RUN_LOCK:
+        deadline = time.monotonic() + timeout  # waiting for another call counts against this one's time
+        if not RUN_LOCK.acquire(timeout=max(0, timeout)):
+            raise RuntimeError(ai_failure("timed out waiting for another Antigravity call"))
+        try:
             home = self._prepare(web, env)
             # none of the person's agy/Gemini overrides (accounts, API keys, endpoints) reach the call
             run_env = {key: value for key, value in (env or os.environ).items()
@@ -627,9 +630,14 @@ class AntigravityAdapter:
                 run_env.update(USERPROFILE=str(home), APPDATA=str(home / "AppData/Roaming"),
                                LOCALAPPDATA=str(home / "AppData/Local"))
             try:
-                result = _invoke(argv, message, run_env, timeout, _workdir())
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise RuntimeError(ai_failure("timed out waiting for another Antigravity call"))
+                result = _invoke(argv, message, run_env, left, _workdir())
             finally:
                 self._wipe(home)
+        finally:
+            RUN_LOCK.release()
         final = next((event.get("result") for event in reversed(list(_json_lines(result.stdout)))
                       if event.get("event") == "result" and isinstance(event.get("result"), dict)), {})
         text = str(final.get("response") or "").strip()

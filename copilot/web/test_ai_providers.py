@@ -415,6 +415,24 @@ class AntigravityTests(unittest.TestCase):
             self.assertEqual(runs, [1])
             self.assertTrue(os.path.samefile(link, token))
 
+    def test_waiting_for_another_call_uses_up_the_same_time_budget(self):
+        with self.signed_in() as (tmp, env):
+            adapter = AntigravityAdapter(lambda: "/fake/agy")
+            choice = {"provider": "antigravity", "model": "solo", "effort": "", "speed": ""}
+            budgets = []
+            invoke = lambda argv, prompt, run_env, timeout, cwd: budgets.append(timeout) or Result(1, "", "stop")
+            with patch.object(ai_providers, "_invoke", invoke):
+                with ai_providers.RUN_LOCK:
+                    started = time.monotonic()
+                    with self.assertRaisesRegex(RuntimeError, "^AI_NETWORK:"):
+                        adapter.call(choice, "p", executable="/fake/agy", env=env, timeout=0.2)
+                    self.assertLess(time.monotonic() - started, 2)
+                self.assertEqual(budgets, [])
+                with self.assertRaises(RuntimeError):
+                    adapter.call(choice, "p", executable="/fake/agy", env=env, timeout=5)
+            self.assertTrue(0 < budgets[0] <= 5)
+            self.assertFalse(ai_providers.RUN_LOCK.locked())
+
     def test_signed_out_call_asks_for_sign_in(self):
         with self.signed_in(False) as (tmp, env):
             with self.assertRaisesRegex(RuntimeError, "^AI_LOGIN:"):
