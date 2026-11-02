@@ -235,6 +235,20 @@ class RebuildTests(unittest.TestCase):
         self.assertEqual(self.copilot.analysis["state"], "idle")
         self.assertEqual(self.reports, [])
 
+    def test_a_rebuild_of_an_earlier_transcript_is_pending_again(self):
+        self.assertTrue(self.rebuilds.run("m-archived"))
+        self.assertEqual(server.rebuild_state("m-archived")["state"], "done")
+        added = {"id": "late", "timestamp": "2026-10-28T15:00:00+03:00", "speaker": "Иван", "text": "Финальная реплика"}
+        server.ARCHIVE.detail = lambda meeting_id: dict(DETAIL, transcript=SEGMENTS + [added],
+                                                       journal=self.journal.snapshot(meeting_id))
+        state = server.rebuild_state("m-archived")
+        self.assertEqual((state["state"], state["suggested"]), ("needed", True))
+        sent = len(self.adapter.calls)
+        self.assertTrue(self.rebuilds.run("m-archived"))
+        self.assertEqual(len(self.adapter.calls), sent + 1, "only the changed last window is sent")
+        self.assertIn("Финальная реплика", self.adapter.calls[-1][1])
+        self.assertEqual(server.rebuild_state("m-archived")["state"], "done")
+
     def test_a_failing_ai_keeps_the_mark_and_the_next_run_resumes(self):
         self.rebuilds.failed("m-archived")
         real = ScriptedAdapter.call

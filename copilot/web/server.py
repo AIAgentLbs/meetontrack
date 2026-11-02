@@ -24,7 +24,7 @@ from pathlib import Path
 from urllib.parse import urldefrag, urlparse, urlsplit, urlunsplit, parse_qs
 
 from archive import MeetingArchive
-from analysis_rebuild import WINDOW as ANALYSIS_WINDOW, AnalysisRebuilds, chunk_key, transcript_chunks
+from analysis_rebuild import WINDOW as ANALYSIS_WINDOW, AnalysisRebuilds, chunk_key, transcript_chunks, transcript_signature
 from canonical_transcript import canonical_segments
 from meeting_boundaries import MeetingBoundaries, BoundaryConflict, BoundaryUnavailable
 from calendar_meetings import CalendarMeetings
@@ -2501,12 +2501,12 @@ def apply_analysis(snap: dict, answer: str, chat: list[dict]) -> str:
 ARCHIVE_BUSY = {"recording", "loading", "overloaded"}
 
 
-def rebuild_analysis(meeting_id: str, skip=frozenset(), progress=lambda key, done, total: None) -> int:
+def rebuild_analysis(meeting_id: str, skip=frozenset(), progress=lambda key, done, total: None) -> str:
     """Rebuild Call overview analysis of a finished meeting from its stored transcript, with the
     live analysis question and parsing, over consecutive windows the size of the live one, so a
     long meeting is covered end to end. It runs in an AI session of its own: the live meeting's
     COPILOT thread and state are untouched. Windows whose key is in `skip` were analysed before
-    and are not sent again. It never creates or delivers a report. Returns the number of windows.
+    and are not sent again. It never creates or delivers a report. Returns the transcript_signature read.
     A one-off script uses REBUILDS.run(meeting_id), which also records progress for re-runs."""
     detail = ARCHIVE.detail(meeting_id) if meeting_id else None
     if detail is None:
@@ -2526,7 +2526,7 @@ def rebuild_analysis(meeting_id: str, skip=frozenset(), progress=lambda key, don
             answer = session.ask(question, context, snap["meeting"], meeting_id, scope, kind="insight", show_user=False)
             apply_analysis(snap, answer, chat)
         progress(key, number, len(windows))
-    return len(windows)
+    return transcript_signature(segments)
 
 
 REBUILDS = AnalysisRebuilds(HOME / ".config/meeting-copilot/analysis-rebuilds.json", rebuild_analysis)
@@ -2534,8 +2534,8 @@ REBUILDS = AnalysisRebuilds(HOME / ".config/meeting-copilot/analysis-rebuilds.js
 
 def rebuild_state(meeting_id: str, detail: dict | None = None) -> dict:
     """Rebuild progress, and whether the archive should offer it (missing or failed analysis)."""
-    state = REBUILDS.snapshot(meeting_id)
     detail = detail if detail is not None else ARCHIVE.detail(meeting_id) or {}
+    state = REBUILDS.snapshot(meeting_id, transcript_signature(detail.get("transcript", [])))
     analysed = any(item.get("source") in {"copilot", "transcript"} for item in detail.get("journal", []))
     state["suggested"] = state["state"] in {"needed", "error"} or (
         state["state"] == "idle" and bool(detail.get("transcript")) and not analysed and not detail.get("fact_checks"))

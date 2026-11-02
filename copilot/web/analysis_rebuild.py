@@ -51,10 +51,15 @@ def chunk_key(segments: list[dict]) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
+def transcript_signature(segments: list[dict]) -> str:
+    """The final transcript a rebuild read: a rebuild done for another one is pending again."""
+    return chunk_key([item for item in segments if not item.get("provisional")])
+
+
 class AnalysisRebuilds:
     """Per meeting {"state": needed|running|done|error, "chunks": [analysed keys], "done", "total",
-    "message", "at", "from"}. `rebuild(meeting_id, skip, progress)` does the work; it raises
-    LookupError when the meeting no longer exists."""
+    "message", "at", "from", "source"}. `rebuild(meeting_id, skip, progress)` does the work and
+    returns the transcript_signature it read; it raises LookupError when the meeting no longer exists."""
     RETRY, MAX_RETRY = 300, 7200
 
     def __init__(self, path, rebuild=None):
@@ -88,10 +93,14 @@ class AnalysisRebuilds:
                     self.meetings[meeting_id] = before
                 raise
 
-    def snapshot(self, meeting_id: str) -> dict:
+    def snapshot(self, meeting_id: str, source: str = "") -> dict:
+        """`source`: the meeting's transcript_signature now; a rebuild of an earlier transcript
+        (final import, retranscription) shows as needed. Its analysed chunks are not sent again."""
         with self.lock:
             item = dict(self.meetings.get(meeting_id) or {"state": "idle"})
         item.pop("chunks", None)
+        if source and item["state"] == "done" and item.get("source") and item["source"] != source:
+            item["state"] = "needed"
         return item
 
     def pending(self) -> list[str]:
@@ -137,8 +146,8 @@ class AnalysisRebuilds:
         try:
             with self.lock:
                 skip = set(self.meetings.get(meeting_id, {}).get("chunks", []))
-            self.rebuild(meeting_id, skip, progress)
-            self._update(meeting_id, state="done", message="")
+            source = self.rebuild(meeting_id, skip, progress)
+            self._update(meeting_id, state="done", message="", source=source if isinstance(source, str) else "")
             return True
         except Paused:  # analysed chunks are kept; the rest follows when nothing is recording
             self._update(meeting_id, state="needed", message="")
