@@ -325,10 +325,14 @@ hashes, Pages removed, and the Windows installer relocated to
   Antigravity enabled with an isolated strict agy home (commits c54397b, 337ebd9).
   Close after the next release ships it.
 - [ ] MEETONTRACK-107: analysis lost when the AI fails mid-meeting; rebuild endpoint + auto-retry
-  (commit c499d54). Close after release.
+  (commit c499d54; review fixes d44c72e, 842c84d, aa861a7). Close after release.
 - [ ] MEETONTRACK-106: The Mac recorder still refuses Antigravity
   (`capture/.../Summary/AIChoice.swift`), so summaries and speaker names are unavailable
   with that choice. Add a Swift backend with the same isolation; check the Windows recorder.
+- [ ] MEETONTRACK-108: On macOS the Antigravity sign-in runs as `open -a Terminal agy`;
+  `SignIns` tracks `open`, so an abandoned sign-in leaves agy waiting in Terminal
+  (`AntigravityAdapter.sign_in_command`, `ai_providers.py`). Launch agy through a wrapper that
+  records its own PID and stop only that PID after the window; never touch other Terminal sessions.
 - Deferred by owner (2026-10-19): automatic installation is not required for the
   current release. Current acceptance is a working newer-version indicator,
   release notes and a copyable platform-specific update command. No automatic
