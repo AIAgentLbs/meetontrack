@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import ai_providers
+import analysis_rebuild
 import server
 from ai_providers import AIService
 from analysis_rebuild import WINDOW, AnalysisRebuilds, transcript_chunks
@@ -106,6 +107,76 @@ class MarkTests(unittest.TestCase):
         rebuilds.wake.set()
         self.assertEqual(runs, ["m1"])
         self.assertEqual(rebuilds.snapshot("m1")["state"], "done")
+
+
+    def test_a_state_file_that_cannot_be_written_keeps_the_meeting_and_the_worker(self):
+        runs = []
+        rebuilds = AnalysisRebuilds(self.path, lambda meeting_id, skip, progress: runs.append(meeting_id))
+        rebuilds.failed("m1")
+        real, broken = analysis_rebuild._atomic_json, [True]
+
+        def save(path, payload):
+            if broken[0]:
+                raise OSError("disk full")
+            real(path, payload)
+        stop = threading.Event()
+        with patch.object(analysis_rebuild, "_atomic_json", save):
+            worker = threading.Thread(target=rebuilds.loop, args=(stop,), daemon=True)
+            worker.start()
+            rebuilds.wake.set()
+            worker.join(0.3)
+            self.assertTrue(worker.is_alive())
+            self.assertEqual((runs, rebuilds.pending()), ([], ["m1"]), "still retryable")
+            broken[0] = False
+            rebuilds.wake.set()
+            for _ in range(50):
+                if runs:
+                    break
+                worker.join(0.05)
+        stop.set()
+        rebuilds.wake.set()
+        self.assertEqual((runs, rebuilds.snapshot("m1")["state"]), (["m1"], "done"))
+
+        def finish_unsaved(meeting_id, skip, progress):
+            broken[0] = True
+        rebuilds = AnalysisRebuilds(self.path, finish_unsaved)
+        rebuilds.failed("m2")
+        with patch.object(analysis_rebuild, "_atomic_json", save), self.assertRaises(OSError):
+            rebuilds.run("m2")
+        self.assertIn("m2", rebuilds.pending(), "not left running forever")
+
+    def test_a_recording_pauses_the_rebuild_between_chunks_and_it_resumes(self):
+        sent, recording = [], [False]
+
+        def rebuild(meeting_id, skip, progress):
+            for number, key in enumerate(["k1", "k2", "k3"], 1):
+                if key not in skip:
+                    sent.append((meeting_id, key))
+                    recording[0] = recording[0] or len(sent) == 1  # a meeting starts during the first chunk
+                progress(key, number, 3)
+        rebuilds = AnalysisRebuilds(self.path, rebuild)
+        rebuilds.failed("m1")
+        rebuilds.failed("m2")
+        self.assertTrue(rebuilds.run("m1", lambda: recording[0]))
+        state = rebuilds.snapshot("m1")
+        self.assertEqual((sent, state["state"], state["done"]), ([("m1", "k1")], "needed", 1))
+        stop = threading.Event()
+        worker = threading.Thread(target=rebuilds.loop, args=(stop, lambda: recording[0]), daemon=True)
+        worker.start()
+        rebuilds.wake.set()
+        worker.join(0.2)
+        self.assertEqual(len(sent), 1, "nothing runs while recording")
+        recording[0] = False
+        rebuilds.wake.set()
+        for _ in range(50):
+            if rebuilds.pending() == []:
+                break
+            worker.join(0.05)
+        stop.set()
+        rebuilds.wake.set()
+        self.assertEqual(sorted(sent), sorted([("m1", "k1"), ("m1", "k2"), ("m1", "k3"),
+                                               ("m2", "k1"), ("m2", "k2"), ("m2", "k3")]), "m1 resumed, not restarted")
+        self.assertEqual(rebuilds.pending(), [])
 
 
 class RebuildTests(unittest.TestCase):

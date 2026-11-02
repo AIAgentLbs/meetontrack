@@ -14,6 +14,10 @@ from archive import _atomic_json, _json
 WINDOW = 14000  # transcript characters per analysis: the live analysis window
 
 
+class Paused(Exception):
+    """A meeting started recording: the rebuild stops between chunks and resumes later."""
+
+
 def _parts(segment: dict, line, size: int) -> list[dict]:
     """A segment whose line alone is longer than `size`, as consecutive parts that each fit, with
     stable ids (id#0, id#1...) so their progress is kept like any chunk's."""
@@ -71,9 +75,18 @@ class AnalysisRebuilds:
 
     def _update(self, meeting_id: str, **values) -> None:
         with self.lock:
-            item = self.meetings.setdefault(meeting_id, {"chunks": [], "from": 0})
+            before = self.meetings.get(meeting_id)
+            item = dict(before or {"chunks": [], "from": 0})
             item.update(values, at=datetime.now().astimezone().isoformat(timespec="seconds"))
-            self._save_locked()
+            self.meetings[meeting_id] = item
+            try:
+                self._save_locked()
+            except Exception:  # not saved: memory keeps what the file says, so a retry still sees it
+                if before is None:
+                    del self.meetings[meeting_id]
+                else:
+                    self.meetings[meeting_id] = before
+                raise
 
     def snapshot(self, meeting_id: str) -> dict:
         with self.lock:
@@ -116,12 +129,19 @@ class AnalysisRebuilds:
             item.update(done=done, total=total)
             self._save_locked()
 
-    def _run_locked(self, meeting_id: str) -> bool:
+    def _run_locked(self, meeting_id: str, busy=lambda: False) -> bool:
+        def progress(key, done, total):
+            self._progress(meeting_id, key, done, total)
+            if done < total and busy():
+                raise Paused
         try:
             with self.lock:
                 skip = set(self.meetings.get(meeting_id, {}).get("chunks", []))
-            self.rebuild(meeting_id, skip, lambda key, done, total: self._progress(meeting_id, key, done, total))
+            self.rebuild(meeting_id, skip, progress)
             self._update(meeting_id, state="done", message="")
+            return True
+        except Paused:  # analysed chunks are kept; the rest follows when nothing is recording
+            self._update(meeting_id, state="needed", message="")
             return True
         except LookupError:
             with self.lock:
@@ -132,6 +152,10 @@ class AnalysisRebuilds:
             self._update(meeting_id, state="error", message=str(error)[:300])
             return False
         finally:
+            with self.lock:
+                item = self.meetings.get(meeting_id)
+                if item and item.get("state") == "running":  # its final state could not be saved
+                    item["state"] = "needed"
             self.run_lock.release()
 
     def start(self, meeting_id: str) -> None:
@@ -145,15 +169,16 @@ class AnalysisRebuilds:
             raise
         threading.Thread(target=self._run_locked, args=(meeting_id,), name="analysis-rebuild", daemon=True).start()
 
-    def run(self, meeting_id: str) -> bool:
-        """Rebuild now, waiting for any other rebuild; False when the AI failed."""
+    def run(self, meeting_id: str, busy=lambda: False) -> bool:
+        """Rebuild now, waiting for any other rebuild; False when the AI failed. Stops between
+        chunks once `busy()` (a meeting is recording)."""
         self.run_lock.acquire()
         try:
             self._update(meeting_id, state="running", message="")
         except Exception:
             self.run_lock.release()
             raise
-        return self._run_locked(meeting_id)
+        return self._run_locked(meeting_id, busy)
 
     def loop(self, stop: threading.Event, busy=lambda: False) -> None:
         """Retry marked meetings while no meeting is recording: every 5 minutes, doubling after a
@@ -163,8 +188,15 @@ class AnalysisRebuilds:
             if self.wake.wait(delay):
                 delay = self.RETRY
             self.wake.clear()
-            pending = self.pending()
-            if stop.is_set() or not pending or busy():
-                continue
-            ok = all(self.run(meeting_id) for meeting_id in pending)  # stops at the first failure
+            ok = True
+            for meeting_id in self.pending():
+                if stop.is_set() or busy():
+                    break
+                try:
+                    ok = self.run(meeting_id, busy)
+                except Exception as error:  # e.g. the state file cannot be written: keep the worker alive
+                    print(f"analysis rebuild failed: {type(error).__name__}: {error}", flush=True)
+                    ok = False
+                if not ok:
+                    break  # the AI fails: the others would fail the same way
             delay = self.RETRY if ok else min(delay * 2, self.MAX_RETRY)
