@@ -1085,12 +1085,30 @@ class SignIns:
 
     def _wait(self, adapter, process):
         """Everything ends within WINDOW: a browser tab closed without signing in leaves the CLI
-        waiting forever, so it is stopped then (its whole process group) and reported as failed."""
-        deadline, signed_in = time.monotonic() + self.WINDOW, False
-        try:
-            code = process.wait(timeout=self.WINDOW)
-        except subprocess.TimeoutExpired:
-            code = None
+        waiting forever, so it is stopped then (its whole process group) and reported as failed.
+        A sign-in in a window is noticed while the window is still open (Windows keeps interactive
+        agy's console open after it signs in)."""
+        window = getattr(adapter, "sign_in_window", False)
+        deadline, code, signed_in = time.monotonic() + self.WINDOW, None, False
+        while time.monotonic() < deadline:
+            left = max(0, deadline - time.monotonic())
+            if code is None:
+                try:
+                    code = process.wait(timeout=min(self.POLL, left) if window else left)
+                except subprocess.TimeoutExpired:
+                    if not window:
+                        continue
+            else:
+                time.sleep(self.POLL)
+            if code:
+                break
+            try:
+                signed_in = self.service.options(adapter.name, refresh=True).get("state") == "available"
+            except Exception:  # noqa: BLE001 - discovery reports its own failures; keep the thread alive
+                signed_in = False
+            if signed_in or not window:
+                break
+        if code is None and not signed_in:
             try:
                 if WINDOWS:
                     process.kill()  # ponytail: the CLI only, not a browser helper it may have started
@@ -1098,15 +1116,6 @@ class SignIns:
                     os.killpg(process.pid, signal.SIGKILL)  # its own session, see _spawn
             except OSError:
                 pass
-        window = getattr(adapter, "sign_in_window", False)
-        while code == 0:
-            try:
-                signed_in = self.service.options(adapter.name, refresh=True).get("state") == "available"
-            except Exception:  # noqa: BLE001 - discovery reports its own failures; keep the thread alive
-                signed_in = False
-            if signed_in or not window or time.monotonic() >= deadline:
-                break
-            time.sleep(self.POLL)
         with self.lock:
             self.running.discard(adapter.name)
             if not signed_in:

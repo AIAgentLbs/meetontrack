@@ -1044,6 +1044,27 @@ class SignInTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     ai_providers.SignIns(AIService(Path(tmp) / "d.json", {}, adapters=[adapter]), tmp).start("fake")
 
+    def test_a_sign_in_window_left_open_succeeds_once_signed_in(self):
+        adapter = FakeAdapter("unavailable")
+        adapter.sign_in_command, adapter.sign_in_window = lambda: ["/x/fake"], True
+        done, process = [], self.Process()  # the console stays open: wait() never returns
+        with tempfile.TemporaryDirectory() as tmp:
+            sign_ins = ai_providers.SignIns(AIService(Path(tmp) / "c.json", {}, adapters=[adapter]), tmp, done.append)
+            sign_ins.POLL, sign_ins.WINDOW = 0.05, 10
+            with patch.object(ai_providers.subprocess, "Popen", return_value=process), \
+                    patch.object(ai_providers.os, "killpg") as killpg:
+                self.assertTrue(sign_ins.start("fake"))
+                time.sleep(0.2)
+                self.assertEqual(sign_ins.state()["running"], ["fake"])
+                adapter.state = "available"
+                for _ in range(100):
+                    if done:
+                        break
+                    time.sleep(0.05)
+            self.assertEqual(done, ["fake"])
+            self.assertEqual(sign_ins.state(), {"running": [], "failed": {}})
+            killpg.assert_not_called()
+
     def test_one_detached_sign_in_per_provider_then_discovery_and_done(self):
         adapter = FakeAdapter()
         adapter.sign_in_command = lambda: ["/x/fake", "login"]
