@@ -14,10 +14,22 @@ from archive import _atomic_json, _json
 WINDOW = 14000  # transcript characters per analysis: the live analysis window
 
 
+def _parts(segment: dict, line, size: int) -> list[dict]:
+    """A segment whose line alone is longer than `size`, as consecutive parts that each fit, with
+    stable ids (id#0, id#1...) so their progress is kept like any chunk's."""
+    room = size - len(line({**segment, "text": ""})) - 1
+    text = str(segment.get("text") or "")
+    if len(line(segment)) + 1 <= size or room <= 0:
+        return [segment]
+    identity = str(segment.get("id") or segment.get("timestamp") or "")
+    return [{**segment, "id": f"{identity}#{number}", "text": text[start:start + room]}
+            for number, start in enumerate(range(0, len(text), room))]
+
+
 def transcript_chunks(segments: list[dict], line, size: int = WINDOW) -> list[list[dict]]:
     """Consecutive segments in windows of at most `size` characters of rendered lines."""
     chunks, current, length = [], [], 0
-    for segment in segments:
+    for segment in (part for item in segments for part in _parts(item, line, size)):
         cost = len(line(segment)) + 1
         if current and length + cost > size:
             chunks.append(current)

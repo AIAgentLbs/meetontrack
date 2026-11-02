@@ -49,6 +49,21 @@ class ChunkTests(unittest.TestCase):
                              "\n".join(map(server.transcript_line, window)), "a window is never cut")
 
 
+    def test_a_segment_longer_than_a_window_is_split_and_read_whole(self):
+        long = {"id": "big", "timestamp": "2026-10-28T14:00:00+03:00", "speaker": "Иван",
+                "text": "".join(f"слово{n} " for n in range(6000))}
+        segments = SEGMENTS[:3] + [long] + SEGMENTS[3:6]
+        windows = transcript_chunks(segments, server.transcript_line)
+        for window in windows:
+            self.assertEqual(server.Handler._transcript_text({"segments": window}),
+                             "\n".join(map(server.transcript_line, window)), "a window is never cut")
+        parts = [item for window in windows for item in window if item["id"].startswith("big#")]
+        self.assertGreater(len(parts), 2)
+        self.assertEqual("".join(item["text"] for item in parts), long["text"])
+        self.assertEqual([item["id"] for item in parts], [f"big#{n}" for n in range(len(parts))])
+        self.assertEqual(windows, transcript_chunks(segments, server.transcript_line), "stable for resuming")
+
+
 class MarkTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
