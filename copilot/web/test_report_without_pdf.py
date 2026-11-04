@@ -50,6 +50,31 @@ class BrowserLookupTests(unittest.TestCase):
                 MeetingArchive._print_pdf(folder / "index.html", folder / "meeting-report.pdf")
         self.assertEqual([p.name for p in folder.iterdir()], ["chrome.exe"], "The print profile is removed")
 
+    def test_a_failing_browser_hands_over_to_the_next(self):
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(folder, ignore_errors=True))
+        chrome, edge = folder / "chrome.exe", folder / "msedge.exe"
+        chrome.write_bytes(b"")
+        edge.write_bytes(b"")
+        tried = []
+
+        def print_with(browser, html, pdf):
+            tried.append(browser)
+            if browser == chrome:
+                raise archive.ReportPdfError("chrome не создал PDF")
+            pdf.write_bytes(b"%PDF synthetic")
+        with patch.object(MeetingArchive, "_pdf_browser_candidates", return_value=[chrome, chrome, edge]), \
+             patch.object(MeetingArchive, "_print_pdf_with", side_effect=print_with):
+            MeetingArchive._print_pdf(folder / "index.html", folder / "meeting-report.pdf")
+            self.assertEqual(tried, [chrome, edge], "each install once, in order")
+            self.assertTrue((folder / "meeting-report.pdf").is_file())
+            tried.clear()
+            with patch.object(MeetingArchive, "_print_pdf_with",
+                              side_effect=archive.ReportPdfError("не создал PDF")) as failing:
+                with self.assertRaisesRegex(archive.ReportPdfError, "не создал PDF; не создал PDF"):
+                    MeetingArchive._print_pdf(folder / "index.html", folder / "meeting-report.pdf")
+                self.assertEqual(failing.call_count, 2, "every found browser is tried before the HTML fallback")
+
     @unittest.skipUnless(os.name == "nt", "Windows install places")
     def test_windows_looks_in_program_files_and_local_app_data(self):
         places = [str(path) for path in MeetingArchive._pdf_browser_candidates()]

@@ -77,6 +77,53 @@ class DeliveryTests(unittest.TestCase):
                 self.archive.deliver(self.detail, {"pdf_path": str(self.pdf)}, previous=result)
                 run.assert_not_called()
 
+    def test_restart_between_email_and_telegram_never_sends_either_twice(self):
+        """MEETONTRACK-122: the process dies during the Telegram send."""
+        settings = json.loads((self.config / "delivery.json").read_text())
+        settings.update(drive_enabled=False, telegram_enabled=True, telegram_account="synthetic",
+                        telegram_config=str(self.config / "telegram.env"))
+        (self.config / "telegram.env").write_text("# Synthetic fixture: no credentials")
+        (self.config / "delivery.json").write_text(json.dumps(settings))
+        receipts = self.archive.reports_root / "meeting-1" / "delivery-receipts.json"
+        receipts.parent.mkdir(parents=True)
+        report = {"pdf_path": str(self.pdf)}
+
+        def run(command, **_):
+            if "gmail" in command:
+                self.assertEqual(json.loads(receipts.read_text())["mail_status"], "unknown",
+                                 "uncertainty is on disk before the email leaves")
+                return subprocess.CompletedProcess([], 0, '{"id":"mail-1"}', "")
+            raise SystemExit("killed during the Telegram upload")
+        with patch("archive.subprocess.run", side_effect=run), self.assertRaises(SystemExit):
+            self.archive.deliver(self.detail, report)
+        self.assertEqual(json.loads(receipts.read_text()),
+                         {"mail_status": "sent", "gmail_message_id": "mail-1", "telegram_status": "unknown"})
+        with patch("archive.subprocess.run") as after_restart:
+            result = self.archive.deliver(self.detail, report)
+        after_restart.assert_not_called()
+        self.assertEqual((result["mail_status"], result["telegram_status"]), ("sent", "unknown"))
+
+    def test_definite_failure_leaves_no_receipt_so_the_retry_still_sends(self):
+        receipts = self.archive.reports_root / "meeting-1" / "delivery-receipts.json"
+        receipts.parent.mkdir(parents=True)
+        report = {"pdf_path": str(self.pdf)}
+        with patch.object(self.archive, "_upload_drive_report_gws", return_value=("auth_required", {})), \
+             patch.object(self.archive, "_gws_call", return_value=None) as gws:
+            self.assertEqual(self.archive.deliver(self.detail, report)["mail_status"], "unknown")
+        # missing_send_acknowledgement is an unknown outcome; a plain refusal is a failure.
+        receipts.unlink()
+
+        def refused(*args, diagnostics=None, **_):
+            diagnostics.update(provider="gws", reason="google_api_failed")
+        with patch.object(self.archive, "_upload_drive_report_gws", return_value=("auth_required", {})), \
+             patch.object(self.archive, "_gws_call", side_effect=refused):
+            self.assertEqual(self.archive.deliver(self.detail, report)["mail_status"], "failed")
+        self.assertEqual(json.loads(receipts.read_text()), {})
+        with patch.object(self.archive, "_upload_drive_report_gws", return_value=("auth_required", {})), \
+             patch.object(self.archive, "_gws_call", return_value={"id": "mail-2"}) as gws:
+            self.assertEqual(self.archive.deliver(self.detail, report)["mail_status"], "sent")
+        gws.assert_called_once()
+
     def test_telegram_missing_dependency_and_invalid_ack_are_not_sent(self):
         self.telegram_setup()
         for payload, expected in (({"status": "dependency_missing"}, "dependency_missing"),

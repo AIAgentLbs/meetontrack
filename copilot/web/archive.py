@@ -1480,15 +1480,39 @@ class MeetingArchive:
                 if (path := shutil.which(name))]
 
     @classmethod
+    def pdf_browsers(cls) -> list[Path]:
+        """Installed browsers in preference order, each install once."""
+        seen: set[str] = set()
+        found: list[Path] = []
+        for path in cls._pdf_browser_candidates():
+            key = os.path.normcase(os.path.abspath(path))
+            if key not in seen and path.is_file():
+                seen.add(key)
+                found.append(path)
+        return found
+
+    @classmethod
     def pdf_browser(cls) -> Path | None:
-        return next((path for path in cls._pdf_browser_candidates() if path.is_file()), None)
+        return next(iter(cls.pdf_browsers()), None)
 
     @classmethod
     def _print_pdf(cls, html_path: Path, pdf_path: Path) -> None:
-        """Print with Chrome or Edge, then terminate its lingering headless helper."""
-        chrome = cls.pdf_browser()
-        if chrome is None:
+        """Print with Chrome, else Edge, else Chromium: a browser that fails hands over to the next."""
+        browsers = cls.pdf_browsers()
+        if not browsers:
             raise ReportPdfError("Не найден браузер Chrome или Edge для создания PDF")
+        errors: list[str] = []
+        for browser in browsers:
+            try:
+                cls._print_pdf_with(browser, html_path, pdf_path)
+                return
+            except ReportPdfError as exc:
+                errors.append(str(exc))
+        raise ReportPdfError("; ".join(errors))
+
+    @staticmethod
+    def _print_pdf_with(chrome: Path, html_path: Path, pdf_path: Path) -> None:
+        """Print with one browser, then terminate its lingering headless helper."""
         profile = Path(tempfile.mkdtemp(prefix=PRINT_PROFILE_PREFIX))
         temporary = pdf_path.with_suffix(".tmp.pdf")
         temporary.unlink(missing_ok=True)
@@ -1842,8 +1866,30 @@ class MeetingArchive:
         if not has_pdf:
             attachment = source / STANDALONE_REPORT
         receipts = _json(source / "delivery-receipts.json", {})
+        receipts = receipts if isinstance(receipts, dict) else {}
         if not manual:
             previous = {**previous, **receipts}
+        held: dict[str, dict] = {}
+
+        # MEETONTRACK-122: each channel's outcome is on disk before the next send
+        # starts. "unknown" goes down first, so a process that dies mid-send never
+        # sends again on its own; a definite failure removes it so retries still run.
+        def receipt(values: dict, *, before: bool = False) -> None:
+            if not source.is_dir():
+                return
+            field = next(iter(values))
+            if before:
+                held[field] = {key: receipts.get(key) for key in values}
+                receipts[field] = "unknown"
+            elif values[field] in {"sent", "unknown"}:
+                receipts.update({key: value for key, value in values.items() if value is not None})
+            elif (held.get(field) or {}).get(field) == "sent":
+                # A confirmed resend failed: the earlier delivery still stands.
+                receipts.update({key: value for key, value in held[field].items() if value is not None})
+            else:
+                for key in values:
+                    receipts.pop(key, None)
+            _atomic_json(source / "delivery-receipts.json", receipts)
         drive_status = str(previous.get("drive_status") or "not_configured")
         drive_folder = str(previous.get("drive_folder") or "")
         drive_links: dict[str, str] = {
@@ -1934,6 +1980,7 @@ class MeetingArchive:
         smtp = settings.get("email_provider") == "smtp"
         if mail_status not in {"sent", "unknown"} and recipient:
             mail_error.clear()
+            receipt({"mail_status": None, "gmail_message_id": None}, before=True)
             subject = f"{self.product_name}: {detail['title']} — {stamp}"
             body = (
                 f"Отчет по встрече «{detail['title']}» от {stamp}.\n\n"
@@ -1987,6 +2034,8 @@ class MeetingArchive:
                     mail_error.update(provider="gws", reason="missing_send_acknowledgement")
                 if mail_error.get("reason") in {"timeout_outcome_unknown", "invalid_response", "missing_send_acknowledgement"}:
                     mail_status = "unknown"
+            receipt({"mail_status": mail_status,
+                     "gmail_message_id": gmail_message_id if mail_status == "sent" else None})
 
         telegram_status = str(previous.get("telegram_status") or "not_configured")
         telegram_message_id = previous.get("telegram_message_id")
@@ -2016,6 +2065,7 @@ class MeetingArchive:
             ):
                 if drive_links.get(key):
                     command.extend([flag, drive_links[key]])
+            receipt({"telegram_status": None, "telegram_message_id": None}, before=True)
             try:
                 result = subprocess.run(
                     command, capture_output=True, text=True, timeout=180,
@@ -2034,6 +2084,8 @@ class MeetingArchive:
                 telegram_status = "unknown"
             except OSError:
                 telegram_status = "failed"
+            receipt({"telegram_status": telegram_status,
+                     "telegram_message_id": telegram_message_id if telegram_status == "sent" else None})
         outcome = {
             "drive_status": drive_status,
             "drive_folder": drive_folder,
@@ -2045,13 +2097,6 @@ class MeetingArchive:
             "telegram_status": telegram_status,
             "telegram_message_id": telegram_message_id,
         }
-        if source.is_dir():
-            for channel, keys in (("mail_status", ("mail_status", "gmail_message_id")),
-                                  ("telegram_status", ("telegram_status", "telegram_message_id"))):
-                if outcome[channel] == "sent":
-                    receipts.update({key: outcome[key] for key in keys})
-            if receipts:
-                _atomic_json(source / "delivery-receipts.json", receipts)
         return outcome
 
     def report_path(self, meeting_id: str, relative: str) -> Path | None:
