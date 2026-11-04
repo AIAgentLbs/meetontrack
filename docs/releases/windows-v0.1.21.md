@@ -11,6 +11,9 @@ speech models. AI answers are optional and use an AI tool you already have.
 - The report PDF now tries both browsers: when Google Chrome is installed but
   cannot print, Microsoft Edge prints it. Only when neither can print does
   the report go out as an HTML file (MEETONTRACK-123).
+- Until you choose an interface language in Settings, the web UI follows
+  your browser's first preferred language: Russian for Russian, English
+  otherwise (before, it was always Russian). A language you chose stays.
 - Speaker corrections carry over to the final transcript in the last two rare
   cases: a meeting split from one recording whose boundary moved, and a revised
   final transcript whose lines moved. A line to check stays in the "check the
