@@ -54,7 +54,7 @@ hashes, Pages removed, and the Windows installer relocated to
   only upstream; link gsamat/amanu's copy or our own.
 - [ ] MEETONTRACK-113: Windows counterpart of MEETONTRACK-109: the recorder runs the
   local service itself and shows the UI in its own window.
-- [ ] MEETONTRACK-114: Processes the web service starts (AI CLIs, headless Chrome,
+- [x] MEETONTRACK-114 (shipped in v0.1.21, Mac, closed 2026-11-04): Processes the web service starts (AI CLIs, headless Chrome,
   helpers) survive when the app stops the service (`LocalServer.swift`, `server.py`).
   Start the service in its own process group and signal the group on stop.
   Fixed on main 2026-11-04; closes on release. (`server.py` leads its group and terminates it on shutdown; the app
@@ -62,7 +62,7 @@ hashes, Pages removed, and the Windows installer relocated to
 - [ ] MEETONTRACK-115: `copilot/web/test_ai_providers.py` has 5 failures and 2 errors
   under the bundled Python 3.12 runtime (also on baseline). Fix them and run the web
   suite with the packaged runtime in the candidate check.
-- [ ] MEETONTRACK-116: `LocalServer.swift` adopts any server on port 43121 that
+- [x] MEETONTRACK-116 (shipped in v0.1.21, Mac, closed 2026-11-04): `LocalServer.swift` adopts any server on port 43121 that
   reports the bundle's version (another user's, or one started by hand). Pass a
   per-launch nonce to the child and adopt only a server that echoes it.
   Fixed on main 2026-11-04; closes on release. (`MEETONTRACK_INSTANCE`, echoed as `instance` by `/api/health`.) A foreign
@@ -70,10 +70,13 @@ hashes, Pages removed, and the Windows installer relocated to
   bind failure, it does not name the conflict.
 - [ ] MEETONTRACK-124: AI sign-in CLIs run in their own session (`ai_providers.py` `_spawn`), so an open
   sign-in outlives the app-run service on quit. Track them and stop each group on server shutdown.
+- [ ] MEETONTRACK-126: worker threads start before `own_process_group()` in `server.py` `main()`, so a helper
+  (printing browser, AI CLI) spawned in that first moment escapes shutdown cleanup. Create the group right after
+  bind, before any worker (with `--exit-with-parent`); extend `test_parent_watch.py`. Found by the 0.1.21 release review.
 - [ ] MEETONTRACK-125: `install.sh` rewrites `config.json` to drop the retired analytics key before the
   new app is proven; a rolled-back install keeps the rewritten file. Move the migration after the commit
   point or add config.json to the rollback set.
-- [ ] MEETONTRACK-109: One MeetOnTrack app with its own window: Python and the web
+- [x] MEETONTRACK-109 (shipped in v0.1.21, Mac, closed 2026-11-04): One MeetOnTrack app with its own window: Python and the web
   payload inside the bundle, the app runs the local service itself (no launchd
   agent) and shows the UI in a WKWebView window instead of a browser tab. Signed,
   notarized DMG is out of scope: no Apple Developer account for now (owner
@@ -247,15 +250,15 @@ hashes, Pages removed, and the Windows installer relocated to
   to uncorrected text is not flagged; `speaker_review` names are dropped by `SpeakerEdits._write` or a revised final;
   the corrected import skips `translation_en` preservation. Approach: keep corrected spans until the import consumes them.
   Fixed on main 2026-11-04 (tests in `test_speaker_carry_edges.py`); closes on release.
-- [ ] MEETONTRACK-121: two P2s left by the MEETONTRACK-119 review: a split meeting whose boundary moved can still
+- [x] MEETONTRACK-121 (shipped in v0.1.21 / windows-v0.1.21, closed 2026-11-04): two P2s left by the MEETONTRACK-119 review: a split meeting whose boundary moved can still
   copy a correction by start time onto a merged line (`archive.py` `sync_transcript` annotation), and a flagged line
   whose start shifts in a revised final loses its review entry (`_still_to_review`). Approach: move such corrections
   into `corrected_live`; remap flagged spans by overlap. Fixed on main 2026-11-04; closes on release.
-- [ ] MEETONTRACK-122: a restart between the email and the Telegram send can send the email again
+- [x] MEETONTRACK-122 (shipped in v0.1.21 / windows-v0.1.21, closed 2026-11-04): a restart between the email and the Telegram send can send the email again
   (`archive.py` `deliver` writes `delivery-receipts.json` only at the end; pre-existing). Approach: persist each
   channel as "unknown" before its send and its receipt right after it, as `delivery_retry.py` does.
   Fixed on main 2026-11-04; closes on release.
-- [ ] MEETONTRACK-123: the report PDF used only the first browser found; Chrome that cannot print
+- [x] MEETONTRACK-123 (shipped in v0.1.21 / windows-v0.1.21, closed 2026-11-04): the report PDF used only the first browser found; Chrome that cannot print
   sent the HTML fallback although Edge or Chromium could print (`archive.py` `_print_pdf`). Now every
   installed browser is tried in order before the HTML fallback. Fixed on main 2026-11-04; closes on release.
 - [ ] MEETONTRACK-118: a final transcript that never arrives stops being flagged after the 3-day delivery window
