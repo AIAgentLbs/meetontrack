@@ -225,6 +225,14 @@ hashes, Pages removed, and the Windows installer relocated to
   (`archive.py` `_drops_corrections`); split meetings are not guarded before import; a small corrected overlap that loses
   to uncorrected text is not flagged; `speaker_review` names are dropped by `SpeakerEdits._write` or a revised final;
   the corrected import skips `translation_en` preservation. Approach: keep corrected spans until the import consumes them.
+  Fixed on main 2026-11-04 (tests in `test_speaker_carry_edges.py`); closes on release.
+- [ ] MEETONTRACK-121: two P2s left by the MEETONTRACK-119 review: a split meeting whose boundary moved can still
+  copy a correction by start time onto a merged line (`archive.py` `sync_transcript` annotation), and a flagged line
+  whose start shifts in a revised final loses its review entry (`_still_to_review`). Approach: move such corrections
+  into `corrected_live`; remap flagged spans by overlap.
+- [ ] MEETONTRACK-122: a restart between the email and the Telegram send can send the email again
+  (`archive.py` `deliver` writes `delivery-receipts.json` only at the end; pre-existing). Approach: persist each
+  channel as "unknown" before its send and its receipt right after it, as `delivery_retry.py` does.
 - [ ] MEETONTRACK-118: a final transcript that never arrives stops being flagged after the 3-day delivery window
   (`archive.py` `_final_wait`, `delivery_health`), and a late final makes the report on request only.
 - [ ] MEETONTRACK-89: Mac call-audio capture fades to silence during Chrome calls (39 of 53 min lost on 2026-10-21);
@@ -433,6 +441,8 @@ hashes, Pages removed, and the Windows installer relocated to
   looks for Chrome only at its macOS path. Find Chrome or Edge on Windows (Program Files,
   LocalAppData, App Paths), print with the same headless flags, add a path-lookup test.
   The windows-v0.1.19 notes state the limit.
+  Fixed on main 2026-11-04: Chrome then Edge at standard places and App Paths; without a PDF the report goes out
+  as one HTML file with a visible, retried problem; Windows CI prints with Chrome and with Edge. Closes on release.
 - MEETONTRACK-25: Keep the full Python suite platform-aware: three security tests currently
   assume POSIX mode 0600, and a recorder test assumes POSIX path spelling.
   Windows ACL checks must replace, not silently skip, the security assertions.
