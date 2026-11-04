@@ -170,6 +170,10 @@ class SpeakerEdits:
             done = {segment_id(s) for s in manual}
             named = {s.get("speaker") for s in manual}
             review["segment_ids"] = [key for key in review.get("segment_ids", []) if key not in done]
+            if "spans" in review:
+                review["spans"] = {key: span for key, span in review["spans"].items() if key in review["segment_ids"]}
+                if not review["spans"]:
+                    review.pop("spans")
             review["names"] = [name for name in review.get("names", []) if name not in named]
             if not review["segment_ids"] and not review["names"]:
                 canonical.pop("speaker_review")
@@ -187,7 +191,8 @@ class SpeakerEdits:
             raise ValueError("Укажите имя длиной до 80 символов без переносов строк")
         return value
 
-    def annotate(self, snapshot: dict) -> dict:
+    def annotate(self, snapshot: dict, *, not_by_id: frozenset[str] | set[str] = frozenset()) -> dict:
+        """`not_by_id`: lines whose saved correction belongs to other text with the same start."""
         result = copy.deepcopy(snapshot)
         meeting_id = str(result.get("meeting_id") or "")
         if not meeting_id:
@@ -201,7 +206,7 @@ class SpeakerEdits:
         labels = dict(names)
         for segment in result.get("segments", []):
             key = segment_id(segment)
-            if saved := corrected.get(key):
+            if key not in not_by_id and (saved := corrected.get(key)):
                 for field in ("speaker", "speaker_id", "speaker_confidence", "speaker_identity"):
                     segment[field] = saved[field]
             identity, label = base_speaker(segment)

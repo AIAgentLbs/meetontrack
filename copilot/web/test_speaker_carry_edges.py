@@ -199,5 +199,46 @@ class SplitMeetingCorrectionTests(unittest.TestCase):
         self.assertNotIn("corrected_live", stored)
 
 
+class RemainingEdgeTests(unittest.TestCase):
+    """MEETONTRACK-121: the two P2s left by the MEETONTRACK-119 review."""
+
+    def test_a_moved_split_boundary_does_not_hand_a_short_correction_to_the_merged_line(self):
+        split = SplitMeetingCorrectionTests("test_2_a_moved_boundary_keeps_the_dropped_correction_for_the_import")
+        split.setUp()
+        self.addCleanup(split.doCleanups)
+        split.physical["segments"][0]["end_timestamp"] = "2026-01-01T10:02:03Z"
+        split.sync()
+        annotated = split.archive.annotate_speakers(split.stored())
+        split.archive.speaker_edits.assign(annotated, [annotated["segments"][0]["segment_id"]], name="Synthetic Alpha")
+        part = next(part for part in split.store.project(split.physical) if part["meeting_id"] == "p1")
+        merged = {**part, "logical_interval": {**part["logical_interval"], "end": "2026-01-01T10:06:00Z"},
+                  "segments": [{"timestamp": "2026-01-01T10:02:00Z", "end_timestamp": "2026-01-01T10:02:10Z",
+                                "source": "system", "text": "old, merged with the next line"}]}
+        split.archive.sync_transcript(merged)
+        stored = split.stored()
+        self.assertNotEqual(stored["segments"][0].get("speaker_identity"), "manual",
+                            "same start, other line: not corrected by its start alone")
+        self.assertEqual([s["speaker"] for s in stored["corrected_live"]], ["Synthetic Alpha"])
+        (split.recording / "transcript.json").write_text(json.dumps({"engine": "synthetic", "segments": [
+            {"speaker": "them", "start_ms": 120000, "end_ms": 130000, "text": "old final"}]}))
+        split.archive.import_final_transcript(stored)
+        stored = split.stored()
+        line = stored["segments"][0]
+        self.assertNotEqual(line.get("speaker"), "Synthetic Alpha", "3 s of 10 were corrected, counted once")
+        self.assertIn(segment_id(line), stored["speaker_review"]["segment_ids"])
+
+    def test_a_flagged_line_whose_start_moves_in_a_revised_final_stays_flagged(self):
+        old = {"source": "system", "timestamp": at(0), "end_timestamp": at(10), "text": "Final mixed"}
+        earlier = MeetingArchive._still_to_review(None, {"segment_ids": [segment_id(old)], "names": []}, [old])
+        self.assertEqual(earlier["spans"], {segment_id(old): ["system", at(0), at(10)]})
+        revised = [{"source": "system", "timestamp": at(1), "end_timestamp": at(10), "text": "Final mixed, revised"},
+                   {"source": "microphone", "timestamp": at(2), "end_timestamp": at(4), "text": "Other channel"},
+                   {"source": "system", "timestamp": at(30), "end_timestamp": at(34), "text": "Later"}]
+        review = MeetingArchive._still_to_review(earlier, None, revised)
+        self.assertEqual(review["segment_ids"], [segment_id(revised[0])])
+        revised[0].update(speaker_identity="manual", speaker="Synthetic Alpha")
+        self.assertIsNone(MeetingArchive._still_to_review(earlier, None, revised), "assigned by hand: resolved")
+
+
 if __name__ == "__main__":
     unittest.main()

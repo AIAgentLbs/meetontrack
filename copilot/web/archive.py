@@ -23,7 +23,7 @@ from functools import wraps
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
-from speaker_edits import SpeakerEdits, carry_corrections, segment_id
+from speaker_edits import SpeakerEdits, carry_corrections, segment_id, _seconds
 from fact_check import with_speakers
 from delivery_health import DeliveryHealth, drive_links_ready
 from recording_health import RecordingLocations
@@ -84,6 +84,17 @@ def _dropped_corrections(previous: list[dict], segments: list[dict]) -> list[dic
     """
     kept = {_line_key(s) for s in segments}
     return [s for s in previous if s.get("speaker_identity") == "manual" and _line_key(s) not in kept]
+
+
+def _overlaps(segment: dict, first, last) -> bool:
+    """Whether a line shares time with a remembered span (start, end; end may be missing)."""
+    start, end = _seconds(segment.get("timestamp")), _seconds(segment.get("end_timestamp"))
+    span_start, span_end = _seconds(first), _seconds(last)
+    if start is None or span_start is None:
+        return False
+    end = end if end is not None and end > start else start + 1.0
+    span_end = span_end if span_end is not None and span_end > span_start else span_start + 1.0
+    return min(end, span_end) - max(start, span_start) > 0
 
 
 def _keep_translations(previous: list[dict], segments: list[dict]) -> None:
@@ -199,8 +210,8 @@ class MeetingArchive:
             values[filename] = [self.event_router(item) for item in _json(self.config_root / filename, {}).get("items", [])]
         return values[filename]
 
-    def annotate_speakers(self, snapshot: dict) -> dict:
-        return self.speaker_edits.annotate(snapshot)
+    def annotate_speakers(self, snapshot: dict, *, not_by_id: frozenset[str] | set[str] = frozenset()) -> dict:
+        return self.speaker_edits.annotate(snapshot, not_by_id=not_by_id)
 
     @property
     def frames(self) -> list[dict]:
@@ -287,7 +298,11 @@ class MeetingArchive:
                            if not interval or interval_contains(interval, str(s.get("timestamp") or ""))}
                 if waiting:
                     clean["corrected_live"] = list(waiting.values())
-            corrected = self.annotate_speakers(clean)
+            # A waiting correction must not land by its start on a changed line that starts
+            # at the same moment: it carries by overlap at the import (MEETONTRACK-121).
+            shown = {_line_key(s) for s in clean["segments"]}
+            corrected = self.annotate_speakers(clean, not_by_id={
+                segment_id(s) for s in clean.get("corrected_live", []) if _line_key(s) not in shown})
             clean["segments"] = corrected["segments"]
             # A restart or an unavailable translation provider must not erase translations.
             _keep_translations(previous.get("segments", []), clean["segments"])
@@ -361,9 +376,11 @@ class MeetingArchive:
                     return False  # Corrected again meanwhile: the next pass reads the new edits.
                 annotated = self.annotate_speakers(stored)
                 final = self.transcript_annotator({**snapshot, "segments": final}).get("segments", final)
+                # A waiting line that is also shown again counts once (MEETONTRACK-121).
+                live_lines = {_line_key(s): s for s in [*annotated.get("segments", []),
+                                                         *stored.get("corrected_live", [])]}
                 segments, names, review = carry_corrections(
-                    [*annotated.get("segments", []), *stored.get("corrected_live", [])],
-                    stored.get("speaker_names", {}), final)
+                    list(live_lines.values()), stored.get("speaker_names", {}), final)
                 _keep_translations(stored.get("segments", []), segments)
                 imported = {**stored, "segments": segments, "speaker_names": names, "capture_warnings": warnings,
                             "latest_at": segments[-1]["timestamp"] if segments else "", "final_transcript": version,
@@ -386,11 +403,27 @@ class MeetingArchive:
         earlier, review = earlier or {}, review or {}
         named = {s.get("speaker") for s in segments if s.get("speaker_identity") == "manual"}
         present = {segment_id(s): s for s in segments}
+        open_lines = [s for s in segments if s.get("speaker_identity") != "manual"]
         ids = [key for key in review.get("segment_ids", []) + earlier.get("segment_ids", [])
                if key in present and present[key].get("speaker_identity") != "manual"]
+        # A flagged line whose start moved in the revised final is found again by its
+        # time span on the same channel (MEETONTRACK-121).
+        spans = earlier.get("spans") if isinstance(earlier.get("spans"), dict) else {}
+        for key in earlier.get("segment_ids", []):
+            if key in present or not isinstance(spans.get(key), list) or len(spans[key]) != 3:
+                continue
+            source, first, last = spans[key]
+            ids += [segment_id(s) for s in open_lines
+                    if s.get("source") == source and _overlaps(s, first, last)]
         names = sorted({*review.get("names", []), *(name for name in earlier.get("names", []) if name not in named)})
         ids = list(dict.fromkeys(ids))
-        return {"segment_ids": ids, "names": names} if ids or names else None
+        if not ids and not names:
+            return None
+        result = {"segment_ids": ids, "names": names}
+        if ids:
+            result["spans"] = {key: [present[key].get("source"), present[key].get("timestamp"),
+                                     present[key].get("end_timestamp")] for key in ids}
+        return result
 
     def _mark_final(self, snapshot: dict, version: str, live: list[dict]) -> bool:
         """Corrections made on text that already was the final one: only mark it final."""
