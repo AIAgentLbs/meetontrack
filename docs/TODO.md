@@ -220,7 +220,7 @@ hashes, Pages removed, and the Windows installer relocated to
   over by time overlap on the same channel, per line and then per final voice (`speaker_edits.py` `carry_corrections`);
   a correction the final cannot place keeps the final's own label and the meeting shows "check the speakers"
   (`speaker_review`). The report is then sent once, from the final transcript.
-- [ ] MEETONTRACK-119: remaining edge cases of carrying speaker corrections to the final transcript (MEETONTRACK-117
+- [x] MEETONTRACK-119 (shipped in v0.1.20 / windows-v0.1.20, closed 2026-11-04): remaining edge cases of carrying speaker corrections to the final transcript (MEETONTRACK-117
   review P2s): a final line with the same start but a longer span keeps a correction by timestamp
   (`archive.py` `_drops_corrections`); split meetings are not guarded before import; a small corrected overlap that loses
   to uncorrected text is not flagged; `speaker_review` names are dropped by `SpeakerEdits._write` or a revised final;
@@ -436,7 +436,7 @@ hashes, Pages removed, and the Windows installer relocated to
 
 ## Windows beta acceptance gaps
 
-- [ ] MEETONTRACK-120: Windows never makes the PDF meeting report, so no report is emailed,
+- [x] MEETONTRACK-120 (shipped in v0.1.20 / windows-v0.1.20, closed 2026-11-04): Windows never makes the PDF meeting report, so no report is emailed,
   uploaded or sent to Telegram (found by the 0.1.19 notes review). `archive.py` `_print_pdf`
   looks for Chrome only at its macOS path. Find Chrome or Edge on Windows (Program Files,
   LocalAppData, App Paths), print with the same headless flags, add a path-lookup test.
