@@ -482,6 +482,7 @@ final class AppController {
     private lazy var recordings = RecordingsWindow(root: root)
     private var network: NetworkMonitor?
     private var setupRequestObserver: NSObjectProtocol?
+    private var assistantRequestObserver: NSObjectProtocol?
     /// How the app menu is told whether to offer **Setup…**; the status
     /// item's own menu is reached directly.
     var onSetupAvailable: ((Bool) -> Void)?
@@ -593,6 +594,10 @@ final class AppController {
             self?.applyIconPreferences()
         }
         setupRequestObserver = SetupRequest.observe { [weak self] in self?.showSetup() }
+        // `meeting-copilot` (the shell command) rings this to open the window.
+        assistantRequestObserver = DistributedNotificationCenter.default().addObserver(
+            forName: AssistantLink.request, object: nil, queue: .main
+        ) { _ in MainActor.assumeIsolated { AssistantLink.open() } }
         activateObserver = SingleInstance.observe { [weak self] in self?.showWindow() }
         recordRequestObserver = RecordRequest.observe { [weak self] action in
             self?.perform(action)

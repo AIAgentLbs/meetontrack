@@ -2349,7 +2349,6 @@ ARCHIVE = MeetingArchive(
     transcript_annotator=FRAMES.annotate,
 )
 DELIVERY_RETRY = DeliveryRetry(ARCHIVE)
-ARCHIVE.remove_print_leftovers()  # Before any report prints.
 GOOGLE_CONTEXT.delivery_settings = ARCHIVE.delivery_settings
 SUMMARY_REWRITES = SummaryRewrites(ARCHIVE, lambda prompt: AI.run("summary_rewrite", prompt, timeout=180))
 
@@ -3488,6 +3487,7 @@ def main() -> None:
     # Bind first: a port someone else holds must fail before any worker can
     # touch the archive or start a delivery next to that other service.
     server = ThreadingHTTPServer((HOST, args.port), Handler)
+    ARCHIVE.remove_print_leftovers()  # Ours now: before any report prints.
     poller = threading.Thread(target=TRANSCRIPT.loop, name="meeting-copilot-poller", daemon=True)
     poller.start()
     recognition_worker = threading.Thread(

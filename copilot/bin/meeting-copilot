@@ -27,7 +27,10 @@ export PYTHONDONTWRITEBYTECODE=1
 [[ -x "$python" ]] || { print -u2 "MeetOnTrack Python runtime is missing; reinstall from meetontrack.com."; exit 1; }
 
 # The assistant lives in the app's own window, not in a browser tab.
-open_copilot() { open -a "$capture_app"; }
+open_copilot() {
+  open -a "$capture_app"
+  /usr/bin/osascript -l JavaScript -e 'ObjC.import("Foundation"); $.NSDistributedNotificationCenter.defaultCenter.postNotificationNameObjectUserInfoDeliverImmediately("com.aiagentlabs.meeting-copilot.open-assistant", $(), $(), true)' >/dev/null 2>&1 || true
+}
 
 case "${1:-}" in
   "") ;;

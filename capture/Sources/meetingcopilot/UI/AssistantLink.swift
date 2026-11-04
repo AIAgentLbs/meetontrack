@@ -4,6 +4,9 @@ import WebKit
 /// Shared entry point from setup, the menu bar and recorder controls: the
 /// assistant opens in MeetOnTrack's own window, not in a browser tab.
 enum AssistantLink {
+    /// Posted by the `meeting-copilot` command to open this window in the running app.
+    nonisolated static let request = Notification.Name("com.aiagentlabs.meeting-copilot.open-assistant")
+
     @MainActor private static var window: AssistantWindow?
 
     @MainActor static func open() {
