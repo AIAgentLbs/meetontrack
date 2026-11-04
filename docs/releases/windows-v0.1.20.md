@@ -8,13 +8,15 @@ speech models. AI answers are optional and use an AI tool you already have.
   report, so no report was made or sent (MEETONTRACK-120). The PDF is now
   printed by Google Chrome or, when Chrome is not installed, by Microsoft
   Edge, which comes with Windows.
-- A meeting report is no longer lost when its PDF cannot be made. If neither
-  browser can make the PDF, the report still goes out by email and Telegram as
-  a single HTML file with a short note. The meeting and the delivery header
-  say "The PDF was not created" ("PDF не создан"), and the app tries the PDF
-  again every 30 minutes. Once the PDF is made it is uploaded to Google Drive,
-  if you turned Drive on, and the email is not sent again. Drive only ever
-  receives the PDF. Only the final transcript is ever sent, as in 0.1.19.
+- A meeting report is no longer lost when its PDF cannot be made. If the
+  browser cannot make the PDF, the report still goes out by email and Telegram
+  as a single HTML file with a short note. The meeting and
+  the delivery header say "The PDF was not created" ("PDF не создан"), and the
+  app tries the PDF again every 30 minutes. Google Drive, if you turned it on,
+  waits for the PDF and then receives the report with its PDF and images;
+  email and Telegram are not sent again. A PDF made more than three days
+  after the call goes to Drive only when you ask. Only the final transcript is
+  ever sent, as in 0.1.19.
 - "Send again" ("Отправить снова") and the automatic retries also work for a
   report that has only the HTML file.
 - Speakers you correct during the call carry over to the final transcript in
