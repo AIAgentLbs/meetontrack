@@ -60,6 +60,9 @@ hashes, Pages removed, and the Windows installer relocated to
 - [ ] MEETONTRACK-115: `copilot/web/test_ai_providers.py` has 5 failures and 2 errors
   under the bundled Python 3.12 runtime (also on baseline). Fix them and run the web
   suite with the packaged runtime in the candidate check.
+- [ ] MEETONTRACK-116: `LocalServer.swift` adopts any server on port 43121 that
+  reports the bundle's version (another user's, or one started by hand). Pass a
+  per-launch nonce to the child and adopt only a server that echoes it.
 - [ ] MEETONTRACK-109: One MeetOnTrack app with its own window: Python and the web
   payload inside the bundle, the app runs the local service itself (no launchd
   agent) and shows the UI in a WKWebView window instead of a browser tab. Signed,
