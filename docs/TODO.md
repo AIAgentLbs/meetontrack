@@ -185,21 +185,21 @@ hashes, Pages removed, and the Windows installer relocated to
 - [ ] MEETONTRACK-81: Windows in-app updates do nothing: releases carry no Velopack update files.
 - [ ] MEETONTRACK-82: Windows recorder hardcodes AI/speech providers and models (file:line list in tracker).
 - [ ] MEETONTRACK-83: Windows recorder labels speakers Me/Participant 1; use You/Others, drop speaker_names.backend.
-- [ ] MEETONTRACK-84: Windows AI check and questions fail with AI_FAILED, [WinError 5] Access is denied
+- [x] MEETONTRACK-84 (shipped; closed in Plane 2026-11-04): Windows AI check and questions fail with AI_FAILED, [WinError 5] Access is denied
   in the archive folder (0.1.11, owner check 2026-10-21); reproduce on 0.1.12 and fix.
   Fixed in main c65a93b (an elevated mkdir(0o700) left owner-only ACLs); ships in the next Windows build.
 - [ ] MEETONTRACK-91: Zoom tile names mixing Cyrillic and Latin are misread by OCR ("Катя из Kumar&Solo" -> "ат umar&Sol" on 2026-10-22) and the garbled name reaches the transcript; re-OCR the highlighted label crop at higher scale with ru+en and snap to the full label seen in other frames (capture zoom-frame-inspector, copilot/web/server.py _speaker_from_frame).
-- [ ] MEETONTRACK-92: An unreadable or undated report status said "Не читается состояние отчета. Проверьте локальный архив" with no action.
+- [x] MEETONTRACK-92 (shipped; closed in Plane 2026-11-04): An unreadable or undated report status said "Не читается состояние отчета. Проверьте локальный архив" with no action.
   Fixed in release/0.1.15 (`archive.py` `repair_report_states`): rebuilt from the report folder, or one "create the report again" button; close after release.
 - [ ] MEETONTRACK-93: 0.1.15 review leftovers (P2): a repaired report whose PDF is older than the 3-day window and was never
   tracked is skipped as historical, so no Send again is offered (`archive.py` `repair_report_states`, exempt `state_repaired_at`);
   a resend still sending after the 5-minute poll shows "Could not send" (`app.js` `resendReport`, show "may not have arrived").
-- [ ] MEETONTRACK-99: Rebuilt reports of old meetings showed old delivery failures as new problems (0.1.16, 9AE490BB:
+- [x] MEETONTRACK-99 (shipped; closed in Plane 2026-11-04): Rebuilt reports of old meetings showed old delivery failures as new problems (0.1.16, 9AE490BB:
   email failed 2026-10-16, Telegram sent; the MEETONTRACK-94 rebuild re-dated the report and raised a fresh "email failed").
   Fixed on fix/meetontrack-on-request-delivery: a rebuild that sends nothing keeps the earlier outcome and its dates; the
   retry window runs from the first send (`delivery_started_at`); on-request reports are judged as expired (`delivery_health.py`),
   so the polluted issue clears on the next check after start.
-- [ ] MEETONTRACK-98: Report PDFs of long meetings failed on 0.1.16: Chrome got a fixed 20 s to print (`archive.py` `_print_pdf`)
+- [x] MEETONTRACK-98 (shipped; closed in Plane 2026-11-04): Report PDFs of long meetings failed on 0.1.16: Chrome got a fixed 20 s to print (`archive.py` `_print_pdf`)
   and `finalize_history` retried every minute. Fixed on fix/meetontrack-pdf-print-timeout: wait for Chrome to exit (180 s cap);
   print outside the archive lock (one job per report folder, chunks of one call share it; re-print if the meeting changed); a
   failed report shows in the library and the delivery pill with "Create the report again" and retries itself every 30 minutes;
@@ -237,20 +237,20 @@ hashes, Pages removed, and the Windows installer relocated to
   (`archive.py` `_final_wait`, `delivery_health`), and a late final makes the report on request only.
 - [ ] MEETONTRACK-89: Mac call-audio capture fades to silence during Chrome calls (39 of 53 min lost on 2026-10-21);
   watchdog fix ee2e6cf limits it; live A/B against an output-clocked aggregate on the next real call.
-- [ ] MEETONTRACK-86: Windows: Codex sandbox refusal shows only as a generic AI failure.
-- [ ] MEETONTRACK-87: Windows: frame relevance check fails with "model answered, but not as asked".
-- [ ] MEETONTRACK-88: Recorder quit-when-idle command, so an upgrade can replace an old capture at once.
-- [ ] MEETONTRACK-90: Live fact-check strip on the dashboard (branch feat/live-fact-check): claims ride the
+- [x] MEETONTRACK-86 (shipped; closed in Plane 2026-11-04): Windows: Codex sandbox refusal shows only as a generic AI failure.
+- [x] MEETONTRACK-87 (shipped; closed in Plane 2026-11-04): Windows: frame relevance check fails with "model answered, but not as asked".
+- [x] MEETONTRACK-88 (shipped; closed in Plane 2026-11-04): Recorder quit-when-idle command, so an upgrade can replace an old capture at once.
+- [x] MEETONTRACK-90 (shipped; closed in Plane 2026-11-04): Live fact-check strip on the dashboard (branch feat/live-fact-check): claims ride the
   live analysis, verdicts need a source the app itself opened, else yellow; web search only via ai.choice.
   Codex P2 follow-ups fixed on the branch (2026-10-22): rows show the speaker the annotated transcript shows now
   (corrections included), and one wall-clock deadline per fetch shuts down a source that trickles headers or body.
   Open until the branch is merged and released.
   2026-10-22 owner request: moved into Call overview as a fourth column (strip and its grid row removed).
-- [ ] MEETONTRACK-96: Chat tab shows only the owner's questions, notes and the answers to him; auto-analysis
+- [x] MEETONTRACK-96 (shipped; closed in Plane 2026-11-04): Chat tab shows only the owner's questions, notes and the answers to him; auto-analysis
   (and raw SIGNAL_UPDATE/protocol lines) never reach it, also for stored meetings (filtered on read, data kept).
   The separate Meeting chat tab is removed; call-chat capture still feeds Call overview and Links and services.
   Done on branch worktree-agent-a427cf01f1e72ae19; open until merged and released.
-- [ ] MEETONTRACK-97: Call overview status counters are filter toggles saved as `call_overview_statuses` in the
+- [x] MEETONTRACK-97 (shipped; closed in Plane 2026-11-04): Call overview status counters are filter toggles saved as `call_overview_statuses` in the
   shared config.json. Done on branch worktree-agent-a427cf01f1e72ae19; open until merged and released.
 - [ ] MEETONTRACK-70: LocalVQE echo-cancellation model (`liblocalvqe`, echo removal before
   transcription) is still a fixed model; offer it through discovery like the speech
@@ -323,7 +323,7 @@ hashes, Pages removed, and the Windows installer relocated to
 - MEETONTRACK-16: Migrate legacy report branding to MeetOnTrack without changing automatic report
   delivery signatures or resending previously delivered reports. Existing PDF/HTML
   exports retain their original branding until an intentional migration/rebuild.
-- [ ] MEETONTRACK-95: Links and services: one card per URL (SERVICE and LINK merged, OCR
+- [x] MEETONTRACK-95 (shipped; closed in Plane 2026-11-04): Links and services: one card per URL (SERVICE and LINK merged, OCR
   one-character variants such as forms/torms merged) and no links to the call itself
   (Zoom, Meet, Teams, Telemost and similar). Source fix 2026-10-22 in
   `copilot/web/journal_links.py`, applied on create and on read without rewriting
@@ -331,34 +331,34 @@ hashes, Pages removed, and the Windows installer relocated to
 
 ## MeetOnTrack updates and distribution
 
-- [ ] MEETONTRACK-100: Every Mac `install.sh` run left `Meeting Copilot Capture.backup-*.app`
+- [x] MEETONTRACK-100 (shipped; closed in Plane 2026-11-04): Every Mac `install.sh` run left `Meeting Copilot Capture.backup-*.app`
   in /Applications (10 extra "Meeting Copilot" in Launchpad on the owner's Mac) plus
   `{python,web}.backup-*` in the share dir. Source fix 2026-10-26: backups live only in the
   installer temp dir until commit, and the next install moves old leftovers to the Trash.
   Close after the next public Mac package ships it.
-- [ ] MEETONTRACK-101: A provider 429 (Codex "exceeded retry limit, last status: 429") was shown
+- [x] MEETONTRACK-101 (shipped; closed in Plane 2026-11-04): A provider 429 (Codex "exceeded retry limit, last status: 429") was shown
   as "The AI account limit is reached" while the weekly limit was about 1% used. Source fix
   2026-10-26: throttling maps to AI_BUSY ("busy, not your plan limit"), AI_LIMIT only for real
   usage-limit/quota text (`copilot/web/first_run.py`). Close after the next release ships it.
-- [ ] MEETONTRACK-102: Report utterance and frame times were UTC while the header was local
+- [x] MEETONTRACK-102 (shipped; closed in Plane 2026-11-04): Report utterance and frame times were UTC while the header was local
   (12:59 vs 11:59 on 2026-10-26). Source fix 2026-10-26 in `archive.py` and
   `meeting_boundaries.py`. Close after the next release ships it.
-- [ ] MEETONTRACK-103: Two consecutive Telemost calls (goodbyes, 86 s audio gap, new person)
+- [x] MEETONTRACK-103 (shipped; closed in Plane 2026-11-04): Two consecutive Telemost calls (goodbyes, 86 s audio gap, new person)
   were recorded as one meeting, one report and one email. Source fix 2026-10-26: while recording,
   the server starts a new logical meeting at the end of a far-end audio gap of at least 75 s
   with no transcribed speech in it, RU/EN goodbyes in the 60 s before it and speech after it
   (`call_change_gap` in `meeting_boundaries.py`). Close after the next release ships it.
-- [ ] MEETONTRACK-104: Speaker roster named a participant "Sure" from the English word when AI
+- [x] MEETONTRACK-104 (shipped; closed in Plane 2026-11-04): Speaker roster named a participant "Sure" from the English word when AI
   naming was unavailable. Common words must never become names. Source fix 2026-10-26:
   "I am X"/"I'm X" counts as a self-introduction only when X is written capitalised
   (`spoken_name` in `server.py`), and the roster's "имя звучит в разговоре" hint matches
   the name case-sensitively (`archive.py`). Close after the next release ships it.
-- [ ] MEETONTRACK-105: Codex lost its sign-in (`token_revoked`, 2026-10-28) and the banner
+- [x] MEETONTRACK-105 (shipped; closed in Plane 2026-11-04): Codex lost its sign-in (`token_revoked`, 2026-10-28) and the banner
   showed raw "workspace routing discovery unauthorized (401)". Source fix: "Sign in to
   <tool>" buttons for Codex, Claude Code and Antigravity (`POST /api/ai/sign-in`) and
   Antigravity enabled with an isolated strict agy home (commits c54397b, 337ebd9).
   Close after the next release ships it.
-- [ ] MEETONTRACK-107: analysis lost when the AI fails mid-meeting; rebuild endpoint + auto-retry
+- [x] MEETONTRACK-107 (shipped; closed in Plane 2026-11-04): analysis lost when the AI fails mid-meeting; rebuild endpoint + auto-retry
   (commit c499d54; review fixes d44c72e, 842c84d, aa861a7). Close after release.
   Open P2s from the 2026-11-02 re-review: a rebuild started with the button does not pause
   when a recording starts (`analysis_rebuild.py` `start()` passes no busy predicate), and
@@ -455,7 +455,7 @@ hashes, Pages removed, and the Windows installer relocated to
   promoting the unsigned Windows technical beta to a stable release.
 - MEETONTRACK-29: Windows signed distribution and automatic-install acceptance remain future
   work; verify release notifications and manual update instructions now.
-- MEETONTRACK-65: Upgrade can keep serving the previous version (found 2026-10-21 while fixing
+- [x] MEETONTRACK-65 (shipped; closed in Plane 2026-11-04): Upgrade can keep serving the previous version (found 2026-10-21 while fixing
   the macOS LaunchAgent restart race). `scripts/windows/install.ps1` never stops
   the running web server, and `meeting-copilot.ps1` reuses any healthy server on
   port 43121, so the old `versions\<old>\web\server.py` keeps running after an
@@ -556,7 +556,9 @@ stored in this repository. Verify the public installed package as well as source
   first-time user who has not received instructions from the developer.
   Owner rule 2026-10-21: the fewest clicks, no confirmations. A speech model the
   installer downloaded counts as chosen. Auto-record is on by default and lives in
-  Settings. Interface language lives in Settings only. Never ask how to split speakers:
+  Settings. Interface language: confirmed at first launch, preselected Russian when macOS's
+  first language is Russian and English otherwise, changeable in Settings (owner
+  correction 2026-11-04; the web UI uses the same default until config.json has one). Never ask how to split speakers:
   label by channel, then use the existing live diarizer and post-call speaker naming.
 - [ ] MEETONTRACK-67: One-time in-app showcase at first launch, before setup: what
   MeetOnTrack does differently (live answers from your files with sources, both sides

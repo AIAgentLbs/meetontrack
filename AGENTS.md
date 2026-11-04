@@ -10,6 +10,11 @@ Owner scope decision: 2026-10-19.
   tracker (project `MEETONTRACK`, owner decision 2026-10-21). `docs/TODO.md` mirrors
   it: every open item carries its `MEETONTRACK-N` number. Add new work to the
   tracker first, then the mirror line; close it in the tracker.
+- Closing tasks (owner rule 2026-11-04): the agent closes a MEETONTRACK task
+  itself, in Plane and in this mirror, once the release containing its fix is
+  published on GitHub Releases and the website points to it; work that ships no
+  release (repository or process work) is closed when done and verified. Mike
+  does not close these tasks by hand.
 - Website, domain/DNS, GA4, GSC, Umami, SEO, marketing email-domain setup,
   competitor comparisons, keyword/trademark research and promotional demos belong
   to the private `AIAgentLbs/meetontrack-website` repository, deployed by
