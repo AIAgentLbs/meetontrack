@@ -26,18 +26,8 @@ export PYTHONDONTWRITEBYTECODE=1
 [[ -x "$python" ]] || python="$(command -v python3 || true)"
 [[ -x "$python" ]] || { print -u2 "MeetOnTrack Python runtime is missing; reinstall from meetontrack.com."; exit 1; }
 
-open_copilot() {
-  if [[ -d "/Applications/Google Chrome.app" ]]; then
-    /usr/bin/osascript \
-      -e 'tell application "Google Chrome"' \
-      -e 'set copilotWindow to make new window' \
-      -e "set URL of active tab of copilotWindow to \"$web_url\"" \
-      -e 'activate' \
-      -e 'end tell' >/dev/null 2>&1 || open "$web_url"
-  else
-    open "$web_url"
-  fi
-}
+# The assistant lives in the app's own window, not in a browser tab.
+open_copilot() { open -a "$capture_app"; }
 
 case "${1:-}" in
   "") ;;

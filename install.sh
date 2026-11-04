@@ -46,8 +46,13 @@ finish() {
   if [[ $status -ne 0 && "$committed" != true && ${#replaced[@]} -gt 0 ]]; then
     # A new app that failed its readiness check is quit before its files go.
     if [[ "$launched" == true ]]; then
+      # Quit it (and its service) for good before its files are swapped back.
       pkill -TERM -f "$app/Contents/MacOS/MeetingCopilotCapture" >/dev/null 2>&1 || true
-      sleep 2
+      for wait in {1..40}; do
+        pgrep -f "$app/Contents/(MacOS/MeetingCopilotCapture|Resources/payload/)" >/dev/null 2>&1 || break
+        sleep 0.25
+      done
+      pkill -KILL -f "$app/Contents/(MacOS/MeetingCopilotCapture|Resources/payload/)" >/dev/null 2>&1 || true
     fi
     for ((index=${#replaced[@]}-1; index>=0; index--)); do
       target="${replaced[$index]}"

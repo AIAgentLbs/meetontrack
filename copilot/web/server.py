@@ -3485,6 +3485,9 @@ def main() -> None:
     # The assistant is optional. Missing Codex is explained by first-run UI;
     # it must not prevent recording, transcript viewing, or source setup.
 
+    # Bind first: a port someone else holds must fail before any worker can
+    # touch the archive or start a delivery next to that other service.
+    server = ThreadingHTTPServer((HOST, args.port), Handler)
     poller = threading.Thread(target=TRANSCRIPT.loop, name="meeting-copilot-poller", daemon=True)
     poller.start()
     recognition_worker = threading.Thread(
@@ -3508,7 +3511,6 @@ def main() -> None:
                      name="analysis-rebuilds", daemon=True).start()
     if args.exit_with_parent:
         watch_parent(sys.stdin.buffer)
-    server = ThreadingHTTPServer((HOST, args.port), Handler)
     url = f"http://{HOST}:{args.port}"
     print(f"MeetOnTrack: {url}", flush=True)
     print("Press Ctrl+C to stop the local UI.", flush=True)

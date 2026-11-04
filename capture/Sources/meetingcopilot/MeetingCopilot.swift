@@ -81,8 +81,14 @@ struct Run: ParsableCommand {
 
         // An explicit first-run choice precedes every persistent window and
         // permission check, preselected from the Mac's first language.
-        // Cancelling starts neither the recorder nor setup.
-        guard FirstLaunchLanguage.confirmIfNeeded() else { return }
+        // Cancelling starts neither the recorder nor setup. The assistant's
+        // service starts first: an installer waiting for it must not time out
+        // while someone reads the dialog.
+        LocalServer.shared.start()
+        guard FirstLaunchLanguage.confirmIfNeeded() else {
+            LocalServer.shared.stop()
+            return
+        }
 
         // Keep the command line pointing at this bundle, so agents and
         // scripts reach the same signed program the app runs.

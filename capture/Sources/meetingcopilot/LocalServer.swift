@@ -69,9 +69,12 @@ final class LocalServer {
         guard timer == nil else { return }
         stopping = false
         check()
-        timer = Timer.scheduledTimer(withTimeInterval: checkInterval, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: checkInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.check() }
         }
+        // Common modes: keep supervising while a modal dialog is up.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     /// Run `action` once the server answers; at once if it already does.
