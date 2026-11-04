@@ -68,6 +68,11 @@ hashes, Pages removed, and the Windows installer relocated to
   Fixed on main 2026-11-04; closes on release. (`MEETONTRACK_INSTANCE`, echoed as `instance` by `/api/health`.) A foreign
   server on the port is not adopted; the window then waits and `server.log` shows the
   bind failure, it does not name the conflict.
+- [ ] MEETONTRACK-124: AI sign-in CLIs run in their own session (`ai_providers.py` `_spawn`), so an open
+  sign-in outlives the app-run service on quit. Track them and stop each group on server shutdown.
+- [ ] MEETONTRACK-125: `install.sh` rewrites `config.json` to drop the retired analytics key before the
+  new app is proven; a rolled-back install keeps the rewritten file. Move the migration after the commit
+  point or add config.json to the rollback set.
 - [ ] MEETONTRACK-109: One MeetOnTrack app with its own window: Python and the web
   payload inside the bundle, the app runs the local service itself (no launchd
   agent) and shows the UI in a WKWebView window instead of a browser tab. Signed,
