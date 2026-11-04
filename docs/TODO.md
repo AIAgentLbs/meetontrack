@@ -39,11 +39,19 @@ hashes, Pages removed, and the Windows installer relocated to
 
 ## One macOS recorder source (2026-10-20)
 
-- [ ] MEETONTRACK-2: One repository (owner decision 2026-11-04): move the Windows
-  recorder (`windows/` and its CI) from `AIAgentLbs/meetontrack-recorder` into
-  `windows/` here, build it from this repository, then archive
-  `meetontrack-recorder` (read-only, pointer to `meetontrack`). This repository's
-  URL, releases and website links stay unchanged. `capture/` remains the Mac source.
+- [x] MEETONTRACK-2: One repository (owner decision 2026-11-04): the Windows
+  recorder moved into `windows/` with its history (from `meetontrack-recorder`
+  `50e7448`); `windows-candidate.yml` builds, packages and accepts it from here
+  ([run 41826469696](https://github.com/AIAgentLbs/meetontrack/actions/runs/41826469696));
+  `meetontrack-recorder` archived with a pointer. `capture/` remains the Mac source.
+- [ ] MEETONTRACK-110: `windows/tests/test_workflow_safety.py:7` targets the upstream
+  `windows-beta.yml`, which was not moved; both tests fail. Rewrite them for
+  `windows-candidate.yml` and run them there, or delete them.
+- [ ] MEETONTRACK-111: Pin the .NET SDK (`windows/global.json`). With `10.0.x` the
+  rebuilt recorder bundles runtime 10.0.14 instead of 0.1.18's 10.0.13: same files,
+  different bytes, so a rebuild of one commit is not reproducible.
+- [ ] MEETONTRACK-112: `windows/BETA.md:94` links to a hardware checklist that exists
+  only upstream; link gsamat/amanu's copy or our own.
 - [ ] MEETONTRACK-109: One MeetOnTrack app with its own window: Python and the web
   payload inside the bundle, the app runs the local service itself (no launchd
   agent) and shows the UI in a WKWebView window instead of a browser tab. Signed,
