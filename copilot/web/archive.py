@@ -1530,7 +1530,7 @@ class MeetingArchive:
 
     @classmethod
     def _print_pdf(cls, html_path: Path, pdf_path: Path) -> None:
-        """Print with Chrome, else Edge, else Chromium: a browser that fails hands over to the next."""
+        """Print with Chrome, else Edge, else Chromium: a browser that fails hands over to the next (MEETONTRACK-123)."""
         browsers = cls.pdf_browsers()
         if not browsers:
             raise ReportPdfError("Не найден браузер Chrome или Edge для создания PDF")

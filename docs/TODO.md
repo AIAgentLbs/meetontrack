@@ -57,12 +57,17 @@ hashes, Pages removed, and the Windows installer relocated to
 - [ ] MEETONTRACK-114: Processes the web service starts (AI CLIs, headless Chrome,
   helpers) survive when the app stops the service (`LocalServer.swift`, `server.py`).
   Start the service in its own process group and signal the group on stop.
+  Fixed on main 2026-11-04; closes on release. (`server.py` leads its group and terminates it on shutdown; the app
+  kills the group after stop, a hang or a crash; tests in `test_parent_watch.py`, `LocalServerTests`.)
 - [ ] MEETONTRACK-115: `copilot/web/test_ai_providers.py` has 5 failures and 2 errors
   under the bundled Python 3.12 runtime (also on baseline). Fix them and run the web
   suite with the packaged runtime in the candidate check.
 - [ ] MEETONTRACK-116: `LocalServer.swift` adopts any server on port 43121 that
   reports the bundle's version (another user's, or one started by hand). Pass a
   per-launch nonce to the child and adopt only a server that echoes it.
+  Fixed on main 2026-11-04; closes on release. (`MEETONTRACK_INSTANCE`, echoed as `instance` by `/api/health`.) A foreign
+  server on the port is not adopted; the window then waits and `server.log` shows the
+  bind failure, it does not name the conflict.
 - [ ] MEETONTRACK-109: One MeetOnTrack app with its own window: Python and the web
   payload inside the bundle, the app runs the local service itself (no launchd
   agent) and shows the UI in a WKWebView window instead of a browser tab. Signed,
@@ -240,10 +245,14 @@ hashes, Pages removed, and the Windows installer relocated to
 - [ ] MEETONTRACK-121: two P2s left by the MEETONTRACK-119 review: a split meeting whose boundary moved can still
   copy a correction by start time onto a merged line (`archive.py` `sync_transcript` annotation), and a flagged line
   whose start shifts in a revised final loses its review entry (`_still_to_review`). Approach: move such corrections
-  into `corrected_live`; remap flagged spans by overlap.
+  into `corrected_live`; remap flagged spans by overlap. Fixed on main 2026-11-04; closes on release.
 - [ ] MEETONTRACK-122: a restart between the email and the Telegram send can send the email again
   (`archive.py` `deliver` writes `delivery-receipts.json` only at the end; pre-existing). Approach: persist each
   channel as "unknown" before its send and its receipt right after it, as `delivery_retry.py` does.
+  Fixed on main 2026-11-04; closes on release.
+- [ ] MEETONTRACK-123: the report PDF used only the first browser found; Chrome that cannot print
+  sent the HTML fallback although Edge or Chromium could print (`archive.py` `_print_pdf`). Now every
+  installed browser is tried in order before the HTML fallback. Fixed on main 2026-11-04; closes on release.
 - [ ] MEETONTRACK-118: a final transcript that never arrives stops being flagged after the 3-day delivery window
   (`archive.py` `_final_wait`, `delivery_health`), and a late final makes the report on request only.
 - [ ] MEETONTRACK-89: Mac call-audio capture fades to silence during Chrome calls (39 of 53 min lost on 2026-10-21);
