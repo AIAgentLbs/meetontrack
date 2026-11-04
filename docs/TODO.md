@@ -220,6 +220,11 @@ hashes, Pages removed, and the Windows installer relocated to
   over by time overlap on the same channel, per line and then per final voice (`speaker_edits.py` `carry_corrections`);
   a correction the final cannot place keeps the final's own label and the meeting shows "check the speakers"
   (`speaker_review`). The report is then sent once, from the final transcript.
+- [ ] MEETONTRACK-119: remaining edge cases of carrying speaker corrections to the final transcript (MEETONTRACK-117
+  review P2s): a final line with the same start but a longer span keeps a correction by timestamp
+  (`archive.py` `_drops_corrections`); split meetings are not guarded before import; a small corrected overlap that loses
+  to uncorrected text is not flagged; `speaker_review` names are dropped by `SpeakerEdits._write` or a revised final;
+  the corrected import skips `translation_en` preservation. Approach: keep corrected spans until the import consumes them.
 - [ ] MEETONTRACK-118: a final transcript that never arrives stops being flagged after the 3-day delivery window
   (`archive.py` `_final_wait`, `delivery_health`), and a late final makes the report on request only.
 - [ ] MEETONTRACK-89: Mac call-audio capture fades to silence during Chrome calls (39 of 53 min lost on 2026-10-21);
