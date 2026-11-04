@@ -52,6 +52,14 @@ hashes, Pages removed, and the Windows installer relocated to
   different bytes, so a rebuild of one commit is not reproducible.
 - [ ] MEETONTRACK-112: `windows/BETA.md:94` links to a hardware checklist that exists
   only upstream; link gsamat/amanu's copy or our own.
+- [ ] MEETONTRACK-113: Windows counterpart of MEETONTRACK-109: the recorder runs the
+  local service itself and shows the UI in its own window.
+- [ ] MEETONTRACK-114: Processes the web service starts (AI CLIs, headless Chrome,
+  helpers) survive when the app stops the service (`LocalServer.swift`, `server.py`).
+  Start the service in its own process group and signal the group on stop.
+- [ ] MEETONTRACK-115: `copilot/web/test_ai_providers.py` has 5 failures and 2 errors
+  under the bundled Python 3.12 runtime (also on baseline). Fix them and run the web
+  suite with the packaged runtime in the candidate check.
 - [ ] MEETONTRACK-109: One MeetOnTrack app with its own window: Python and the web
   payload inside the bundle, the app runs the local service itself (no launchd
   agent) and shows the UI in a WKWebView window instead of a browser tab. Signed,
