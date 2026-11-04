@@ -59,7 +59,8 @@ class WindowsRuntimeTests(unittest.TestCase):
             finally:
                 httpd.shutdown()
                 httpd.server_close()
-        self.assertEqual(body, {"ok": True, "service": "meeting-copilot", "version": "9.9.9-windows-beta.1"})
+        self.assertEqual(body, {"ok": True, "service": "meeting-copilot", "version": "9.9.9-windows-beta.1",
+                                "instance": os.environ.get("MEETONTRACK_INSTANCE", "")})
 
     def test_windows_liveness_never_calls_os_kill(self):
         with patch("recording_health.os.name", "nt"), patch("recording_health.os.kill") as kill, \

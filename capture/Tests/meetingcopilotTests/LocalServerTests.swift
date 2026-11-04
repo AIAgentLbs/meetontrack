@@ -39,9 +39,10 @@ struct LocalServerTests {
         #expect(server.launches == 2)
     }
 
-    @Test("A server that is already answering is used, not started twice")
-    func adoptsHealthyServer() async throws {
-        let server = LocalServer(command: try command("sleep 30"), probe: { "0.1.19" })
+    @Test("The app's own server is used, not started twice")
+    func adoptsOwnServer() async throws {
+        let server = LocalServer(command: try command("sleep 30"), instance: "own",
+                                 probe: { .init(version: "0.1.19", instance: "own") })
         var ready = false
         server.whenReady { ready = true }
         server.start()
@@ -51,9 +52,52 @@ struct LocalServerTests {
         server.stop()
     }
 
+    @Test("A same-version server the app did not start is not adopted (MEETONTRACK-116)")
+    func refusesForeignInstance() async throws {
+        let server = LocalServer(command: try command("sleep 30"), expectedVersion: "0.1.19", instance: "own",
+                                 probe: { .init(version: "0.1.19", instance: "someone-else") })
+        server.checkInterval = 0.05
+        server.start()
+        await wait { server.launches == 1 }
+        #expect(server.launches == 1)
+        #expect(!server.isReady)
+        server.stop(grace: 1)
+        // A build without a payload has no child of its own: it uses whatever answers.
+        #expect(LocalServer(command: nil).isOurs(.init(version: "0.1.19", instance: "")))
+    }
+
+    @Test("The child is told this run's token")
+    func passesInstance() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let server = LocalServer(command: try command("echo \"$MEETONTRACK_INSTANCE\" > '\(root.path)'; sleep 30"),
+                                 instance: "token-1", probe: { nil })
+        server.start()
+        await wait { (try? String(contentsOf: root, encoding: .utf8)) != nil }
+        #expect((try? String(contentsOf: root, encoding: .utf8)) == "token-1\n")
+        server.stop(grace: 1)
+    }
+
+    @Test("Stopping the server also stops what it started (MEETONTRACK-114)")
+    func stopsGrandchildren() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        // The server leads its own process group, as server.py does with --exit-with-parent,
+        // and leaves a child that ignores SIGINT behind.
+        let script = "exec /usr/bin/perl -e 'setpgrp(0,0); $SIG{INT}=sub{exit 0}; "
+            + "if (!fork) { $SIG{INT}=q(IGNORE); open my $f, q(>), q(\(root.path)); print $f $$; close $f; sleep 60; exit } sleep 60'"
+        let server = LocalServer(command: try command(script), probe: { nil })
+        server.start()
+        await wait { (try? String(contentsOf: root, encoding: .utf8)).flatMap { Int32($0) } != nil }
+        let grandchild = try #require((try? String(contentsOf: root, encoding: .utf8)).flatMap { Int32($0) })
+        #expect(kill(grandchild, 0) == 0)
+        server.stop(grace: 1)
+        await wait { kill(grandchild, 0) != 0 }
+        #expect(kill(grandchild, 0) == -1)
+    }
+
     @Test("An old server still holding the port is not adopted")
     func refusesOtherVersion() async throws {
-        let server = LocalServer(command: try command("sleep 30"), expectedVersion: "0.1.19", probe: { "0.1.18" })
+        let server = LocalServer(command: try command("sleep 30"), expectedVersion: "0.1.19",
+                                 probe: { .init(version: "0.1.18", instance: "") })
         server.checkInterval = 0.05
         server.start()
         await wait { server.launches == 1 }

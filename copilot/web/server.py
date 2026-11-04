@@ -2802,7 +2802,9 @@ class Handler(BaseHTTPRequestHandler):
                                                           refresh=query.get("refresh", [""])[0] == "1")})
         elif path == "/api/health":
             # The launcher reuses a running server only when it is this exact installed version.
-            self._json({"ok": True, "service": "meeting-copilot", "version": UPDATES.identity["version"]})
+            # "instance" lets the app tell its own child from another server on the port (MEETONTRACK-116).
+            self._json({"ok": True, "service": "meeting-copilot", "version": UPDATES.identity["version"],
+                        "instance": os.environ.get("MEETONTRACK_INSTANCE", "")})
         elif path == "/api/state":
             transcript = annotated_snapshot()
             with FRAMES.lock:
@@ -3274,6 +3276,29 @@ def watch_parent(stream) -> threading.Thread:
     return thread
 
 
+def own_process_group() -> bool:
+    """Lead a process group, so everything this server starts can be stopped with it (MEETONTRACK-114)."""
+    if os.name == "nt":
+        return False
+    try:
+        os.setpgid(0, 0)
+    except OSError:
+        return False
+    return True
+
+
+def stop_process_group() -> None:
+    """Terminate what this server started (AI CLIs, a printing browser); the server itself goes on to exit."""
+    import signal
+    if os.name == "nt" or os.getpgrp() != os.getpid():
+        return
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    try:
+        os.killpg(os.getpgrp(), signal.SIGTERM)
+    except OSError:
+        pass
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local live meeting copilot")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -3509,7 +3534,9 @@ def main() -> None:
     threading.Thread(target=FACT_CHECKS.loop, args=(TRANSCRIPT.stop,), name="fact-checks", daemon=True).start()
     threading.Thread(target=REBUILDS.loop, args=(TRANSCRIPT.stop, lambda: TRANSCRIPT.status in ARCHIVE_BUSY),
                      name="analysis-rebuilds", daemon=True).start()
+    leads_group = False
     if args.exit_with_parent:
+        leads_group = own_process_group()
         watch_parent(sys.stdin.buffer)
     url = f"http://{HOST}:{args.port}"
     print(f"MeetOnTrack: {url}", flush=True)
@@ -3523,6 +3550,8 @@ def main() -> None:
     finally:
         TRANSCRIPT.stop.set()
         server.server_close()
+        if leads_group:
+            stop_process_group()
 
 
 if __name__ == "__main__":
