@@ -151,7 +151,7 @@ case "$*" in
       printf '{"ok":true,"service":"different-app"}'
     else
       touch "$FIXTURE_ROOT/healthy"
-      printf '{"ok":true,"service":"meeting-copilot","version":"%s"}' "${MOCK_HEALTH_VERSION:-0.1.9}"
+      printf '{"ok":true,"service":"meeting-copilot","version":"%s","instance":"%s"}' "${MOCK_HEALTH_VERSION:-0.1.9}" "${MOCK_HEALTH_INSTANCE-app-token}"
     fi
     exit 0;;
 esac
@@ -173,7 +173,8 @@ exit 2
         self.assertFalse((self.root / "launches").exists())
 
     def test_unready_unrelated_or_old_service_is_not_success(self):
-        for environment in ({"MOCK_WRONG_SERVICE": "1"}, {"MOCK_HEALTH_VERSION": "0.1.18"}):
+        for environment in ({"MOCK_WRONG_SERVICE": "1"}, {"MOCK_HEALTH_VERSION": "0.1.18"},
+                            {"MOCK_HEALTH_INSTANCE": ""}):  # started by hand, not by the app
             with self.subTest(environment=environment):
                 for name in ("opened", "health-count", "healthy"):
                     (self.root / name).unlink(missing_ok=True)

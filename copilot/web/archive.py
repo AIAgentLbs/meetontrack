@@ -377,8 +377,10 @@ class MeetingArchive:
                 annotated = self.annotate_speakers(stored)
                 final = self.transcript_annotator({**snapshot, "segments": final}).get("segments", final)
                 # A waiting line that is also shown again counts once (MEETONTRACK-121).
-                live_lines = {_line_key(s): s for s in [*annotated.get("segments", []),
-                                                         *stored.get("corrected_live", [])]}
+                live_lines = {_line_key(s): s for s in stored.get("corrected_live", [])}
+                for line in annotated.get("segments", []):  # a newer correction of the same line wins
+                    if line.get("speaker_identity") == "manual" or _line_key(line) not in live_lines:
+                        live_lines[_line_key(line)] = line
                 segments, names, review = carry_corrections(
                     list(live_lines.values()), stored.get("speaker_names", {}), final)
                 _keep_translations(stored.get("segments", []), segments)
@@ -406,11 +408,11 @@ class MeetingArchive:
         open_lines = [s for s in segments if s.get("speaker_identity") != "manual"]
         ids = [key for key in review.get("segment_ids", []) + earlier.get("segment_ids", [])
                if key in present and present[key].get("speaker_identity") != "manual"]
-        # A flagged line whose start moved in the revised final is found again by its
-        # time span on the same channel (MEETONTRACK-121).
+        # A flagged line whose start moved or that was split in the revised final is found
+        # again by its time span on the same channel (MEETONTRACK-121).
         spans = earlier.get("spans") if isinstance(earlier.get("spans"), dict) else {}
         for key in earlier.get("segment_ids", []):
-            if key in present or not isinstance(spans.get(key), list) or len(spans[key]) != 3:
+            if not isinstance(spans.get(key), list) or len(spans[key]) != 3:
                 continue
             source, first, last = spans[key]
             ids += [segment_id(s) for s in open_lines
@@ -1898,7 +1900,10 @@ class MeetingArchive:
         has_pdf = attachment.suffix == ".pdf" and attachment.is_file()
         if not has_pdf:
             attachment = source / STANDALONE_REPORT
-        receipts = _json(source / "delivery-receipts.json", {})
+        receipts = _json(source / "delivery-receipts.json", None)
+        if receipts is None and (source / "delivery-receipts.json").exists():
+            # Unreadable receipts may hide a send: never repeat it on our own (MEETONTRACK-122).
+            receipts = {"mail_status": "unknown", "telegram_status": "unknown"}
         receipts = receipts if isinstance(receipts, dict) else {}
         if not manual:
             previous = {**previous, **receipts}

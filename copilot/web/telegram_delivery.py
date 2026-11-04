@@ -79,7 +79,10 @@ async def deliver(args: argparse.Namespace) -> dict:
             return {"ok": False, "status": "unknown"}
         return {"ok": True, "status": "sent", "message_id": message.id}
     finally:
-        await client.disconnect()
+        try:
+            await client.disconnect()
+        except Exception:  # noqa: BLE001 - a sent message stays sent; never report it as failed (MEETONTRACK-122)
+            pass
 
 
 def main() -> int:

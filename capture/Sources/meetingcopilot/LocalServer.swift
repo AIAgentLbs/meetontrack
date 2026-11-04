@@ -184,6 +184,9 @@ final class LocalServer {
         }
         process.terminationHandler = { [weak self] ended in
             let pid = ended.processIdentifier, status = ended.terminationStatus
+            // At once, not later on the main actor: a crashed server's helpers must not
+            // outlive it, and its group id must not have been reused meanwhile.
+            Self.killGroup(pid)
             Task { @MainActor in self?.ended(pid: pid, status: status) }
         }
         do {
@@ -202,7 +205,6 @@ final class LocalServer {
 
     private func ended(pid: Int32, status: Int32) {
         guard process?.processIdentifier == pid else { return }
-        Self.killGroup(pid)  // A crashed server's helpers must not outlive it.
         process = nil
         stdin = nil
         isReady = false

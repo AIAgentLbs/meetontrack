@@ -238,6 +238,11 @@ class RemainingEdgeTests(unittest.TestCase):
         self.assertEqual(review["segment_ids"], [segment_id(revised[0])])
         revised[0].update(speaker_identity="manual", speaker="Synthetic Alpha")
         self.assertIsNone(MeetingArchive._still_to_review(earlier, None, revised), "assigned by hand: resolved")
+        split = [{"source": "system", "timestamp": at(0), "end_timestamp": at(5), "text": "First half"},
+                 {"source": "system", "timestamp": at(5), "end_timestamp": at(10), "text": "Second half"}]
+        review = MeetingArchive._still_to_review(earlier, None, split)
+        self.assertEqual(review["segment_ids"], [segment_id(split[0]), segment_id(split[1])],
+                         "a flagged line split in two flags both halves")
 
 
 if __name__ == "__main__":

@@ -195,12 +195,14 @@ if [[ "${MEETING_COPILOT_SKIP_LAUNCH:-0}" != "1" ]]; then
   launched=true
   open "$app"
   # The app starts the assistant's local service itself; confirm it is this
-  # version answering, not a leftover, before calling the install done.
+  # version answering, not a leftover, before calling the install done. Only a
+  # service an app started carries a launch token (MEETONTRACK-116): one started
+  # by hand on the port does not count.
   ready=false
   for attempt in {1..120}; do
     if curl --fail --silent --connect-timeout 1 --max-time 1 \
       "http://127.0.0.1:43121/api/health" \
-      | "$python" -I -B -c 'import json,sys; value=json.load(sys.stdin); sys.exit(0 if value.get("ok") is True and value.get("service")=="meeting-copilot" and value.get("version")==sys.argv[1] else 1)' "$release_version" \
+      | "$python" -I -B -c 'import json,sys; value=json.load(sys.stdin); sys.exit(0 if value.get("ok") is True and value.get("service")=="meeting-copilot" and value.get("version")==sys.argv[1] and value.get("instance") else 1)' "$release_version" \
         >/dev/null 2>&1; then
       ready=true
       break

@@ -103,6 +103,15 @@ class DeliveryTests(unittest.TestCase):
         after_restart.assert_not_called()
         self.assertEqual((result["mail_status"], result["telegram_status"]), ("sent", "unknown"))
 
+    def test_unreadable_receipts_never_send_again_on_their_own(self):
+        receipts = self.archive.reports_root / "meeting-1" / "delivery-receipts.json"
+        receipts.parent.mkdir(parents=True)
+        receipts.write_text('{"mail_status": "se')  # cut off mid-write
+        with patch.object(self.archive, "_upload_drive_report_gws", return_value=("auth_required", {})), \
+             patch.object(self.archive, "_gws_call") as gws:
+            self.assertEqual(self.archive.deliver(self.detail, {"pdf_path": str(self.pdf)})["mail_status"], "unknown")
+        gws.assert_not_called()
+
     def test_definite_failure_leaves_no_receipt_so_the_retry_still_sends(self):
         receipts = self.archive.reports_root / "meeting-1" / "delivery-receipts.json"
         receipts.parent.mkdir(parents=True)

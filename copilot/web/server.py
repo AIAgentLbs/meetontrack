@@ -2625,7 +2625,9 @@ def archive_loop() -> None:
                 for meeting_id in BOUNDARIES.closed_ids():
                     ARCHIVE.create_due_report(meeting_id)
             for part in TRANSCRIPT.snapshots():
-                snapshot = ARCHIVE.annotate_speakers(TRANSLATIONS.annotate(FRAMES.annotate(part)))
+                # sync_transcript applies speaker corrections itself; a pre-annotated part would
+                # already carry a correction by start on a changed line (MEETONTRACK-121).
+                snapshot = TRANSLATIONS.annotate(FRAMES.annotate(part))
                 ARCHIVE.sync_transcript(snapshot)
                 meeting_id = str(snapshot.get("meeting_id") or "")
                 if meeting_id:
@@ -3148,11 +3150,12 @@ class Handler(BaseHTTPRequestHandler):
                 result = RECOGNITION_GUARD.tick(manual_meeting_id=BOUNDARIES.physical_id(str(payload.get("meeting_id") or "")))
                 self._json({"ok": True, "recording_health": result})
             elif path == "/api/analyze":
-                snap = ARCHIVE.annotate_speakers(FRAMES.annotate(TRANSCRIPT.snapshot()))
+                raw_snap = FRAMES.annotate(TRANSCRIPT.snapshot())
                 # A short automatic mic session may only be dictation. Do not
                 # send it to an analysis provider unless the owner asks explicitly.
-                if snap["meeting_id"]:
-                    ARCHIVE.sync_transcript(snap)
+                if raw_snap["meeting_id"]:
+                    ARCHIVE.sync_transcript(raw_snap)  # unannotated: see archive_loop (MEETONTRACK-121)
+                snap = ARCHIVE.annotate_speakers(raw_snap)
                 candidate = ARCHIVE.detail(snap["meeting_id"]) if snap["meeting_id"] else None
                 if candidate and ARCHIVE._short_automatic(candidate) and not payload.get("force", False):
                     self._json({"ok": True, "skipped": True, "reason": "short_automatic_recording"})
