@@ -11,8 +11,11 @@ on:
         default: false
   push:
     branches: [main]
+    # Everything that enters the Windows package or its acceptance.
     paths: ['windows/**', 'scripts/windows/**', 'scripts/check_windows_candidate.ps1',
-            'scripts/test_windows_installer.ps1', '.github/workflows/windows-candidate.yml']
+            'scripts/test_windows_installer.ps1', 'scripts/vendor-delivery.py',
+            'scripts/delivery-requirements.txt', 'copilot/web/**', 'copilot/config/SESSION.md',
+            'LICENSE', '.gitattributes', '.github/workflows/windows-candidate.yml']
 permissions:
   contents: read
 jobs:

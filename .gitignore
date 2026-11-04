@@ -30,6 +30,9 @@ windows/**/bin/
 windows/**/obj/
 windows/.tools/
 windows/artifacts/
+windows/**/.vs/
+windows/**/*.csproj.user
+windows/**/TestResults/
 /managed/
 /managed.zip
 /candidate/

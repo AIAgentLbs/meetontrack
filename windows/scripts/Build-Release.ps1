@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $windowsRoot = Split-Path -Parent $PSScriptRoot
-$sourceVersion = (Get-Content -LiteralPath (Join-Path $windowsRoot "..\VERSION") -Raw).Trim()
+$sourceVersion = (Get-Content -LiteralPath (Join-Path $windowsRoot "VERSION") -Raw).Trim()
 if ([string]::IsNullOrWhiteSpace($Version)) { $Version = $sourceVersion }
 if ($Version -ne $sourceVersion) { throw "Package version must match VERSION ($sourceVersion)." }
 $publishDirectory = Join-Path $windowsRoot "artifacts\publish"

@@ -1,5 +1,11 @@
 # Third-party notices
 
+MeetOnTrack note: this is the upstream Amanu notice, kept unchanged for
+attribution. The macOS rows describe the upstream Mac app, not this Windows
+recorder. In the MeetOnTrack Windows package the licences ship under
+`capture/Licenses/` (Markdig and the native transcription runtimes), and the
+Amanu MIT licence as `capture/AMANU-LICENSE`.
+
 Amanu includes the following open-source components. Exact copies of their
 license texts are included in every application bundle under
 `Contents/Resources/Licenses`.

@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)] [string] $PublishDirectory,
     [Parameter(Mandatory = $true)] [string] $ReleaseDirectory,
-    [string] $Version = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '../../VERSION') -Raw).Trim()
+    [string] $Version = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '../VERSION') -Raw).Trim()
 )
 
 $ErrorActionPreference = 'Stop'
