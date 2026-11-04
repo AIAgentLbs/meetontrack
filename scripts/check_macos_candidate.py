@@ -3,8 +3,8 @@
 No Capture process or LaunchAgent is started; launchctl and open are fakes.
 The bundled server is started once on a spare port with a disposable HOME to
 prove the payload runs and exits when its parent's stdin closes. This does not
-claim hardware or Gatekeeper acceptance. Upgrade from 0.1.18 is simulated with
-that release's on-disk layout (agent plist, separate python/web/bin copies).
+claim hardware or Gatekeeper acceptance. Upgrade from 0.1.18-0.1.20 is simulated
+with their on-disk layout (agent plist, separate python/web/bin copies).
 """
 import argparse
 import hashlib
@@ -82,7 +82,7 @@ def main():
         assert not (fixture.root / 'compiled').exists()
         print(json.dumps({'version': manifest['version'], 'source_revision': manifest['source_revision'],
                           'sha256': digest, 'manifest_files': len(manifest['sha256']),
-                          'upgrade_from_0_1_18_layout': 'passed', 'reinstall_preserves_data': 'passed',
+                          'upgrade_from_0_1_20_layout': 'passed', 'reinstall_preserves_data': 'passed',
                           'signatures': 'ad-hoc valid', 'bundled_server': served,
                           'hardware_test': 'not performed'}, indent=2))
     finally:
@@ -97,7 +97,8 @@ def smoke_server(runtime, web, home, version, config, port=43987):
     process = subprocess.Popen([str(runtime), '-B', str(web / 'server.py'), '--port', str(port), '--no-open',
                                 '--exit-with-parent'], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL, env={'HOME': str(home), 'PATH': '/usr/bin:/bin',
-                                                               'PYTHONDONTWRITEBYTECODE': '1'}, cwd=home)
+                                                               'PYTHONDONTWRITEBYTECODE': '1',
+                                                               'MEETONTRACK_INSTANCE': 'candidate-check'}, cwd=home)
     try:
         for _ in range(120):
             assert process.poll() is None, f'bundled server exited early ({process.returncode})'
@@ -109,12 +110,15 @@ def smoke_server(runtime, web, home, version, config, port=43987):
                 time.sleep(0.25)
         else:
             raise AssertionError('bundled server did not answer')
-        assert health == {'ok': True, 'service': 'meeting-copilot', 'version': version}, health
+        # The app adopts only the server that echoes its own launch token (MEETONTRACK-116).
+        assert health == {'ok': True, 'service': 'meeting-copilot', 'version': version,
+                          'instance': 'candidate-check'}, health
         with urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=5) as response:
             assert b'MeetOnTrack' in response.read()
+        assert os.getpgid(process.pid) == process.pid, 'the server leads its own process group (MEETONTRACK-114)'
         process.stdin.close()  # the app is gone
         assert process.wait(timeout=10) == 0, f'bundled server exit status {process.returncode}'
-        return 'health, index and exit-with-parent passed'
+        return 'health, instance token, process group, index and exit-with-parent passed'
     finally:
         if process.poll() is None:
             process.kill()
