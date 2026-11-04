@@ -58,7 +58,12 @@ class DeliveryRetry:
                     if any(not enabled(settings, c) for c in channels):
                         raise ValueError("channel_disabled")
                     fields = {"email": "mail_status", "drive": "drive_status", "telegram": "telegram_status"}
-                    acknowledged = {**report, **read_json(path.parent / "delivery-receipts.json")}
+                    receipts_path = path.parent / "delivery-receipts.json"
+                    receipts = read_json(receipts_path)
+                    if not receipts and receipts_path.exists() and receipts_path.read_bytes().strip() not in {b"", b"{}"}:
+                        # Unreadable receipts may hide a send: ask before resending (MEETONTRACK-122).
+                        receipts = {"mail_status": "unknown", "telegram_status": "unknown"}
+                    acknowledged = {**report, **receipts}
                     if not confirm and any(acknowledged.get(fields[c]) in {"sent", "uploaded", "unknown"} for c in channels):
                         raise ValueError("resend_confirmation_required")
                     previous = dict(report)

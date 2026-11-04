@@ -42,6 +42,11 @@ class RetryTests(unittest.TestCase):
         self.run_retry().assert_not_called()
         self.assertEqual(self.retry.snapshot()["error"],"resend_confirmation_required")
 
+    def test_unreadable_receipts_require_confirmation(self):
+        (self.path.parent/"delivery-receipts.json").write_text('{"mail_status": "se')
+        self.run_retry().assert_not_called()
+        self.assertEqual(self.retry.snapshot()["error"],"resend_confirmation_required")
+
     def test_disabled_channel_cannot_be_retried(self):
         (self.archive.config_root/"delivery.json").write_text('{"email_enabled":false}')
         self.run_retry().assert_not_called()
