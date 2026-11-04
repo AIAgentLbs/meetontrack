@@ -841,7 +841,7 @@ Object.assign(translations.ru, {
   "delivery.final.plain": "Отчет по встрече ждет итоговую расшифровку",
   "final_wait.waiting": "Отчет ждет итоговую расшифровку и уйдет, как только она будет готова.",
   "final_wait.final_transcript": "Итоговой расшифровки нет уже {minutes} мин после звонка. Отчет не отправлен: предварительная расшифровка не отправляется. Проверьте, что приложение записи запущено. Отчет уйдет сам, когда итоговая расшифровка будет готова.",
-  "final_wait.speakers_edited": "Спикеры были исправлены в предварительной расшифровке до готовности итоговой, поэтому итоговая расшифровка не применена и отчет не отправлен.",
+  "speaker_review": "Итоговая расшифровка применена. Часть исправлений спикеров из предварительной расшифровки не удалось перенести уверенно: проверьте спикеров ({count} реплик{names}).",
   "report_failure.pdf": "Отчет не создан: Chrome не смог сохранить PDF. Попыток: {attempts}, последняя в {time}. Приложение само повторит попытку через 30 минут, или нажмите «Создать отчет заново».",
   "report_failure.other": "Отчет не создан ({message}). Попыток: {attempts}, последняя в {time}. Приложение само повторит попытку через 30 минут, или нажмите «Создать отчет заново».",
   "report_failure.short": "Отчет не создан. Откройте встречу и нажмите «Создать отчет заново».",
@@ -902,7 +902,7 @@ Object.assign(translations.en, {
   "delivery.final.plain": "A meeting report waits for the final transcript",
   "final_wait.waiting": "The report waits for the final transcript and is sent as soon as it is ready.",
   "final_wait.final_transcript": "There is still no final transcript {minutes} min after the call. The report is not sent: the preliminary transcript is never sent. Check that the recorder is running. The report is sent by itself once the final transcript is ready.",
-  "final_wait.speakers_edited": "Speakers were corrected on the preliminary transcript before the final one was ready, so the final transcript was not applied and the report is not sent.",
+  "speaker_review": "The final transcript is applied. Some speaker corrections from the preliminary transcript could not be carried over with confidence: check the speakers ({count} lines{names}).",
   "report_failure.pdf": "The report was not created: Chrome could not save the PDF. Attempts: {attempts}, last at {time}. The app tries again by itself in 30 minutes, or press Create the report again.",
   "report_failure.other": "The report was not created ({message}). Attempts: {attempts}, last at {time}. The app tries again by itself in 30 minutes, or press Create the report again.",
   "report_failure.short": "Report not created. Open the meeting and press Create the report again.",
@@ -996,8 +996,13 @@ const deliveryResend = {};
 
 // MEETONTRACK-94: a report is sent only from the final transcript; say why it waits.
 function finalWaitText(wait) {
-  if (wait.state !== "missing") return t("final_wait.waiting");
-  return t(`final_wait.${wait.reason === "speakers_edited" ? "speakers_edited" : "final_transcript"}`, {minutes: wait.minutes || 0});
+  return t(wait.state === "missing" ? "final_wait.final_transcript" : "final_wait.waiting", {minutes: wait.minutes || 0});
+}
+
+// MEETONTRACK-117: corrections made on live text that the final transcript could not take with confidence.
+function speakerReviewText(review) {
+  const names = (review.names || []).join(", ");
+  return t("speaker_review", {count: (review.segment_ids || []).length, names: names ? `; ${names}` : ""});
 }
 
 function undeliveredLabel(item) {
@@ -2444,7 +2449,8 @@ function renderArchiveList() {
       textNode("span", `archive-library-status ${meeting.library_status || ""}`, t(`library.${meeting.library_status || "transcript_ready"}`)),
       textNode("span", "archive-audio-gap", audioGapText(meeting)),
       textNode("span", "archive-report-failure", meeting.report_failure ? t("report_failure.short") : ""),
-      textNode("span", "archive-final-wait", meeting.final_wait ? finalWaitText(meeting.final_wait) : ""),
+      textNode("span", "archive-final-wait", meeting.final_wait ? finalWaitText(meeting.final_wait)
+        : meeting.speaker_review ? speakerReviewText(meeting.speaker_review) : ""),
       textNode("span", "archive-item-preview", meeting.preview || ""),
       textNode("span", "archive-item-counts", [
         archiveDuration(meeting.duration_seconds), `${meeting.transcript_count} ${t("archive.utterances")}`,
@@ -2525,6 +2531,7 @@ function renderArchiveDetail(meeting) {
   overview.append(textNode("h3", "", t("library.overview")));
   if (meeting.audio_gap) overview.append(textNode("p", "archive-quality-note archive-audio-gap", audioGapText(meeting)));
   if (meeting.final_wait) overview.append(textNode("p", "archive-final-wait", finalWaitText(meeting.final_wait)));
+  if (meeting.speaker_review) overview.append(textNode("p", "archive-final-wait", speakerReviewText(meeting.speaker_review)));
   if (meeting.report_failure) {
     const failure = textNode("div", "archive-report-failure archive-report-failure-detail", "");
     failure.append(textNode("p", "", reportFailureText(meeting.report_failure)));

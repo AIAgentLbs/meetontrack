@@ -36,6 +36,100 @@ def base_speaker(segment: dict) -> tuple[str, str]:
     return "remote-1", "Собеседник 1"
 
 
+def _seconds(value) -> float | None:
+    try:
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment.timestamp() if moment.tzinfo else None
+
+
+# A final line takes a correction only when this share of its overlap with
+# corrected live lines belongs to one person (MEETONTRACK-117).
+CARRY_CONFIDENCE = 0.6
+
+
+def carry_corrections(live: list[dict], names: dict, final: list[dict]) -> tuple[list[dict], dict, dict | None]:
+    """Carry speaker corrections made on live text over to the final transcript (MEETONTRACK-117).
+
+    `live` is the annotated live transcript (speaker_identity "manual" where the person
+    corrected it), `names` its speaker_names. The microphone's own name carries as is.
+    Other corrections carry by time overlap on the same channel, where uncorrected live
+    lines also vote: a final line takes whoever holds most of its overlap; a line without
+    such a clear match takes whoever holds most of the overlap of its whole final voice.
+    Lines touched by corrections with neither keep the final's own label and are listed for
+    review, as are corrected names that reached no final line.
+    Returns (segments, speaker_names, review or None).
+    """
+    spans: list[tuple[str, float, float, str, str]] = []  # source, start, end, speaker_id, name
+    by_source: dict[str, list[dict]] = {}
+    for item in sorted(live, key=lambda s: str(s.get("timestamp") or "")):
+        by_source.setdefault(str(item.get("source") or ""), []).append(item)
+    for source, items in by_source.items():
+        for index, item in enumerate(items):
+            start = _seconds(item.get("timestamp"))
+            if start is None:
+                continue
+            end = _seconds(item.get("end_timestamp"))
+            if end is None or end <= start:
+                following = _seconds(items[index + 1].get("timestamp")) if index + 1 < len(items) else None
+                end = start + min(30.0, following - start if following and following > start else 5.0)
+            # Uncorrected lines vote too, so one corrected line does not rename its whole voice.
+            manual = item.get("speaker_identity") == "manual" and item.get("speaker")
+            spans.append((source, start, end, str(item.get("speaker_id") or "") if manual else "", str(item.get("speaker") or "")))
+    labels = {identity: name for _, _, _, identity, name in spans if identity}
+
+    def winner(weights: Counter, length: float = 0.0) -> str | None:
+        if not weights:
+            return None
+        identity, weight = weights.most_common(1)[0]
+        confident = weight >= CARRY_CONFIDENCE * sum(weights.values()) and weight >= CARRY_CONFIDENCE * length
+        return identity if confident else None
+
+    lines = []  # (segment, its final voice, overlap weights, length)
+    voices: dict[str, Counter] = {}
+    for item in final:
+        segment = dict(item)
+        voice = base_speaker(segment)[0]
+        start, end = _seconds(segment.get("timestamp")), _seconds(segment.get("end_timestamp"))
+        weights: Counter = Counter()
+        length = 0.0
+        if start is not None:
+            end = end if end is not None and end > start else start + 1.0
+            length = end - start
+            for source, first, last, identity, _ in spans:
+                overlap = min(end, last) - max(start, first)
+                if source == segment.get("source") and overlap > 0:
+                    weights[identity] += overlap
+        if weights:
+            voices.setdefault(voice, Counter()).update(weights)
+        lines.append((segment, voice, weights, length))
+    by_voice = {voice: winner(weights) for voice, weights in voices.items()}  # Dominance only.
+
+    carried = {"self": names["self"]} if names.get("self") else {}
+    used: set[str] = set()
+    review: list[str] = []
+    for segment, voice, weights, length in lines:
+        identity = winner(weights, length) or by_voice.get(voice)
+        if not identity:  # No correction here, or one the final cannot place with confidence.
+            if identity is None and any(weights[key] for key in weights if key):
+                review.append(segment_id(segment))
+            continue
+        used.add(identity)
+        if identity == "self":
+            continue  # The microphone is "self" by channel: its name carries through speaker_names.
+        name = labels[identity]
+        target = "manual-" + hashlib.sha256(name.casefold().encode()).hexdigest()[:12]
+        segment.update(speaker_id=target, speaker=name, speaker_label=name,
+                       speaker_identity="manual", speaker_confidence="manual")
+        carried[target] = name
+    lost = sorted({name for identity, name in labels.items() if identity not in used and identity != "self"})
+    segments = [segment for segment, _, _, _ in lines]
+    if not review and not lost:
+        return segments, carried, None
+    return segments, carried, {"segment_ids": review, "names": lost}
+
+
 class SpeakerEdits:
     def __init__(self, archive_root: Path):
         self.root = archive_root

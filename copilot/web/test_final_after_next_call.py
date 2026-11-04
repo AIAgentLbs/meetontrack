@@ -16,6 +16,7 @@ from unittest.mock import patch
 import archive
 from archive import MeetingArchive
 from delivery_health import DeliveryHealth
+from speaker_edits import carry_corrections
 
 
 def iso(moment: datetime) -> str:
@@ -484,14 +485,57 @@ class FinalOnlyDeliveryTests(unittest.TestCase):
         self.archive.retry_pending_deliveries()
         self.assertEqual(self.sent, ["FIRST-CALL"])
 
-    def test_speakers_corrected_on_live_text_keep_it_unsent(self):
-        stored = self.stored()
-        stored.update(speaker_revision=1, speaker_names={"remote-1": "Synthetic Name"})
-        (self.root / "archive/FIRST-CALL/meeting.json").write_text(json.dumps(stored))
+    def test_speakers_corrected_on_live_text_carry_to_the_final_sent_once(self):
+        # MEETONTRACK-117: the person renamed the other side during the call.
+        self.archive.speaker_edits.rename(self.archive.annotate_speakers(self.stored()), "remote-1", "Synthetic Name")
         self.write_final(self.final)
         self.finalize()
-        self.assertEqual(self.sent, [])
-        self.assertEqual(self.archive.detail("FIRST-CALL")["final_wait"]["reason"], "speakers_edited")
+        self.finalize()
+        self.assertEqual(self.sent, ["FIRST-CALL"], "Sent once, from the final transcript")
+        stored = self.stored()
+        self.assertNotIn("speaker_review", stored)
+        self.assertTrue(all(item["text"].startswith("Final") for item in stored["segments"]))
+        speakers = {item["source"]: set() for item in stored["segments"]}
+        for item in self.archive.report_detail("FIRST-CALL")["transcript"]:
+            speakers.setdefault(item.get("source"), set()).add(item.get("speaker"))
+        self.assertEqual(speakers["system"], {"Synthetic Name"}, "Every line of the renamed voice")
+        self.assertNotIn("Synthetic Name", speakers["microphone"])
+
+    def test_a_correction_the_final_cannot_place_is_flagged_and_still_sent(self):
+        live = self.archive.annotate_speakers(self.stored())["segments"]
+        for segment, name in ((live[0], "Synthetic Alpha"), (live[1], "Synthetic Beta")):
+            self.archive.speaker_edits.assign(self.archive.annotate_speakers(self.stored()), [segment["segment_id"]], name=name)
+        # The final transcript holds both corrected moments in one line of one voice.
+        self.write_final([{"speaker": "me", "start_ms": 1000, "end_ms": 3000, "text": "Final hello"},
+                          {"speaker": "them", "start_ms": 39000, "end_ms": 125000, "text": "Final long line"}])
+        self.finalize()
+        self.finalize()
+        self.assertEqual(self.sent, ["FIRST-CALL"], "Still sent once, from the final transcript")
+        detail = self.archive.detail("FIRST-CALL")
+        self.assertEqual(detail["speaker_review"]["names"], ["Synthetic Alpha", "Synthetic Beta"])
+        self.assertEqual(len(detail["speaker_review"]["segment_ids"]), 1)
+        line = next(item for item in self.stored()["segments"] if item["text"] == "Final long line")
+        self.assertNotIn(line.get("speaker"), {"Synthetic Alpha", "Synthetic Beta"}, "The final keeps its own label")
+        summary = next(item for item in self.archive.list_meetings() if item["meeting_id"] == "FIRST-CALL")
+        self.assertTrue(summary["speaker_review"])
+
+    def test_the_owners_own_name_carries_to_the_final(self):
+        final = [{"source": "microphone", "timestamp": "2026-10-22T16:00:00+00:00", "text": "Final mine"}]
+        live = [{"source": "microphone", "timestamp": "2026-10-22T16:00:00+00:00", "speaker_id": "self",
+                 "speaker": "Synthetic Me", "speaker_identity": "manual", "text": "Live mine"}]
+        segments, names, review = carry_corrections(live, {"self": "Synthetic Me"}, final)
+        self.assertEqual((segments, names, review), (final, {"self": "Synthetic Me"}, None))
+
+    def test_one_corrected_line_does_not_rename_its_whole_voice(self):
+        at = lambda second: f"2026-10-22T16:00:{second:02d}+00:00"
+        live = [{"source": "system", "timestamp": at(second), "end_timestamp": at(second + 4), "speaker_id": "remote-1",
+                 "speaker": "Собеседник 1", "text": "Live"} for second in (0, 10, 20, 30)]
+        live[1].update(speaker_id="manual-x", speaker="Synthetic Guest", speaker_identity="manual")
+        final = [{"source": "system", "timestamp": at(second), "end_timestamp": at(second + 4), "text": "Final"}
+                 for second in (0, 10, 20, 30)]
+        segments, _, review = carry_corrections(live, {}, final)
+        self.assertEqual([item.get("speaker") for item in segments], [None, "Synthetic Guest", None, None])
+        self.assertIsNone(review)
 
     def test_a_rebuild_of_lost_analysis_holds_the_report_until_it_ends(self):
         pending = {"FIRST-CALL"}

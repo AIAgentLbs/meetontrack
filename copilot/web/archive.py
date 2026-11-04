@@ -23,7 +23,7 @@ from functools import wraps
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
-from speaker_edits import SpeakerEdits
+from speaker_edits import SpeakerEdits, carry_corrections
 from fact_check import with_speakers
 from delivery_health import DeliveryHealth, drive_links_ready
 from recording_health import RecordingLocations
@@ -310,24 +310,44 @@ class MeetingArchive:
         live = list(snapshot.get("segments") or [])
         if _lines(final) == _lines(live):
             final = live  # Already imported by the live file: keep its names.
+        finish = _date(snapshot.get("ended_at") or snapshot.get("updated_at"))
+        warnings = [narrowed for warning in snapshot.get("capture_warnings") or []
+                    if (narrowed := self._narrow_warning(warning, final, finish))]
         if snapshot.get("speaker_revision"):
-            # ponytail: hand-corrected speakers are kept, so only edits made on the
-            # final text itself count as final; otherwise the report waits, unsent.
-            if final is not live:
-                return False
+            # The final transcript is always imported; the person's speaker corrections
+            # on the live text are carried over to it (MEETONTRACK-117).
+            if final is live:
+                return self._mark_final(snapshot, version, live)
             with self.speaker_edits.lock:
                 path = self.archive_root / _safe(str(snapshot.get("meeting_id") or "")) / "meeting.json"
                 stored = _json(path, {})
                 if not stored or _lines(stored.get("segments", [])) != _lines(live):
-                    return False
-                _atomic_json(path, {**stored, "final_transcript": version})
+                    return False  # Corrected again meanwhile: the next pass reads the new edits.
+                annotated = self.annotate_speakers(stored)
+                final = self.transcript_annotator({**snapshot, "segments": final}).get("segments", final)
+                segments, names, review = carry_corrections(
+                    annotated.get("segments", []), stored.get("speaker_names", {}), final)
+                imported = {**stored, "segments": segments, "speaker_names": names, "capture_warnings": warnings,
+                            "latest_at": segments[-1]["timestamp"] if segments else "", "final_transcript": version,
+                            "speaker_revision": int(stored.get("speaker_revision") or 0) + 1}
+                imported.pop("speaker_review", None)
+                if review:
+                    imported["speaker_review"] = review
+                _atomic_json(path, imported)
             return True
-        finish = _date(snapshot.get("ended_at") or snapshot.get("updated_at"))
-        warnings = [narrowed for warning in snapshot.get("capture_warnings") or []
-                    if (narrowed := self._narrow_warning(warning, final, finish))]
         self.sync_transcript(self.transcript_annotator({
             **snapshot, "segments": final, "capture_warnings": warnings,
             "latest_at": final[-1]["timestamp"] if final else "", "final_transcript": version}))
+        return True
+
+    def _mark_final(self, snapshot: dict, version: str, live: list[dict]) -> bool:
+        """Corrections made on text that already was the final one: only mark it final."""
+        with self.speaker_edits.lock:
+            path = self.archive_root / _safe(str(snapshot.get("meeting_id") or "")) / "meeting.json"
+            stored = _json(path, {})
+            if not stored or _lines(stored.get("segments", [])) != _lines(live):
+                return False
+            _atomic_json(path, {**stored, "final_transcript": version})
         return True
 
     @staticmethod
@@ -650,7 +670,7 @@ class MeetingArchive:
             "report": report_meta,
         }
         for field in ("physical_meeting_id", "physical_started_at", "logical_interval", "audio_range", "explicit_boundary",
-                      "final_transcript"):
+                      "final_transcript", "speaker_review"):
             if field in snapshot:
                 result[field] = snapshot[field]
         result["final_wait"] = self._final_wait(snapshot, ended)
@@ -670,10 +690,8 @@ class MeetingArchive:
         waited = (datetime.now().astimezone() - finished).total_seconds()
         if waited > self.delivery_retry_days * 86400:
             return None
-        directory = str(snapshot.get("recording_dir") or "")
-        edited = bool(snapshot.get("speaker_revision") and directory and (Path(directory) / "transcript.json").is_file())
-        return {"state": "missing" if edited or waited >= FINAL_WAIT_ATTENTION_SECONDS else "waiting",
-                "reason": "speakers_edited" if edited else "final_transcript", "minutes": max(0, int(waited // 60))}
+        return {"state": "missing" if waited >= FINAL_WAIT_ATTENTION_SECONDS else "waiting",
+                "reason": "final_transcript", "minutes": max(0, int(waited // 60))}
 
     def _library_detail(self, detail: dict) -> dict:
         detail["source_title"] = detail["title"]
@@ -959,6 +977,7 @@ class MeetingArchive:
             "audio_gap": detail.get("audio_gap"),
             "report_failure": detail.get("report_failure"),
             "final_wait": detail.get("final_wait"),
+            "speaker_review": detail.get("speaker_review"),
             "preview": (detail.get("overview", {}).get("points") or [""])[0],
             "status": detail["status"],
             "started_at": detail["started_at"],

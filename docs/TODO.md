@@ -213,10 +213,13 @@ hashes, Pages removed, and the Windows installer relocated to
   the 15-minute retry and "Send again"), after a rebuild of lost analysis (max 2 h). No timeout falls back to live
   text: a call without its final transcript an hour after it ended shows "waiting for the final transcript" in the
   library and the delivery header and is sent once the transcript arrives. Split meetings now import their part of
-  the final transcript; hand-corrected speakers on live text keep it unsent (MEETONTRACK-117).
-- [ ] MEETONTRACK-117: speakers corrected on the preliminary transcript before `transcript.json` arrives keep the final
-  transcript from being applied, so that report is never sent (`archive.py` `import_final_transcript`); carry the names
-  over to the final text or offer "Apply the final transcript".
+  the final transcript; speakers corrected on live text carry over to it (MEETONTRACK-117).
+- [ ] MEETONTRACK-117: speakers corrected on the preliminary transcript before `transcript.json` arrives kept the final
+  transcript from being applied, so that report was never sent (`archive.py` `import_final_transcript`).
+  Fixed on main 2026-11-04 (closes when released): the final transcript is always imported and the corrections carry
+  over by time overlap on the same channel, per line and then per final voice (`speaker_edits.py` `carry_corrections`);
+  a correction the final cannot place keeps the final's own label and the meeting shows "check the speakers"
+  (`speaker_review`). The report is then sent once, from the final transcript.
 - [ ] MEETONTRACK-118: a final transcript that never arrives stops being flagged after the 3-day delivery window
   (`archive.py` `_final_wait`, `delivery_health`), and a late final makes the report on request only.
 - [ ] MEETONTRACK-89: Mac call-audio capture fades to silence during Chrome calls (39 of 53 min lost on 2026-10-21);
