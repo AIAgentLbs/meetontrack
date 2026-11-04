@@ -50,7 +50,7 @@ class DeliveryRetry:
                         raise ValueError("final_transcript_missing" if detail and detail.get("status") == "finished"
                                          and not detail.get("final_transcript") else "meeting_not_finished")
                     pdf = self.archive.report_path(identity, "meeting-report.pdf")
-                    if not pdf or not pdf.is_file():
+                    if not pdf or not pdf.is_file() or not self.archive.report_matches(detail, report):
                         raise ValueError("report_not_ready")
                     settings = self.archive.delivery_settings.read()
                     if any(not enabled(settings, c) for c in channels):

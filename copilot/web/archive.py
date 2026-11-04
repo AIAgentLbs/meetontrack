@@ -274,6 +274,7 @@ class MeetingArchive:
             if not _date(ended):
                 continue
             snapshots = [_json(self.archive_root / _safe(identity) / "meeting.json", {}) for identity in logical_ids]
+            first.pop("final_transcript", None)  # One split's final mark is not every split's.
             physical = {**first, "meeting_id": physical_id, "status": "finished", "ended_at": ended,
                         "started_at": first.get("physical_started_at") or first.get("started_at"),
                         "updated_at": ended, "segments": [segment for snap in snapshots for segment in snap.get("segments", [])]}
@@ -1061,17 +1062,19 @@ class MeetingArchive:
                 if sending:
                     delivery = self.deliver(detail, meta, previous=previous_delivery)
                 elif deliver and not meta.get("delivery_on_request"):
+                    # "unknown" (a send whose outcome was lost) stays: only the person resends it.
                     delivery = {
                         "drive_status": (
                             "uploaded" if previous_report.get("drive_status") == "uploaded"
                             else "waiting_for_end"
                         ),
                         "mail_status": (
-                            "sent" if previous_report.get("mail_status") == "sent"
+                            previous_report["mail_status"] if previous_report.get("mail_status") in {"sent", "unknown"}
                             else "waiting_for_end"
                         ),
                         "telegram_status": (
-                            "sent" if previous_report.get("telegram_status") == "sent"
+                            previous_report["telegram_status"]
+                            if previous_report.get("telegram_status") in {"sent", "unknown"}
                             else "waiting_for_end"
                         ),
                     }
@@ -1187,9 +1190,9 @@ class MeetingArchive:
             if not pending:
                 continue
             detail = self.report_detail(path.parent.name)
-            if (not detail or not self._ready_for_delivery(detail)
+            if (not detail or not self._ready_for_delivery(detail) or not self.report_matches(detail, meta)
                     or not Path(str(meta.get("pdf_path") or "")).is_file()):
-                continue
+                continue  # A PDF made from live text is made again from the final one first.
             gate = self.report_gate(path.parent.name)
             if not gate.acquire(blocking=False):
                 continue  # Its report is being created and sent right now.
@@ -1460,6 +1463,10 @@ class MeetingArchive:
         return bool(report.get("generated_while_recording")) or (
             report.get("source_signature") != self.source_signature(detail)
         )
+
+    def report_matches(self, detail: dict, meta: dict) -> bool:
+        """The stored PDF was made from the meeting's current text (MEETONTRACK-94)."""
+        return meta.get("source_signature") == self.source_signature(detail)
 
     def _ready_for_delivery(self, detail: dict) -> bool:
         if self._short_automatic(detail):

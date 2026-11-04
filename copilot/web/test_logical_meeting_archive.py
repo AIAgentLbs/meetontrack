@@ -85,6 +85,15 @@ class LogicalArchiveTests(unittest.TestCase):
     def test_intentional_short_split_is_not_discarded_as_dictation(self):
         self.assertFalse(self.archive._short_automatic({"explicit_boundary": True, "recording_trigger": "mic-activity", "duration_seconds": 30}))
 
+    def test_one_splits_final_mark_never_reaches_another_split(self):
+        self.physical["status"] = "recording"
+        self.sync()
+        path = self.archive.archive_root / "p1" / "meeting.json"
+        path.write_text(json.dumps({**json.loads(path.read_text()), "final_transcript": "1:1"}))
+        self.archive.reconcile_boundaries(MeetingBoundaries(self.store.path))
+        self.assertNotIn("final_transcript", json.loads((self.archive.archive_root / self.second / "meeting.json").read_text()))
+        self.assertFalse(self.archive.needs_report(self.second))
+
     def test_restart_reconciles_old_open_interval_from_completed_native_metadata(self):
         self.physical["status"] = "recording"
         self.sync()

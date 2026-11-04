@@ -157,6 +157,7 @@ class DeliveryHealthTests(unittest.TestCase):
                                         "uncertain": False, **label}])
         sent = {"drive_status": "uploaded", "mail_status": "sent", "telegram_status": "sent"}
         with patch.object(archive, "report_detail", return_value={"meeting_id": "test", "status": "finished"}), \
+             patch.object(archive, "report_matches", return_value=True), \
              patch.object(archive, "_ready_for_delivery", return_value=True), \
              patch.object(archive, "deliver", return_value=sent) as deliver:
             DeliveryRetry(archive)._run("test", "request-0123456789", set(undelivered[0]["channels"]), True)

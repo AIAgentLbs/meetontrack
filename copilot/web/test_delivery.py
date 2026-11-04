@@ -96,6 +96,7 @@ class DeliveryTests(unittest.TestCase):
             "drive_status": "auth_required", "mail_status": "auth_required",
         }), encoding="utf-8")
         with patch.object(self.archive, "report_detail", return_value=self.detail), \
+             patch.object(self.archive, "report_matches", return_value=True), \
              patch.object(self.archive, "deliver", return_value={
                  "drive_status": "uploaded", "mail_status": "sent"
              }) as deliver:
@@ -141,6 +142,7 @@ class DeliveryTests(unittest.TestCase):
             "mail_status": "sent", "telegram_status": "sent",
         }), encoding="utf-8")
         with patch.object(self.archive, "report_detail", return_value=self.detail), \
+             patch.object(self.archive, "report_matches", return_value=True), \
              patch.object(self.archive, "deliver", return_value={
                  "drive_status": "uploaded", "mail_status": "sent", "telegram_status": "sent",
              }) as deliver:

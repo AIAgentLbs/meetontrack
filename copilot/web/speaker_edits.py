@@ -56,6 +56,10 @@ class SpeakerEdits:
         path = self._path(meeting_id)
         private_dir(path.parent)
         canonical = self._read(meeting_id)
+        lines = lambda items: [(i.get("source"), i.get("timestamp"), i.get("text")) for i in items]
+        if canonical.get("final_transcript") and lines(snapshot["segments"]) != lines(canonical.get("segments", [])):
+            # The final transcript arrived while this edit was open (MEETONTRACK-94).
+            raise ValueError("Стенограмма изменилась. Откройте разметку снова")
         for field in ("meeting", "status", "started_at", "updated_at", "latest_at", "capture_warnings"):
             if field in snapshot:
                 canonical[field] = snapshot[field]

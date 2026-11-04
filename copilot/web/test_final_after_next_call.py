@@ -503,6 +503,37 @@ class FinalOnlyDeliveryTests(unittest.TestCase):
         self.finalize()
         self.assertEqual(self.sent, ["FIRST-CALL"])
 
+    def make_report(self) -> None:
+        with patch.object(self.archive, "_print_pdf", side_effect=lambda html, pdf: pdf.write_bytes(b"%PDF synthetic")), \
+             patch.object(self.archive, "deliver") as deliver:
+            self.archive.generate_report("FIRST-CALL")  # The person's button, before the final transcript.
+        deliver.assert_not_called()
+
+    def test_a_pdf_made_from_live_text_is_never_retried_after_the_final_import(self):
+        self.make_report()
+        self.write_final(self.final)
+        self.archive.import_final_transcript(self.stored())
+        with patch.object(self.archive, "deliver") as deliver:
+            self.archive.retry_pending_deliveries()
+        deliver.assert_not_called()
+        self.finalize()  # Made again from the final text, then sent.
+        self.assertEqual(self.sent, ["FIRST-CALL"])
+
+    def test_an_uncertain_send_stays_uncertain_while_the_report_waits(self):
+        report_dir = self.root / "reports/FIRST-CALL"
+        report_dir.mkdir(parents=True)
+        (report_dir / "report.json").write_text(json.dumps({"mail_status": "unknown"}))
+        self.make_report()
+        self.assertEqual(self.report()["mail_status"], "unknown")
+
+    def test_a_speaker_edit_opened_on_live_text_cannot_overwrite_the_final_one(self):
+        live = self.archive.detail("FIRST-CALL")
+        self.write_final(self.final)
+        self.archive.import_final_transcript(self.stored())
+        with self.assertRaises(ValueError):
+            self.archive.speaker_edits.rename({**live, "segments": live["transcript"]}, "remote-1", "Synthetic Name")
+        self.assertEqual(len(self.stored()["segments"]), 406)
+
     def test_meetings_already_sent_are_never_sent_again(self):
         # Sent from live text before this change, within and after the delivery window.
         for days in (0, 10):

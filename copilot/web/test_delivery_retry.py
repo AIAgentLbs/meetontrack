@@ -22,10 +22,12 @@ class RetryTests(unittest.TestCase):
         self.path=directory/"report.json"
         self.path.write_text(json.dumps({"mail_status":"failed","generated_at":datetime.now(timezone.utc).isoformat()}))
         self.retry=DeliveryRetry(self.archive)
+        self.matches=True
         self.detail={"meeting_id":"call-1","status":"finished","final_transcript":"1:1","ended_at":(datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat()}
 
     def run_retry(self, confirm=False):
         with patch.object(self.archive,"report_detail",return_value=self.detail), \
+             patch.object(self.archive,"report_matches",return_value=self.matches), \
              patch.object(self.archive,"deliver",return_value={"mail_status":"sent","gmail_message_id":"test-id"}) as send:
             self.retry._run("call-1","request-0123456789",{"email"},confirm)
         return send
@@ -55,6 +57,11 @@ class RetryTests(unittest.TestCase):
         del self.detail["final_transcript"]
         self.run_retry(confirm=True).assert_not_called()
         self.assertEqual(self.retry.snapshot()["error"],"final_transcript_missing")
+
+    def test_pdf_from_older_text_is_not_sent_on_request(self):
+        self.matches=False  # Made from live text before the final transcript was imported.
+        self.run_retry(confirm=True).assert_not_called()
+        self.assertEqual(self.retry.snapshot()["error"],"report_not_ready")
 
     def test_invalid_identity_rejected(self):
         with self.assertRaises(ValueError):
