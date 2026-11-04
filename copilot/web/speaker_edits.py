@@ -47,6 +47,9 @@ def _seconds(value) -> float | None:
 # A final line takes a correction only when this share of its overlap with
 # corrected live lines belongs to one person (MEETONTRACK-117).
 CARRY_CONFIDENCE = 0.6
+# A line not given a correction is still listed for review when at least this
+# share of its overlap was corrected by hand (MEETONTRACK-119).
+REVIEW_SHARE = 0.2
 
 
 def carry_corrections(live: list[dict], names: dict, final: list[dict]) -> tuple[list[dict], dict, dict | None]:
@@ -110,7 +113,10 @@ def carry_corrections(live: list[dict], names: dict, final: list[dict]) -> tuple
         # A line's own overlap decides; only a line no live line overlaps follows its voice.
         identity = winner(weights) if weights else by_voice.get(voice)
         if not identity:  # Uncorrected here, or corrections the final cannot place with confidence.
-            if identity is None and any(weights[key] for key in weights if key):
+            corrected = sum(weight for key, weight in weights.items() if key)
+            # Also when uncorrected text outweighs a real corrected part: that name may be
+            # placed on other lines, yet this one may still be theirs (MEETONTRACK-119).
+            if corrected and (identity is None or corrected >= REVIEW_SHARE * sum(weights.values())):
                 review.append(segment_id(segment))
             continue
         used.add(identity)
@@ -158,10 +164,14 @@ class SpeakerEdits:
         canonical["segments"] = snapshot["segments"]
         canonical["speaker_names"] = snapshot.get("speaker_names", {})
         if review := canonical.get("speaker_review"):
-            # Lines the person has now assigned by hand are reviewed (MEETONTRACK-117).
-            done = {segment_id(s) for s in snapshot["segments"] if s.get("speaker_identity") == "manual"}
+            # Lines the person has now assigned by hand are reviewed (MEETONTRACK-117); a listed
+            # name is resolved once the person has given it to a line (MEETONTRACK-119).
+            manual = [s for s in snapshot["segments"] if s.get("speaker_identity") == "manual"]
+            done = {segment_id(s) for s in manual}
+            named = {s.get("speaker") for s in manual}
             review["segment_ids"] = [key for key in review.get("segment_ids", []) if key not in done]
-            if not review["segment_ids"]:
+            review["names"] = [name for name in review.get("names", []) if name not in named]
+            if not review["segment_ids"] and not review["names"]:
                 canonical.pop("speaker_review")
         canonical["speaker_revision"] = int(canonical.get("speaker_revision", 0)) + 1
         canonical["speaker_corrected_at"] = datetime.now(timezone.utc).isoformat()

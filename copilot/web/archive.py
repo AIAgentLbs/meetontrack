@@ -23,7 +23,7 @@ from functools import wraps
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
-from speaker_edits import SpeakerEdits, carry_corrections
+from speaker_edits import SpeakerEdits, carry_corrections, segment_id
 from fact_check import with_speakers
 from delivery_health import DeliveryHealth, drive_links_ready
 from recording_health import RecordingLocations
@@ -72,10 +72,27 @@ def _mtime(path: Path) -> int | None:
         return None
 
 
-def _drops_corrections(previous: list[dict], segments: list[dict]) -> bool:
-    kept = {(s.get("source"), s.get("timestamp")) for s in segments}
-    return any(s.get("speaker_identity") == "manual" and (s.get("source"), s.get("timestamp")) not in kept
-               for s in previous)
+def _line_key(segment: dict) -> tuple:
+    return tuple(segment.get(key) for key in ("source", "timestamp", "end_timestamp", "text"))
+
+
+def _dropped_corrections(previous: list[dict], segments: list[dict]) -> list[dict]:
+    """Corrected lines the new text no longer has as they were.
+
+    A line with the same start but other words or end (a merged final line) is not
+    the corrected one: its correction carries by overlap at the import (MEETONTRACK-119).
+    """
+    kept = {_line_key(s) for s in segments}
+    return [s for s in previous if s.get("speaker_identity") == "manual" and _line_key(s) not in kept]
+
+
+def _keep_translations(previous: list[dict], segments: list[dict]) -> None:
+    """Live translations exist only in memory; meeting.json is their durable copy."""
+    translated = {(s.get("source"), s.get("timestamp"), s.get("text")): s for s in previous if s.get("translation_en")}
+    for segment in segments:
+        old = translated.get((segment.get("source"), segment.get("timestamp"), segment.get("text")))
+        if old and not segment.get("translation_en"):
+            segment.update({key: old[key] for key in ("translation_en", "translation_partial", "language") if key in old})
 
 
 def _lines(segments: list[dict]) -> list[tuple]:
@@ -253,23 +270,27 @@ class MeetingArchive:
                 if _lines(clean["segments"]) != _lines(previous.get("segments", [])):
                     clean["segments"] = previous.get("segments", [])
                     clean["latest_at"] = str(previous.get("latest_at") or "")
-            elif not clean.get("explicit_boundary") and (
-                    len(previous.get("segments", [])) > len(clean["segments"])
-                    or clean["status"] == "finished"
-                    and _drops_corrections(previous.get("segments", []), clean["segments"])):
+            else:
                 # A live file now showing other text (the final transcript) must not drop
                 # hand corrections: the final import carries them over (MEETONTRACK-117).
-                clean["segments"] = previous["segments"]
+                dropped = (_dropped_corrections(previous.get("segments", []), clean["segments"])
+                           if clean["status"] == "finished" else [])
+                split = bool(clean.get("explicit_boundary"))
+                if (not split or previous.get("logical_interval") == clean.get("logical_interval")) and (
+                        dropped or not split and len(previous.get("segments", [])) > len(clean["segments"])):
+                    clean["segments"] = previous["segments"]
+                    dropped = []
+                # A split meeting whose boundary moved shows its new part; the corrected
+                # lines it dropped wait in the file for the final import (MEETONTRACK-119).
+                interval = clean.get("logical_interval") or {}
+                waiting = {_line_key(s): s for s in [*previous.get("corrected_live", []), *dropped]
+                           if not interval or interval_contains(interval, str(s.get("timestamp") or ""))}
+                if waiting:
+                    clean["corrected_live"] = list(waiting.values())
             corrected = self.annotate_speakers(clean)
             clean["segments"] = corrected["segments"]
-            # Live translations exist only in memory; this file is their durable copy.
-            # A restart or an unavailable translation provider must not erase them.
-            translated = {(s.get("source"), s.get("timestamp"), s.get("text")): s
-                          for s in previous.get("segments", []) if s.get("translation_en")}
-            for segment in clean["segments"]:
-                old = translated.get((segment.get("source"), segment.get("timestamp"), segment.get("text")))
-                if old and not segment.get("translation_en"):
-                    segment.update({key: old[key] for key in ("translation_en", "translation_partial", "language") if key in old})
+            # A restart or an unavailable translation provider must not erase translations.
+            _keep_translations(previous.get("segments", []), clean["segments"])
             for field in ("speaker_names", "speaker_revision", "speaker_corrected_at"):
                 if field in previous:
                     clean[field] = previous[field]
@@ -331,7 +352,7 @@ class MeetingArchive:
         if snapshot.get("speaker_revision"):
             # The final transcript is always imported; the person's speaker corrections
             # on the live text are carried over to it (MEETONTRACK-117).
-            if final is live:
+            if final is live and not snapshot.get("corrected_live"):
                 return self._mark_final(snapshot, version, live)
             with self.speaker_edits.lock:
                 path = self.archive_root / _safe(str(snapshot.get("meeting_id") or "")) / "meeting.json"
@@ -341,10 +362,14 @@ class MeetingArchive:
                 annotated = self.annotate_speakers(stored)
                 final = self.transcript_annotator({**snapshot, "segments": final}).get("segments", final)
                 segments, names, review = carry_corrections(
-                    annotated.get("segments", []), stored.get("speaker_names", {}), final)
+                    [*annotated.get("segments", []), *stored.get("corrected_live", [])],
+                    stored.get("speaker_names", {}), final)
+                _keep_translations(stored.get("segments", []), segments)
                 imported = {**stored, "segments": segments, "speaker_names": names, "capture_warnings": warnings,
                             "latest_at": segments[-1]["timestamp"] if segments else "", "final_transcript": version,
                             "speaker_revision": int(stored.get("speaker_revision") or 0) + 1}
+                imported.pop("corrected_live", None)
+                review = self._still_to_review(stored.get("speaker_review"), review, segments)
                 imported.pop("speaker_review", None)
                 if review:
                     imported["speaker_review"] = review
@@ -354,6 +379,18 @@ class MeetingArchive:
             **snapshot, "segments": final, "capture_warnings": warnings,
             "latest_at": final[-1]["timestamp"] if final else "", "final_transcript": version}))
         return True
+
+    @staticmethod
+    def _still_to_review(earlier: dict | None, review: dict | None, segments: list[dict]) -> dict | None:
+        """A revised final keeps what the person has not yet resolved (MEETONTRACK-119)."""
+        earlier, review = earlier or {}, review or {}
+        named = {s.get("speaker") for s in segments if s.get("speaker_identity") == "manual"}
+        present = {segment_id(s): s for s in segments}
+        ids = [key for key in review.get("segment_ids", []) + earlier.get("segment_ids", [])
+               if key in present and present[key].get("speaker_identity") != "manual"]
+        names = sorted({*review.get("names", []), *(name for name in earlier.get("names", []) if name not in named)})
+        ids = list(dict.fromkeys(ids))
+        return {"segment_ids": ids, "names": names} if ids or names else None
 
     def _mark_final(self, snapshot: dict, version: str, live: list[dict]) -> bool:
         """Corrections made on text that already was the final one: only mark it final."""
