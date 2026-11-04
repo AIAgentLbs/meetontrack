@@ -1,0 +1,23 @@
+{
+  "version": "0.6.6",
+  "description": "Automatic meeting recording, transcription, and summaries for Windows 11.",
+  "homepage": "https://amanu.me/",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/gsamat/amanu/releases/download/windows-v0.6.6/Amanu-stable-Portable.zip",
+      "hash": "13affe923a889b3b2faeb5bc300a864e5bf0249de85fb042593fbd640be485f9"
+    }
+  },
+  "shortcuts": [
+    [
+      "Amanu.exe",
+      "Amanu"
+    ]
+  ],
+  "notes": [
+    "Requires Windows 11 24H2 or later on x64. Open Amanu from the Start menu.",
+    "This portable package does not update itself. Install a newer manifest to upgrade.",
+    "Quit Amanu before upgrading or uninstalling. Recordings and settings are kept outside the package directory."
+  ]
+}
