@@ -12,7 +12,7 @@ included in the package. No compiler, SDK or separate Python is required.
 curl -fsSL https://meetontrack.com/install.sh | bash
 ```
 
-The command installs the checksum-pinned v0.1.19 archive. Read
+The command installs the checksum-pinned v0.1.20 archive. Read
 [install.sh](install.sh) before running it if desired. An existing installation
 must finish its call and quit Capture first. The installer checks again before
 replacement and puts the previous version back if replacing the files fails.
@@ -31,7 +31,7 @@ replacement and puts the previous version back if replacing the files fails.
 
 The package is a technical beta, ad-hoc signed and not Apple-notarized. If macOS
 blocks it, review the exact app in Privacy & Security. Keep Gatekeeper enabled.
-Google Chrome is needed for PDF export.
+Google Chrome, Microsoft Edge or Chromium makes the PDF report; without one, the report is sent as an HTML file.
 
 ## Windows
 
@@ -104,7 +104,7 @@ Windows application versions: `%LOCALAPPDATA%/MeetingCopilot/versions`.
 User settings and recordings are outside that application version directory.
 
 For no-audio failures, check permissions on the actual installed application
-and selected devices, then reopen Capture. For no PDF, check Chrome. If you
+and selected devices, then reopen Capture. For no PDF, check Chrome or Edge. If you
 report a problem, include OS, version and a redacted error at
 https://github.com/AIAgentLbs/meetontrack/issues. Do not upload private
 recordings, transcripts, OAuth JSON or delivery credentials.
