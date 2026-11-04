@@ -1193,9 +1193,14 @@ class MeetingArchive:
             if not pending:
                 continue
             detail = self.report_detail(path.parent.name)
-            if (not detail or not self._ready_for_delivery(detail) or not self.report_matches(detail, meta)
+            if detail and not self.report_matches(detail, meta):
+                # Made from older text (live text, or before a late fact check): the next
+                # history pass makes it again, keeping what was already delivered.
+                self._history_checked.pop(_safe(str(detail.get("meeting_id") or "")), None)
+                continue
+            if (not detail or not self._ready_for_delivery(detail)
                     or not Path(str(meta.get("pdf_path") or "")).is_file()):
-                continue  # A PDF made from live text is made again from the final one first.
+                continue
             gate = self.report_gate(path.parent.name)
             if not gate.acquire(blocking=False):
                 continue  # Its report is being created and sent right now.

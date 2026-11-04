@@ -526,6 +526,18 @@ class FinalOnlyDeliveryTests(unittest.TestCase):
         self.assertFalse(self.archive._ready_for_delivery(stale))
         self.assertTrue(self.archive._ready_for_delivery(self.archive.report_detail("FIRST-CALL")))
 
+    def test_a_retry_of_an_outdated_pdf_has_the_report_made_again(self):
+        self.write_final(self.final)
+        self.finalize()
+        self.archive._history_checked["FIRST-CALL"] = ("cached",)
+        path = self.root / "reports/FIRST-CALL/report.json"
+        path.write_text(json.dumps({**self.report(), "mail_status": "failed", "source_signature": "before-a-late-fact-check",
+                                    "delivery_retry_at": iso(datetime.now(timezone.utc) - timedelta(minutes=1))}))
+        with patch.object(self.archive, "deliver") as deliver:
+            self.archive.retry_pending_deliveries()
+        deliver.assert_not_called()
+        self.assertNotIn("FIRST-CALL", self.archive._history_checked)
+
     def test_an_uncertain_send_stays_uncertain_while_the_report_waits(self):
         report_dir = self.root / "reports/FIRST-CALL"
         report_dir.mkdir(parents=True)
