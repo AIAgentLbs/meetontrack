@@ -80,6 +80,8 @@ analytics, SEO, comparisons and marketing are maintained in a separate website
 repository. See `AGENTS.md` for the boundary.
 
 - `capture/` — native macOS audio capture and transcription application.
+- `windows/` — native Windows recorder (C#/.NET, derived from Amanu); built and
+  accepted by `.github/workflows/windows-candidate.yml`.
 - `copilot/` — loopback-only UI, repository search and meeting archive.
 - `docs/` — application documentation, verification records and release notes.
 - `install.sh` — idempotent macOS installer.
@@ -96,6 +98,13 @@ python3 copilot/web/server.py --self-test
 swift build -c release --package-path capture
 ```
 
+The Windows recorder (on Windows, .NET 10 SDK):
+
+```powershell
+dotnet test windows/tests/Amanu.Core.Tests/Amanu.Core.Tests.csproj -c Release
+dotnet publish windows/src/Amanu.App/Amanu.App.csproj -c Release -r win-x64 --self-contained true -o managed
+```
+
 The AppKit UI test suite additionally requires a logged-in macOS GUI session.
 Building the native app requires the macOS 26 SDK; the resulting app keeps a
 macOS 15 deployment target.
@@ -106,4 +115,6 @@ manifests.
 
 ## License
 
-MIT. See [LICENSE](LICENSE) and [capture/THIRD-PARTY-NOTICES.md](capture/THIRD-PARTY-NOTICES.md).
+MIT. See [LICENSE](LICENSE), [capture/THIRD-PARTY-NOTICES.md](capture/THIRD-PARTY-NOTICES.md)
+and, for the Windows recorder, [windows/LICENSE](windows/LICENSE) and
+[windows/THIRD-PARTY-NOTICES.md](windows/THIRD-PARTY-NOTICES.md).

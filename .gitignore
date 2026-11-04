@@ -24,3 +24,13 @@ frames.json
 .impeccable/review/
 _site/
 
+
+# Windows recorder (windows/) build outputs
+windows/**/bin/
+windows/**/obj/
+windows/.tools/
+windows/artifacts/
+/managed/
+/managed.zip
+/candidate/
+/donor/

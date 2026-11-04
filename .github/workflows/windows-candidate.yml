@@ -1,13 +1,80 @@
 name: Windows packaged candidate acceptance
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Candidate version written into the package (no release is made)
+        default: '0.0.0'
+      check_release_asset:
+        description: Also check the pinned draft/published release asset below
+        type: boolean
+        default: false
   push:
-    branches: [feat/windows-installer]
-    paths: ['.github/workflows/windows-candidate.yml', 'scripts/check_windows_candidate.ps1']
+    branches: [main]
+    paths: ['windows/**', 'scripts/windows/**', 'scripts/check_windows_candidate.ps1',
+            'scripts/test_windows_installer.ps1', '.github/workflows/windows-candidate.yml']
 permissions:
   contents: read
 jobs:
+  build:
+    # Native recorder from this repository's windows/, composed with the
+    # checksum-pinned runtime donor and accepted as an installed package.
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@v6
+      - name: Recorder core and live regression tests
+        shell: pwsh
+        run: |
+          dotnet test windows/tests/Amanu.Core.Tests/Amanu.Core.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Core tests failed' }
+          dotnet test windows/tests/Amanu.Live.Tests/Amanu.Live.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Live tests failed' }
+      - name: Build branded native recorder
+        shell: pwsh
+        run: |
+          dotnet publish windows/src/Amanu.App/Amanu.App.csproj -c Release -r win-x64 --self-contained true -o managed
+          if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
+          $product = (Get-Item managed/MeetingCopilotCapture.exe).VersionInfo.ProductName
+          if ($product -ne 'MeetOnTrack Capture') { throw "Wrong product: $product" }
+          Compress-Archive managed/* managed.zip
+      - name: Compose package from this revision
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version || '0.0.0' }}
+        run: |
+          # Native ASR runtimes and embedded Python come from the public windows-v0.1.4 package (pinned in the packager).
+          gh release download windows-v0.1.4 --repo $env:GITHUB_REPOSITORY --pattern 'meeting-copilot-windows-v0.1.4-x64.zip' --dir donor
+          if ($LASTEXITCODE -ne 0) { throw 'Donor download failed' }
+          $managed = (Get-FileHash managed.zip -Algorithm SHA256).Hash.ToLower()
+          python scripts/windows/package_candidate.py --donor donor/meeting-copilot-windows-v0.1.4-x64.zip --managed managed.zip --managed-sha256 $managed --capture-revision $env:GITHUB_SHA --version $env:VERSION --output "candidate/meeting-copilot-windows-v$env:VERSION-x64.zip"
+          if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
+      - name: Exact packaged installation and regressions
+        shell: pwsh
+        env:
+          VERSION: ${{ inputs.version || '0.0.0' }}
+        run: |
+          $zip = "candidate/meeting-copilot-windows-v$env:VERSION-x64.zip"
+          ./scripts/check_windows_candidate.ps1 -PackagePath $zip -ExpectedSha256 (Get-FileHash $zip -Algorithm SHA256).Hash -Installer ./scripts/windows/install.ps1
+      # Candidate only, not a release: the managed recorder is the packager's
+      # --managed input for a release built from the same revision.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meetontrack-windows-candidate
+          path: |
+            managed.zip
+            candidate/
+          retention-days: 30
   installer:
+    if: inputs.check_release_asset
     runs-on: windows-2025
     timeout-minutes: 20
     # Draft assets are not visible to a contents:read token. Restrict the

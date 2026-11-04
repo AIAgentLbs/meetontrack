@@ -7,12 +7,13 @@
   packaging, GitHub Releases. Local checkout directory keeps its old name.
 - Private `AIAgentLbs/meetontrack-hub` (renamed from `meetontrack` on
   2026-10-21): project hub.
-- Public `AIAgentLbs/meetontrack-recorder` (MIT, formerly
-  `amanu-private-copy`): recorder derived from Amanu, macOS `Sources/` and
-  Windows `windows/` as upstream lays them out. `master` mirrors
-  `gsamat/amanu`; MeetOnTrack work is on `main` (former
-  `feat/meeting-copilot-windows`). Local checkout
-  `/Users/m/code/aiagentlbs/meetontrack-recorder`.
+- The Windows recorder moved into this repository's `windows/` on
+  2026-11-04 (MEETONTRACK-2), with its history, from
+  `AIAgentLbs/meetontrack-recorder` `main` at `50e7448`. That repository
+  (MIT, formerly `amanu-private-copy`; `master` mirrors `gsamat/amanu`) is
+  archived read-only with a pointer here. Its diverged, never-shipped macOS
+  copy (`Sources/`) was not moved: `capture/` is the Mac recorder. Upstream
+  Amanu changes are imported as reviewed changes from `gsamat/amanu`.
 - Private `AIAgentLbs/meetontrack-website`: website, deployed by Coolify.
 - `AIAgentLbs/meeting-copilot-private-copy`: merged into this repository on
   2026-10-20 and deleted by the owner on 2026-10-21.

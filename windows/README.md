@@ -1,3 +1,20 @@
+# MeetOnTrack Windows recorder
+
+This directory is the source of MeetOnTrack's Windows recorder
+(`MeetingCopilotCapture.exe`, product "MeetOnTrack Capture"). It is derived
+from [Amanu](https://github.com/gsamat/amanu) under the MIT license; keep
+[LICENSE](LICENSE) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) with
+it. It moved here on 2026-11-04 from `AIAgentLbs/meetontrack-recorder` (now
+archived) at commit `50e7448`, with its history.
+
+[`.github/workflows/windows-candidate.yml`](../.github/workflows/windows-candidate.yml)
+runs the recorder tests, builds it, composes the Windows package with
+`scripts/windows/package_candidate.py` and checks the installed package.
+The macOS recorder lives in [`capture/`](../capture).
+
+The upstream Amanu README follows for reference. Its release, signing and
+Velopack/winget instructions describe upstream Amanu, not MeetOnTrack.
+
 # Amanu for Windows
 
 The public Windows release is **0.6.6**, for Windows 11 24H2 or later on x64. It uses a native

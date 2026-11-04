@@ -2,6 +2,8 @@
 
 Cross-platform packaging only; Windows execution/installer acceptance is separate.
 Never reuse an upstream application executable, UI resources or update feed.
+--managed is the recorder built from this repository's windows/ (managed.zip of
+the windows-candidate workflow); --capture-revision is the commit it was built from.
 """
 import argparse
 import hashlib

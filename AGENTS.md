@@ -43,6 +43,10 @@ Owner scope decision: 2026-10-19.
   the current checkout contains application work only. The website repository's
   `planning/2026-10-19-repository-separation.json` records file hashes and ownership.
 - Windows installer source is `scripts/windows/install.ps1`, macOS is `install.sh`.
+- Recorder sources live here (owner decision 2026-11-04, MEETONTRACK-2): macOS
+  in `capture/`, Windows in `windows/` (moved from the archived
+  `AIAgentLbs/meetontrack-recorder`). Build the Windows package only from
+  `windows/` via `.github/workflows/windows-candidate.yml`.
   Packaging and tests must use these application-owned sources. The website may
   publish a tested installer snapshot matched to a public package and checksum.
 - Preserve required upstream licence attribution and compatibility identifiers.

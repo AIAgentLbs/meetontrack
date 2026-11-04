@@ -172,8 +172,8 @@ hashes, Pages removed, and the Windows installer relocated to
   recorder must reject unknown arguments instead of launching the GUI: in
   `windows/src/Amanu.App/App.xaml.cs` `Main` only `record <x>` and `--live-worker`
   are handled, so any other arguments start the full WPF app (found 2026-10-21).
-- [ ] MEETONTRACK-80: Windows recorder config.json save drops other writers' keys; fix on
-  meetontrack-recorder branch windows-check-2026-10-21 (read-modify-write under config.json.lock).
+- [ ] MEETONTRACK-80: Windows recorder config.json save drops other writers' keys; fix in
+  `windows/` (read-modify-write under config.json.lock).
 - [ ] MEETONTRACK-81: Windows in-app updates do nothing: releases carry no Velopack update files.
 - [ ] MEETONTRACK-82: Windows recorder hardcodes AI/speech providers and models (file:line list in tracker).
 - [ ] MEETONTRACK-83: Windows recorder labels speakers Me/Participant 1; use You/Others, drop speaker_names.backend.
