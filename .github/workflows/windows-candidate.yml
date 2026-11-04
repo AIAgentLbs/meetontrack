@@ -38,6 +38,7 @@ jobs:
         working-directory: copilot/web
         env:
           MEETONTRACK_REAL_PDF: '1'
+          PYTHONUTF8: '1'  # As the installed app runs its server (meeting-copilot.ps1).
         run: |
           $env:MEETONTRACK_EXPECT_BROWSER = 'chrome'
           uv run --with pillow python -m unittest -v test_report_without_pdf
