@@ -519,6 +519,13 @@ class FinalOnlyDeliveryTests(unittest.TestCase):
         self.finalize()  # Made again from the final text, then sent.
         self.assertEqual(self.sent, ["FIRST-CALL"])
 
+    def test_text_read_before_a_racing_final_import_is_never_ready(self):
+        stale = self.archive.report_detail("FIRST-CALL")  # A retry read the live text...
+        self.write_final(self.final)
+        self.archive.import_final_transcript(self.stored())  # ...then the final import landed.
+        self.assertFalse(self.archive._ready_for_delivery(stale))
+        self.assertTrue(self.archive._ready_for_delivery(self.archive.report_detail("FIRST-CALL")))
+
     def test_an_uncertain_send_stays_uncertain_while_the_report_waits(self):
         report_dir = self.root / "reports/FIRST-CALL"
         report_dir.mkdir(parents=True)

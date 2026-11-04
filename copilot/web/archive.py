@@ -878,6 +878,9 @@ class MeetingArchive:
                     participants.append(participant)
         canonical["participants"] = participants
         canonical["source_meeting_ids"] = [item["meeting_id"] for item in chain]
+        # Read with the very text above: a final import racing this read cannot
+        # pair a final mark with live text (MEETONTRACK-94).
+        canonical["all_final"] = all(item.get("final_transcript") for item in chain)
         canonical["report"] = _json(
             self.reports_root / canonical["meeting_id"] / "report.json", {}
         )
@@ -1486,8 +1489,9 @@ class MeetingArchive:
         # MEETONTRACK-94: a report is sent only from the recorder's final transcript
         # of every chunk of the call, never from live text, and only after a rebuild
         # of its lost analysis. No timeout falls back to live text.
-        return all(item.get("final_transcript") and not self.analysis_pending(str(item.get("meeting_id") or ""))
-                   for item in chain or [detail])
+        return detail.get("all_final", True) and all(
+            item.get("final_transcript") and not self.analysis_pending(str(item.get("meeting_id") or ""))
+            for item in chain or [detail])
 
     def _short_automatic(self, detail: dict) -> bool:
         """A provisional/short auto capture is not a meeting or deliverable.
