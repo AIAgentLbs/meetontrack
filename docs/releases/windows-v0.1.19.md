@@ -4,17 +4,23 @@ Technical beta for Windows 11 24H2+, x64. Capture, .NET, Python and the web UI
 are included; no compiler or SDK is required. Initial setup downloads local
 speech models. AI answers are optional and use an AI tool you already have.
 
+- Windows cannot make the PDF meeting report yet, so on Windows no report is
+  made or sent (MEETONTRACK-120). The changes below apply to reports once that
+  works, and to the Mac today.
 - Meeting reports are now sent only from the final transcript. The quick
   transcript you see during the call is never sent. When a call ends, the
   report waits until the recorder has finished the final transcript of the
-  whole call, then it is made and sent once. This also applies to automatic
-  retries and to "Send again" ("Отправить снова"): a report printed earlier
-  from the quick transcript is printed again from the final one first.
+  whole call, then it is made and sent once. Automatic retries print a report
+  made earlier from the quick transcript again from the final one before
+  sending it. "Send again" ("Отправить снова") never sends a report made from
+  the quick transcript; it waits until the report has been made again.
 - If the final transcript is still missing an hour after the call, the
   meeting and the delivery header say so ("waits for the final transcript",
   "ждет итоговую расшифровку") and ask you to check that the recorder is
   running. Nothing is sent from the quick transcript; the report goes out by
-  itself once the final transcript arrives.
+  itself once the final transcript arrives, if that happens within three days
+  of the call. A final transcript that arrives later makes the report, which
+  is then sent only when you ask (MEETONTRACK-118).
 - A recording split into several meetings now gives each meeting its own
   part of the final transcript, so each of them gets its report.
 - Speakers you correct during the call carry over to the final transcript.
@@ -35,7 +41,7 @@ it is now built together with the rest of MeetOnTrack and includes a newer
 
 Known: a few rare cases of carrying speaker corrections are still open
 (MEETONTRACK-119), and a final transcript that never arrives stops being
-flagged after three days (MEETONTRACK-118). Whether the Windows recorder can
+flagged after three days. Whether the Windows recorder can
 use Antigravity for its own tasks has not been checked yet (MEETONTRACK-106).
 
 The speech recognition choice from the Mac release is not available on Windows
