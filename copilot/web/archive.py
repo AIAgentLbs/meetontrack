@@ -1499,9 +1499,14 @@ class MeetingArchive:
             "--no-pdf-header-footer", f"--user-data-dir={profile}",
             f"--print-to-pdf={temporary}", html_path.resolve().as_uri(),
         ]
-        process = subprocess.Popen(
-            command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
+        try:
+            process = subprocess.Popen(
+                command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except OSError as exc:
+            # A browser that exists but cannot start still gets the HTML fallback.
+            shutil.rmtree(profile, ignore_errors=True)
+            raise ReportPdfError(f"{chrome.stem} не запустился: {type(exc).__name__}") from exc
         try:
             stable = 0
             prior = -1

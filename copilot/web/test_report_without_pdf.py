@@ -38,6 +38,18 @@ class BrowserLookupTests(unittest.TestCase):
             with self.assertRaisesRegex(archive.ReportPdfError, "Chrome или Edge"):
                 MeetingArchive._print_pdf(Path("index.html"), Path("meeting-report.pdf"))
 
+    def test_a_browser_that_cannot_start_is_a_report_error(self):
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(folder, ignore_errors=True))
+        browser = folder / "chrome.exe"
+        browser.write_bytes(b"")
+        with patch.object(MeetingArchive, "_pdf_browser_candidates", return_value=[browser]), \
+             patch.object(archive.subprocess, "Popen", side_effect=PermissionError("denied")), \
+             patch.object(archive.tempfile, "tempdir", str(folder)):
+            with self.assertRaisesRegex(archive.ReportPdfError, "не запустился"):
+                MeetingArchive._print_pdf(folder / "index.html", folder / "meeting-report.pdf")
+        self.assertEqual([p.name for p in folder.iterdir()], ["chrome.exe"], "The print profile is removed")
+
     @unittest.skipUnless(os.name == "nt", "Windows install places")
     def test_windows_looks_in_program_files_and_local_app_data(self):
         places = [str(path) for path in MeetingArchive._pdf_browser_candidates()]
