@@ -21,7 +21,7 @@ struct LocalServerTests {
 
     @Test("A server that dies is started again, and quit stops it for good")
     func restartsThenStops() async throws {
-        let server = LocalServer(command: try command("sleep 30"), probe: { false })
+        let server = LocalServer(command: try command("sleep 30"), probe: { nil })
         server.checkInterval = 0.05
         server.start()
         await wait { server.launches == 1 }
@@ -41,7 +41,7 @@ struct LocalServerTests {
 
     @Test("A server that is already answering is used, not started twice")
     func adoptsHealthyServer() async throws {
-        let server = LocalServer(command: try command("sleep 30"), probe: { true })
+        let server = LocalServer(command: try command("sleep 30"), probe: { "0.1.19" })
         var ready = false
         server.whenReady { ready = true }
         server.start()
@@ -49,6 +49,28 @@ struct LocalServerTests {
         #expect(ready)
         #expect(server.launches == 0)
         server.stop()
+    }
+
+    @Test("An old server still holding the port is not adopted")
+    func refusesOtherVersion() async throws {
+        let server = LocalServer(command: try command("sleep 30"), expectedVersion: "0.1.19", probe: { "0.1.18" })
+        server.checkInterval = 0.05
+        server.start()
+        await wait { server.launches == 1 }
+        #expect(server.launches == 1)
+        #expect(!server.isReady)
+        server.stop(grace: 1)
+    }
+
+    @Test("A server that never answers after starting is restarted")
+    func startupHang() async throws {
+        let server = LocalServer(command: try command("sleep 30"), probe: { nil })
+        server.checkInterval = 0.05
+        server.hangLimit = 0.2
+        server.start()
+        await wait { server.launches == 2 }
+        #expect(server.launches == 2)
+        server.stop(grace: 1)
     }
 
     @Test("Crash restarts back off up to thirty seconds")

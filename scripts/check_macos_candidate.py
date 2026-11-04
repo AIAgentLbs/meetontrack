@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import plistlib
 import shutil
+import socket
 import subprocess
 import time
 import urllib.request
@@ -91,12 +92,15 @@ def main():
 def smoke_server(runtime, web, home, version, config, port=43987):
     """Start the bundled server as the app does, check health, then close stdin."""
     shutil.copytree(config, home / '.config/meeting-copilot')  # what install.sh wrote
+    with socket.socket() as probe:  # an answer must come from our child, not a leftover
+        probe.bind(('127.0.0.1', port))
     process = subprocess.Popen([str(runtime), '-B', str(web / 'server.py'), '--port', str(port), '--no-open',
                                 '--exit-with-parent'], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL, env={'HOME': str(home), 'PATH': '/usr/bin:/bin',
                                                                'PYTHONDONTWRITEBYTECODE': '1'}, cwd=home)
     try:
         for _ in range(120):
+            assert process.poll() is None, f'bundled server exited early ({process.returncode})'
             try:
                 with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/health', timeout=1) as response:
                     health = json.load(response)
@@ -109,7 +113,7 @@ def smoke_server(runtime, web, home, version, config, port=43987):
         with urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=5) as response:
             assert b'MeetOnTrack' in response.read()
         process.stdin.close()  # the app is gone
-        process.wait(timeout=10)
+        assert process.wait(timeout=10) == 0, f'bundled server exit status {process.returncode}'
         return 'health, index and exit-with-parent passed'
     finally:
         if process.poll() is None:

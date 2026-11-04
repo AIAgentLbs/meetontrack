@@ -205,6 +205,48 @@ exit 2
         self.assert_single_app_and_no_backups(app, share)
         self.assertEqual((self.root / "opened").read_text().splitlines(), [str(app)])
 
+    def assert_0_1_18_intact(self, app, share):
+        self.assertEqual((app / "previous").read_text(), "previous-app")
+        self.assertEqual((share / "web/previous").read_text(), "previous-web")
+        self.assertTrue((share / "python/bin/python3").is_file())
+        self.assertTrue((share / "bin/zoom-window-finder").is_file())
+        self.assertTrue((Path(self.env["MEETING_COPILOT_AGENTS_ROOT"]) / "com.aiagentlbs.meeting-copilot.plist").is_file())
+        self.assert_single_app_and_no_backups(app, share)
+
+    def test_new_app_not_ready_restores_0_1_18_and_restarts_its_service(self):
+        app, share, _ = self.seed_existing()
+        self.prepare_launch()
+        (self.root / "loaded").touch()
+        result = self.run_install(MEETING_COPILOT_SKIP_LAUNCH="0", MOCK_HEALTH_VERSION="0.1.18")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("previous version was restored", result.stderr)
+        self.assert_0_1_18_intact(app, share)
+        launches = (self.root / "launches").read_text().splitlines()
+        self.assertTrue(launches[0].startswith("bootout"))
+        self.assertTrue(launches[-1].startswith("bootstrap"))
+        self.assertTrue((self.root / "loaded").exists())
+
+    def test_old_service_that_will_not_stop_changes_nothing(self):
+        app, share, _ = self.seed_existing()
+        self.prepare_launch()
+        (self.root / "loaded").touch()
+        result = self.run_install(MEETING_COPILOT_SKIP_LAUNCH="0", MOCK_UNLOAD_AFTER_PRINTS="99")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("did not stop", result.stderr)
+        self.assert_0_1_18_intact(app, share)
+        self.assertFalse((self.root / "opened").exists())
+
+    def test_failure_after_cli_restores_the_old_cli(self):
+        app, share, config = self.seed_existing()
+        cli = Path(self.env["MEETING_COPILOT_BIN_ROOT"]) / "meeting-copilot"
+        cli.parent.mkdir()
+        cli.write_text("old cli")
+        (config / "config.json").write_text("{not json")  # the settings step fails after the CLI
+        result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(cli.read_text(), "old cli")
+        self.assert_0_1_18_intact(app, share)
+
     def test_user_files_in_old_bin_survive(self):
         _, share, _ = self.seed_existing()
         (share / "bin/mine").write_text("not ours")

@@ -39,14 +39,25 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/meeting-copilot.XXXXXX")"
 rollback="$tmp/rollback"
 replaced=()
 committed=false
+launched=false
+agent_stopped=false
 finish() {
   local status=$? index target
   if [[ $status -ne 0 && "$committed" != true && ${#replaced[@]} -gt 0 ]]; then
+    # A new app that failed its readiness check is quit before its files go.
+    if [[ "$launched" == true ]]; then
+      pkill -TERM -f "$app/Contents/MacOS/MeetingCopilotCapture" >/dev/null 2>&1 || true
+      sleep 2
+    fi
     for ((index=${#replaced[@]}-1; index>=0; index--)); do
       target="${replaced[$index]}"
       rm -rf "$target"
       [[ ! -e "$rollback/$index" ]] || mv "$rollback/$index" "$target"
     done
+    # The old version's service was only stopped, never deleted: start it again.
+    if [[ "$agent_stopped" == true ]]; then
+      launchctl bootstrap "gui/$(id -u)" "$AGENTS/$LABEL.plist" >/dev/null 2>&1 || true
+    fi
     printf 'MeetOnTrack · the previous version was restored\n' >&2
   fi
   rm -rf "$tmp"
@@ -119,7 +130,7 @@ payload="$app/$payload_in"
 python="$payload/python/bin/python3"
 
 mkdir -p "$SHARE" "$CONFIG" "$BIN"
-install -m 0755 "$payload/bin/meeting-copilot" "$BIN/meeting-copilot"
+replace "$payload/bin/meeting-copilot" "$BIN/meeting-copilot"
 install -m 0755 "$payload/config/refresh-repos.py" "$CONFIG/refresh-repos.py"
 # One-time removal of retired usage-reporting state; preserve all other settings.
 "$python" -I -B - "$CONFIG" <<'PY'
@@ -159,28 +170,24 @@ target.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 PY
 fi
 
-# Commit: the new app is in place. The previous copy is deleted with "$tmp".
-committed=true
-
 # Up to 0.1.18 a launchd agent ran the web service from separate copies of
-# Python and web/ in $SHARE. The app runs its own now: retire the agent (so
-# the port is free for the app) and delete only those program copies.
-# Recordings, archive, reports, models and every setting stay untouched.
+# Python and web/ in $SHARE. The app runs its own now. Stop the agent so the
+# port is free, but delete nothing of the old version until the new app has
+# proved itself: a failure from here on restores it and restarts its agent.
 domain="gui/$(id -u)"
 if [[ -f "$AGENTS/$LABEL.plist" ]]; then
   launchctl bootout "$domain/$LABEL" >/dev/null 2>&1 || true
+  agent_stopped=true
+  stopped=false
   for wait in {1..40}; do
-    launchctl print "$domain/$LABEL" >/dev/null 2>&1 || break
+    if ! launchctl print "$domain/$LABEL" >/dev/null 2>&1; then stopped=true; break; fi
     sleep 0.25
   done
-  rm -f "$AGENTS/$LABEL.plist"
-  say "retired the separate background service; MeetOnTrack runs it itself now"
+  [[ "$stopped" == true ]] || fail "The previous background service did not stop; nothing was changed. Rerun the installer."
 fi
-rm -rf "$SHARE/python" "$SHARE/web" "$SHARE/release.json"
-for helper in zoom-window-finder zoom-frame-inspector detect-speech-language; do rm -f "$SHARE/bin/$helper"; done
-rmdir "$SHARE/bin" 2>/dev/null || true
 
 if [[ "${MEETING_COPILOT_SKIP_LAUNCH:-0}" != "1" ]]; then
+  launched=true
   open "$app"
   # The app starts the assistant's local service itself; confirm it is this
   # version answering, not a leftover, before calling the install done.
@@ -195,8 +202,20 @@ if [[ "${MEETING_COPILOT_SKIP_LAUNCH:-0}" != "1" ]]; then
     fi
     sleep 0.25
   done
-  [[ "$ready" == true ]] || fail "Files installed, but the assistant did not become ready. Quit and reopen MeetOnTrack. Log: $SHARE/server.log"
-  say "MeetOnTrack is open; finish first-run permissions and model setup in its window"
+  [[ "$ready" == true ]] || fail "The new version's assistant did not become ready. Log: $SHARE/server.log"
 fi
+
+# Commit: the new app runs. The previous copies are deleted with "$tmp", and
+# only the old program files go: recordings, archive, reports, models and
+# every setting stay untouched.
+committed=true
+if [[ "$agent_stopped" == true ]]; then
+  rm -f "$AGENTS/$LABEL.plist"
+  say "retired the separate background service; MeetOnTrack runs it itself now"
+fi
+rm -rf "$SHARE/python" "$SHARE/web" "$SHARE/release.json"
+for helper in zoom-window-finder zoom-frame-inspector detect-speech-language; do rm -f "$SHARE/bin/$helper"; done
+rmdir "$SHARE/bin" 2>/dev/null || true
+[[ "${MEETING_COPILOT_SKIP_LAUNCH:-0}" == "1" ]] || say "MeetOnTrack is open; finish first-run permissions and model setup in its window"
 say "$release_version installed; existing recordings and private settings were preserved"
 say "reopen anytime with Open MeetOnTrack assistant in the app window or menu bar"

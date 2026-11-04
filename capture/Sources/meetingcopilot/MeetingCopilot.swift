@@ -79,6 +79,11 @@ struct Run: ParsableCommand {
             FileHandle.standardError.write(Data(warning.utf8))
         }
 
+        // An explicit first-run choice precedes every persistent window and
+        // permission check, preselected from the Mac's first language.
+        // Cancelling starts neither the recorder nor setup.
+        guard FirstLaunchLanguage.confirmIfNeeded() else { return }
+
         // Keep the command line pointing at this bundle, so agents and
         // scripts reach the same signed program the app runs.
         if case .success(true) = AgentCLI.install() {

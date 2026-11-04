@@ -17,7 +17,9 @@ import Foundation
 final class LocalServer {
     nonisolated static let port = 43121
     nonisolated static let url = URL(string: "http://127.0.0.1:\(port)/")!
-    static let shared = LocalServer(command: bundledCommand())
+    static let shared = LocalServer(
+        command: bundledCommand(),
+        expectedVersion: Runtime.appBundle?.infoDictionary?["CFBundleShortVersionString"] as? String)
 
     struct Command {
         var executable: URL
@@ -32,7 +34,11 @@ final class LocalServer {
     var checkInterval: TimeInterval = 2
 
     private let command: Command?
-    private let probe: @Sendable () async -> Bool
+    /// The version the bundled server reports. A server on the port that
+    /// reports another one (a 0.1.18 launchd agent that outlived the upgrade)
+    /// is not ours and is never used: its files may already be gone.
+    private let expectedVersion: String?
+    private let probe: @Sendable () async -> String?
     private var process: Process?
     private var stdin: Pipe?
     private var timer: Timer?
@@ -40,14 +46,18 @@ final class LocalServer {
     private var stopping = false
     private var nextLaunch = Date.distantPast
     private var crashes = 0
-    private var lastHealthy: Date?
+    /// Last time the server answered, or when it was launched: a server that
+    /// never answers after starting is as hung as one that stopped answering.
+    private var lastAlive: Date?
     private var waiters: [() -> Void] = []
     private(set) var isReady = false
     private(set) var launches = 0
     var pid: pid_t? { process?.processIdentifier }
 
-    init(command: Command?, probe: @escaping @Sendable () async -> Bool = { await LocalServer.healthy() }) {
+    init(command: Command?, expectedVersion: String? = nil,
+         probe: @escaping @Sendable () async -> String? = { await LocalServer.healthVersion() }) {
         self.command = command
+        self.expectedVersion = expectedVersion
         self.probe = probe
     }
 
@@ -90,17 +100,17 @@ final class LocalServer {
         probing = true
         let probe = self.probe
         Task { @MainActor [weak self] in
-            let healthy = await probe()
+            let version = await probe()
             guard let self else { return }
             self.probing = false
-            self.observe(healthy: healthy)
+            self.observe(healthy: version != nil && (self.expectedVersion == nil || version == self.expectedVersion))
         }
     }
 
     private func observe(healthy: Bool) {
         guard !stopping else { return }
         if healthy {
-            lastHealthy = Date()
+            lastAlive = Date()
             crashes = 0
             if !isReady {
                 isReady = true
@@ -114,9 +124,9 @@ final class LocalServer {
         if let process, process.isRunning {
             // Answering nothing for a minute is a hang, not a busy moment:
             // every request, health included, has its own thread.
-            if let lastHealthy, Date().timeIntervalSince(lastHealthy) > hangLimit {
+            if let lastAlive, Date().timeIntervalSince(lastAlive) > hangLimit {
                 FileHandle.standardError.write(Data("assistant server stopped answering; restarting\n".utf8))
-                self.lastHealthy = nil
+                self.lastAlive = nil
                 kill(process.processIdentifier, SIGKILL)
             }
             return
@@ -151,6 +161,7 @@ final class LocalServer {
             return
         }
         launches += 1
+        lastAlive = Date()
         self.process = process
         stdin = input
     }
@@ -171,14 +182,16 @@ final class LocalServer {
         min(30, pow(2, Double(max(0, crashes - 1))))
     }
 
-    nonisolated static func healthy() async -> Bool {
+    /// The version a MeetOnTrack server on the port reports, or nil.
+    nonisolated static func healthVersion() async -> String? {
         var request = URLRequest(url: url.appendingPathComponent("api/health"))
         request.timeoutInterval = 2
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return false }
-        return value["ok"] as? Bool == true && value["service"] as? String == "meeting-copilot"
+        else { return nil }
+        guard value["ok"] as? Bool == true, value["service"] as? String == "meeting-copilot" else { return nil }
+        return value["version"] as? String ?? ""
     }
 
     private static func openLog(_ url: URL) -> FileHandle? {

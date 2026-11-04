@@ -21,6 +21,8 @@ check_only=false
 no_open=false
 refresh_only=false
 python="$payload/python/bin/python3"
+# The interpreter lives in the signed app bundle: never write bytecode into it.
+export PYTHONDONTWRITEBYTECODE=1
 [[ -x "$python" ]] || python="$(command -v python3 || true)"
 [[ -x "$python" ]] || { print -u2 "MeetOnTrack Python runtime is missing; reinstall from meetontrack.com."; exit 1; }
 
