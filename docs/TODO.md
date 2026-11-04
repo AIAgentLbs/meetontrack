@@ -39,13 +39,16 @@ hashes, Pages removed, and the Windows installer relocated to
 
 ## One macOS recorder source (2026-10-20)
 
-- [ ] MEETONTRACK-2: There are two diverged macOS recorder sources: `capture/` here (renamed
-  `meetingcopilot`, ships in the Mac package, no shared Git history with Amanu)
-  and `Sources/amanu` in public `AIAgentLbs/meetontrack-recorder` (tracks
-  upstream `gsamat/amanu`). Reconcile into one source in
-  `meetontrack-recorder` so upstream fixes merge with `git merge master`, then
-  package the Mac recorder from it like Windows and remove `capture/` here.
-  Needs a file-by-file diff (for example `Config.swift` 639 vs 841 lines).
+- [ ] MEETONTRACK-2: One repository (owner decision 2026-11-04): move the Windows
+  recorder (`windows/` and its CI) from `AIAgentLbs/meetontrack-recorder` into
+  `windows/` here, build it from this repository, then archive
+  `meetontrack-recorder` (read-only, pointer to `meetontrack`). This repository's
+  URL, releases and website links stay unchanged. `capture/` remains the Mac source.
+- [ ] MEETONTRACK-109: One MeetOnTrack app with its own window: Python and the web
+  payload inside the bundle, the app runs the local service itself (no launchd
+  agent) and shows the UI in a WKWebView window instead of a browser tab. Signed,
+  notarized DMG is out of scope: no Apple Developer account for now (owner
+  2026-11-04), revisit when users complain about installation.
 
 ## One settings store and vocabulary across Mac, Windows and web (owner rule 2026-10-20)
 
