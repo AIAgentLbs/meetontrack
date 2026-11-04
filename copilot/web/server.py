@@ -2530,6 +2530,16 @@ def rebuild_analysis(meeting_id: str, skip=frozenset(), progress=lambda key, don
 
 
 REBUILDS = AnalysisRebuilds(HOME / ".config/meeting-copilot/analysis-rebuilds.json", rebuild_analysis)
+def analysis_pending(meeting_id: str) -> bool:
+    """A report waits for the rebuild of its lost analysis (MEETONTRACK-94/107), at most
+    2 hours from the mark: a failing AI ("error") or a stalled queue never holds it longer."""
+    state = REBUILDS.snapshot(meeting_id)
+    marked = parse_timestamp(str(state.get("at") or ""))
+    return state.get("state") in {"needed", "running"} and bool(
+        marked and marked.tzinfo and (datetime.now(timezone.utc) - marked).total_seconds() < REBUILDS.MAX_RETRY)
+
+
+ARCHIVE.analysis_pending = analysis_pending
 
 
 def rebuild_state(meeting_id: str, detail: dict | None = None) -> dict:

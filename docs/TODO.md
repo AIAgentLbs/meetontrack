@@ -208,10 +208,12 @@ hashes, Pages removed, and the Windows installer relocated to
 - [ ] MEETONTRACK-94: A meeting followed right away by another call kept its 44 live segments instead of the recorder's
   406-segment final transcript, got no report and showed only "Recording needs attention" (2026-10-22, 0.1.14):
   the final transcript was read only while that meeting owned the single live file (`archive.py` `finalize_history`).
-  Leftovers (P2): every report is still sent from live text about 2 minutes after the call and the final transcript only
-  refreshes it without resending, so a merged report can mix one chunk's final text with another's live text; decide
-  whether sending waits (bounded) for `transcript.json` (`archive.py` `_ready_for_delivery`). Split (explicit-boundary)
-  meetings and meetings with hand-corrected speakers keep their live text (`import_final_transcript`).
+  Owner rule 2026-11-04, fixed on main (closes when released): a report is built and sent only from the recorder's
+  final transcript of every chunk of the call (`archive.py` `_ready_for_delivery`, the one gate of the automatic send,
+  the 15-minute retry and "Send again"), after a rebuild of lost analysis (max 2 h). No timeout falls back to live
+  text: a call without its final transcript an hour after it ended shows "waiting for the final transcript" in the
+  library and the delivery header and is sent once the transcript arrives. Split meetings now import their part of
+  the final transcript; hand-corrected speakers on live text keep it unsent (see the follow-up below).
 - [ ] MEETONTRACK-89: Mac call-audio capture fades to silence during Chrome calls (39 of 53 min lost on 2026-10-21);
   watchdog fix ee2e6cf limits it; live A/B against an output-clocked aggregate on the next real call.
 - [ ] MEETONTRACK-86: Windows: Codex sandbox refusal shows only as a generic AI failure.

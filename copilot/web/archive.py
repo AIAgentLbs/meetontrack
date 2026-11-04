@@ -32,6 +32,7 @@ from journal_links import collapse_links
 from delivery_settings import DeliverySettings, enabled as delivery_enabled
 from private_dirs import private_dir
 from canonical_transcript import canonical_segments
+from meeting_boundaries import interval_contains
 
 
 def _json(path: Path, fallback: Any) -> Any:
@@ -98,6 +99,9 @@ def _shared_indexes(method):
 
 PRINT_PROFILE_PREFIX = "meeting-copilot-report-"
 REPORT_FAILURE = "report-failure.json"
+# A finished call whose final transcript is still missing this long after it
+# ended needs attention (MEETONTRACK-94); its report keeps waiting, unsent.
+FINAL_WAIT_ATTENTION_SECONDS = 3600
 # What a send left in report.json; a refresh that sends nothing keeps all of it.
 DELIVERY_OUTCOME = ("drive_status", "drive_folder", "drive_folder_url", "drive_html_url", "drive_pdf_url",
                     "drive_links_status", "mail_status", "gmail_message_id", "mail_error",
@@ -149,6 +153,9 @@ class MeetingArchive:
         self._delivery_labels: dict[str, dict] = {}
         # Visual speaker names for a meeting that is no longer the live one.
         self.transcript_annotator = transcript_annotator or (lambda snapshot: snapshot)
+        # A meeting whose lost live analysis is being rebuilt (MEETONTRACK-107) is
+        # not sent until the rebuild ends; the server wires its rebuild state in.
+        self.analysis_pending: Callable[[str], bool] = lambda meeting_id: False
         # meeting_id -> (meeting.json, report.json) versions already found up to date.
         self._history_checked: dict[str, tuple] = {}
         private_dir(self.archive_root, recover=True)
@@ -224,9 +231,13 @@ class MeetingArchive:
                 if previous.get("speaker_revision"):
                     return  # Speakers were corrected by hand meanwhile: keep that text.
                 clean["final_transcript"] = str(transcript["final_transcript"])
-            elif previous.get("final_transcript") and not clean.get("explicit_boundary"):
+            elif previous.get("final_transcript") and (
+                    not clean.get("explicit_boundary")
+                    or previous.get("logical_interval") == clean.get("logical_interval")):
                 # The recorder's final transcript wins: a later live export may
                 # add names or translations to the same lines, never replace them.
+                # A split meeting keeps it until its boundary moves; its part of
+                # the final transcript is then imported again (MEETONTRACK-94).
                 clean["final_transcript"] = previous["final_transcript"]
                 clean["capture_warnings"] = list(previous.get("capture_warnings") or [])
                 if _lines(clean["segments"]) != _lines(previous.get("segments", [])):
@@ -276,10 +287,9 @@ class MeetingArchive:
         right away by another never read its own final transcript there.
         """
         directory = str(snapshot.get("recording_dir") or "")
-        if (snapshot.get("status") != "finished" or not directory or snapshot.get("explicit_boundary")
-                or snapshot.get("speaker_revision")):
-            # ponytail: a split meeting or hand-corrected speakers keep their live
-            # text; importing those needs boundary projection and edit carry-over.
+        interval = snapshot.get("logical_interval") or {}
+        if snapshot.get("status") != "finished" or not directory or (
+                snapshot.get("explicit_boundary") and not interval.get("end")):
             return False
         try:
             stat = (Path(directory) / "transcript.json").stat()
@@ -288,18 +298,35 @@ class MeetingArchive:
         version = f"{stat.st_size}:{stat.st_mtime_ns}"
         if snapshot.get("final_transcript") == version:
             return False
-        final = canonical_segments(snapshot)
-        if not final:
+        if snapshot.get("explicit_boundary"):
+            # A split meeting is its own part of the physical recording's final transcript.
+            final = canonical_segments({**snapshot, "started_at": snapshot.get("physical_started_at")})
+            final = None if final is None else [item for item in final if interval_contains(interval, item["timestamp"])]
+        else:
+            final = canonical_segments(snapshot)
+        if final is None or (not final and not snapshot.get("explicit_boundary")):
             return False
         live = list(snapshot.get("segments") or [])
         if _lines(final) == _lines(live):
             final = live  # Already imported by the live file: keep its names.
+        if snapshot.get("speaker_revision"):
+            # ponytail: hand-corrected speakers are kept, so only edits made on the
+            # final text itself count as final; otherwise the report waits, unsent.
+            if final is not live:
+                return False
+            with self.speaker_edits.lock:
+                path = self.archive_root / _safe(str(snapshot.get("meeting_id") or "")) / "meeting.json"
+                stored = _json(path, {})
+                if not stored or _lines(stored.get("segments", [])) != _lines(live):
+                    return False
+                _atomic_json(path, {**stored, "final_transcript": version})
+            return True
         finish = _date(snapshot.get("ended_at") or snapshot.get("updated_at"))
         warnings = [narrowed for warning in snapshot.get("capture_warnings") or []
                     if (narrowed := self._narrow_warning(warning, final, finish))]
         self.sync_transcript(self.transcript_annotator({
             **snapshot, "segments": final, "capture_warnings": warnings,
-            "latest_at": final[-1]["timestamp"], "final_transcript": version}))
+            "latest_at": final[-1]["timestamp"] if final else "", "final_transcript": version}))
         return True
 
     @staticmethod
@@ -394,7 +421,9 @@ class MeetingArchive:
         for path, ended in imported:
             meeting_id = path.parent.name
             try:
-                version = (path.stat().st_mtime_ns, _mtime(self.reports_root / meeting_id / "report.json"))
+                # A finished analysis rebuild changes no file of the meeting, yet its report may go now.
+                version = (path.stat().st_mtime_ns, _mtime(self.reports_root / meeting_id / "report.json"),
+                           self.analysis_pending(meeting_id))
                 if self._history_checked.get(meeting_id) == version:
                     continue
                 # Remember "nothing to do" only once the 2-minute settling time is long over.
@@ -619,13 +648,31 @@ class MeetingArchive:
             "participants": participants,
             "report": report_meta,
         }
-        for field in ("physical_meeting_id", "physical_started_at", "logical_interval", "audio_range", "explicit_boundary"):
+        for field in ("physical_meeting_id", "physical_started_at", "logical_interval", "audio_range", "explicit_boundary",
+                      "final_transcript"):
             if field in snapshot:
                 result[field] = snapshot[field]
+        result["final_wait"] = self._final_wait(snapshot, ended)
         annotated = self.annotate_speakers({**result, "segments": segments})
         annotated["fact_checks"] = with_speakers(annotated["fact_checks"], annotated["segments"])  # corrections reach rows
         annotated["transcript"] = annotated.pop("segments")
         return self._library_detail(annotated)
+
+    def _final_wait(self, snapshot: dict, ended: str) -> dict | None:
+        """A finished meeting whose report waits for the recorder's final transcript (MEETONTRACK-94).
+
+        Only inside the delivery window: older meetings are never sent on their own.
+        """
+        finished = _date(ended)
+        if not snapshot or snapshot.get("final_transcript") or snapshot.get("status") != "finished" or not finished:
+            return None
+        waited = (datetime.now().astimezone() - finished).total_seconds()
+        if waited > self.delivery_retry_days * 86400:
+            return None
+        directory = str(snapshot.get("recording_dir") or "")
+        edited = bool(snapshot.get("speaker_revision") and directory and (Path(directory) / "transcript.json").is_file())
+        return {"state": "missing" if edited or waited >= FINAL_WAIT_ATTENTION_SECONDS else "waiting",
+                "reason": "speakers_edited" if edited else "final_transcript", "minutes": max(0, int(waited // 60))}
 
     def _library_detail(self, detail: dict) -> dict:
         detail["source_title"] = detail["title"]
@@ -907,6 +954,7 @@ class MeetingArchive:
             "library_status": detail.get("library_status", "transcript_ready"),
             "audio_gap": detail.get("audio_gap"),
             "report_failure": detail.get("report_failure"),
+            "final_wait": detail.get("final_wait"),
             "preview": (detail.get("overview", {}).get("points") or [""])[0],
             "status": detail["status"],
             "started_at": detail["started_at"],
@@ -1193,6 +1241,23 @@ class MeetingArchive:
             health["undelivered"].append({"meeting_id": path.parent.name, "channels": [], "uncertain": False,
                                           "missing": True, "failed": failure, **self._delivery_label(path.parent.name)})
             health["issue_count"] = int(health.get("issue_count") or 0) + 1
+        # A finished call still without its final transcript: its report waits, unsent (MEETONTRACK-94).
+        listed = {item["meeting_id"] for item in health["undelivered"]}
+        now = datetime.now().astimezone()
+        for path in sorted(self.archive_root.glob("*/meeting.json")):
+            snapshot = _json(path, {})
+            ended = _date(str(snapshot.get("ended_at") or snapshot.get("updated_at") or "")) if isinstance(snapshot, dict) else None
+            if (path.parent.name in listed or not ended or snapshot.get("final_transcript")
+                    or snapshot.get("status") != "finished"
+                    or not 0 <= (now - ended).total_seconds() <= self.delivery_retry_days * 86400):
+                continue  # Cheap checks first: the full detail reads every index.
+            detail = self.detail(path.parent.name)
+            wait = (detail or {}).get("final_wait")
+            if not wait or wait["state"] != "missing" or self._short_automatic(detail):
+                continue
+            health["undelivered"].append({"meeting_id": path.parent.name, "channels": [], "uncertain": False,
+                                          "final_wait": wait, **self._delivery_label(path.parent.name)})
+            health["issue_count"] = int(health.get("issue_count") or 0) + 1
         return health
 
     def repair_report_states(self) -> None:
@@ -1409,7 +1474,13 @@ class MeetingArchive:
         if chain and detail.get("meeting_id") != chain[-1].get("meeting_id"):
             return False
         ended = _date(str(detail.get("ended_at") or ""))
-        return bool(ended and (datetime.now().astimezone() - ended).total_seconds() >= 120)
+        if not ended or (datetime.now().astimezone() - ended).total_seconds() < 120:
+            return False
+        # MEETONTRACK-94: a report is sent only from the recorder's final transcript
+        # of every chunk of the call, never from live text, and only after a rebuild
+        # of its lost analysis. No timeout falls back to live text.
+        return all(item.get("final_transcript") and not self.analysis_pending(str(item.get("meeting_id") or ""))
+                   for item in chain or [detail])
 
     def _short_automatic(self, detail: dict) -> bool:
         """A provisional/short auto capture is not a meeting or deliverable.

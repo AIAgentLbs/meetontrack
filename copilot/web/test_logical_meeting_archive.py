@@ -31,6 +31,14 @@ class LogicalArchiveTests(unittest.TestCase):
         for part in self.store.project(self.physical):
             self.archive.sync_transcript(part)
 
+    def import_final(self):
+        """The recorder's final transcript of the whole physical recording arrives."""
+        (self.recording / "transcript.json").write_text(json.dumps({"engine": "synthetic", "segments": [
+            {"speaker": "them", "start_ms": 120000, "end_ms": 121000, "text": "old final"},
+            {"speaker": "them", "start_ms": 480000, "end_ms": 481000, "text": "new final"}]}))
+        for meeting_id in ("p1", self.second):
+            self.archive.import_final_transcript(json.loads((self.archive.archive_root / meeting_id / "meeting.json").read_text()))
+
     def test_report_not_merged_and_duration_bounded(self):
         self.sync()
         first = self.archive.report_detail("p1")
@@ -57,8 +65,11 @@ class LogicalArchiveTests(unittest.TestCase):
         self.physical["status"] = "recording"
         (self.recording / ".recording.json").write_text("{}")
         self.sync()
+        self.assertFalse(self.archive.needs_report("p1"), "Live text is never reported (MEETONTRACK-94)")
+        self.import_final()
         self.assertTrue(self.archive.needs_report("p1"))
         self.assertFalse(self.archive.needs_report(self.second))
+        self.assertEqual([s["text"] for s in self.archive.detail("p1")["transcript"]], ["old final"])
 
     def test_capture_events_route_and_manual_old_note_stays_old(self):
         self.archive.event_router = self.store.route_event
@@ -84,4 +95,11 @@ class LogicalArchiveTests(unittest.TestCase):
         second = self.archive.detail(self.second)
         self.assertEqual(second["status"], "finished")
         self.assertEqual(second["logical_interval"]["end"], "2026-01-01T10:20:00Z")
+        self.assertFalse(self.archive.needs_report(self.second))
+        self.import_final()
+        self.assertTrue(self.archive.needs_report(self.second))
+        self.assertEqual([s["text"] for s in self.archive.detail(self.second)["transcript"]], ["new final"])
+        self.store = restarted
+        self.sync()  # A later live export of the same part keeps the final text and its mark.
+        self.assertEqual([s["text"] for s in self.archive.detail(self.second)["transcript"]], ["new final"])
         self.assertTrue(self.archive.needs_report(self.second))

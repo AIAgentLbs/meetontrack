@@ -46,7 +46,9 @@ class DeliveryRetry:
                 else:
                     detail = self.archive.report_detail(identity)
                     if not detail or not self.archive._ready_for_delivery(detail):
-                        raise ValueError("meeting_not_finished")
+                        # MEETONTRACK-94: only a final transcript is ever sent, also on request.
+                        raise ValueError("final_transcript_missing" if detail and detail.get("status") == "finished"
+                                         and not detail.get("final_transcript") else "meeting_not_finished")
                     pdf = self.archive.report_path(identity, "meeting-report.pdf")
                     if not pdf or not pdf.is_file():
                         raise ValueError("report_not_ready")

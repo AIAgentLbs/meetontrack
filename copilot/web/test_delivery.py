@@ -34,7 +34,7 @@ class DeliveryTests(unittest.TestCase):
             "meeting_id": "meeting-1", "title": "Test call",
             "started_at": datetime.now().astimezone().isoformat(),
             "ended_at": (datetime.now().astimezone() - timedelta(minutes=5)).isoformat(),
-            "status": "finished",
+            "status": "finished", "final_transcript": "1:1",
         }
         self.pdf = root / "meeting-report.pdf"
         self.pdf.write_bytes(b"%PDF-test")

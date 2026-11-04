@@ -1946,6 +1946,8 @@ textarea::placeholder {
 .archive-library-status { font-size: 12px; color: var(--accent-strong); }
 .archive-audio-gap { font-size: 12px; line-height: 1.5; color: var(--muted); }
 .archive-audio-gap:empty { display: none; }
+.archive-final-wait { font-size: 12px; line-height: 1.5; color: var(--warning); }
+.archive-final-wait:empty { display: none; }
 .archive-report-failure { font-size: 12px; line-height: 1.5; color: var(--danger); }
 .archive-report-failure:empty { display: none; }
 .archive-report-failure-detail { display: grid; gap: 8px; justify-items: start; margin: 8px 0; font-size: 14px; }

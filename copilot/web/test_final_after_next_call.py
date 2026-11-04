@@ -388,5 +388,138 @@ class RepairedOldMeetingDeliveryTests(unittest.TestCase):
         self.assertEqual(self.health(hours=2)["issue_count"], 0, "Telegram arrived: the email failure closes")
 
 
+class FinalOnlyDeliveryTests(unittest.TestCase):
+    """MEETONTRACK-94 owner rule: a report goes out only from the final transcript."""
+
+    def __getattr__(self, name):  # The shared call fixture: root, archive, finalize, sent, write_final...
+        case = self.__dict__.get("case")
+        if case is None:
+            raise AttributeError(name)
+        return getattr(case, name)
+
+    def setUp(self):
+        self.case = FinalTranscriptAfterNextCallTests("test_dropout_in_the_last_minute_is_explained_not_flagged")
+        self.case.setUp()
+        self.addCleanup(self.case.doCleanups)
+        self.final = json.loads((self.first / "transcript.json").read_text())["segments"]
+        (self.first / "transcript.json").unlink()  # Only live text so far.
+        self.next_call_ends()
+
+    def report(self) -> dict:
+        path = self.root / "reports/FIRST-CALL/report.json"
+        return json.loads(path.read_text()) if path.exists() else {}
+
+    def test_nothing_is_sent_before_the_final_transcript_and_once_after_it(self):
+        self.finalize()
+        self.archive.retry_pending_deliveries()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.report(), {}, "No report is built from live text")
+        self.write_final(self.final)
+        self.finalize()
+        self.finalize()
+        self.assertEqual(self.sent, ["FIRST-CALL"], "Sent once, from the final transcript")
+        texts = [item["text"] for item in self.archive.report_detail("FIRST-CALL")["transcript"]]
+        self.assertEqual((len(texts), texts[-1]), (406, "Final goodbye"))
+        self.assertNotIn("Live line 0", texts)
+
+    def test_a_missing_final_transcript_needs_attention_and_nothing_is_sent(self):
+        # The call ended about two hours ago and the recorder never wrote its final transcript.
+        self.finalize()
+        detail = self.archive.detail("FIRST-CALL")
+        self.assertEqual((detail["final_wait"]["state"], detail["final_wait"]["reason"]), ("missing", "final_transcript"))
+        summary = next(item for item in self.archive.list_meetings() if item["meeting_id"] == "FIRST-CALL")
+        self.assertEqual(summary["final_wait"]["state"], "missing")
+        item = next(item for item in self.archive.delivery_health()["undelivered"] if item["meeting_id"] == "FIRST-CALL")
+        self.assertEqual(item["final_wait"]["state"], "missing")
+        # The person's "Create the report" builds it from what there is, but sends nothing.
+        with patch.object(self.archive, "_print_pdf", side_effect=lambda html, pdf: pdf.write_bytes(b"%PDF synthetic")), \
+             patch.object(self.archive, "deliver") as deliver:
+            self.archive.generate_report("FIRST-CALL")
+            self.archive.retry_pending_deliveries()
+        deliver.assert_not_called()
+        self.assertEqual(self.report()["mail_status"], "waiting_for_end")
+        # A later final transcript sends it, once.
+        self.write_final(self.final)
+        self.finalize()
+        self.assertEqual(self.sent, ["FIRST-CALL"])
+        self.assertEqual(self.report()["mail_status"], "sent")
+        self.assertIsNone(self.archive.detail("FIRST-CALL")["final_wait"])
+        self.assertNotIn("FIRST-CALL", [i["meeting_id"] for i in self.archive.delivery_health()["undelivered"]])
+
+    def test_a_call_that_just_ended_is_only_waiting(self):
+        meeting = self.stored()
+        ended = datetime.now(timezone.utc) - timedelta(minutes=5)
+        (self.root / "archive/FIRST-CALL/meeting.json").write_text(json.dumps({**meeting, "updated_at": iso(ended)}))
+        meta = json.loads((self.first / "meta.json").read_text())
+        (self.first / "meta.json").write_text(json.dumps({**meta, "ended": iso(ended)}))
+        self.assertEqual(self.archive.detail("FIRST-CALL")["final_wait"]["state"], "waiting")
+        self.assertNotIn("FIRST-CALL", [i["meeting_id"] for i in self.archive.delivery_health()["undelivered"]])
+
+    def test_a_merged_report_waits_for_the_final_transcript_of_every_chunk(self):
+        early = self.start - timedelta(minutes=30)
+        chunk = self.recording("2026.10.22-1530 Google Chrome Helper (Ap", early, self.start - timedelta(seconds=30))
+        self.archive.sync_transcript({**self.live, "meeting": "Synthetic sync"})  # Same title: one call.
+        self.archive.sync_transcript({**self.live, "meeting": "Synthetic sync", "meeting_id": "EARLY-CHUNK", "started_at": iso(early),
+                                      "updated_at": iso(self.start - timedelta(seconds=30)), "capture_warnings": [],
+                                      "recording_dir": str(chunk), "segments": [
+                                          {"source": "system", "timestamp": iso(early + timedelta(seconds=1)), "text": "Live chunk"}]})
+        self.write_final(self.final)  # The last chunk is final, the earlier one is not.
+        self.finalize()
+        self.assertEqual(self.sent, [], "Never one chunk's final text with another's live text")
+        (chunk / "transcript.json").write_text(json.dumps({"engine": "fluidaudio", "segments": [
+            {"speaker": "them", "start_ms": 1000, "end_ms": 3000, "text": "Earlier chunk final"}]}))
+        self.finalize()
+        self.assertEqual(self.sent, ["FIRST-CALL"])
+        texts = [item["text"] for item in self.archive.report_detail("FIRST-CALL")["transcript"]]
+        self.assertIn("Earlier chunk final", texts)
+        self.assertNotIn("Live chunk", texts)
+
+    def test_a_restart_between_live_and_final_sends_once(self):
+        self.finalize()
+        self.case.archive = MeetingArchive(self.root / "recordings", self.root / "archive", self.root / "reports", self.config)
+        self.write_final(self.final)
+        self.finalize()
+        self.case.archive = MeetingArchive(self.root / "recordings", self.root / "archive", self.root / "reports", self.config)
+        self.finalize()
+        self.archive.retry_pending_deliveries()
+        self.assertEqual(self.sent, ["FIRST-CALL"])
+
+    def test_speakers_corrected_on_live_text_keep_it_unsent(self):
+        stored = self.stored()
+        stored.update(speaker_revision=1, speaker_names={"remote-1": "Synthetic Name"})
+        (self.root / "archive/FIRST-CALL/meeting.json").write_text(json.dumps(stored))
+        self.write_final(self.final)
+        self.finalize()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.archive.detail("FIRST-CALL")["final_wait"]["reason"], "speakers_edited")
+
+    def test_a_rebuild_of_lost_analysis_holds_the_report_until_it_ends(self):
+        pending = {"FIRST-CALL"}
+        self.archive.analysis_pending = lambda meeting_id: meeting_id in pending
+        self.write_final(self.final)
+        self.finalize()
+        self.assertEqual(self.sent, [])
+        pending.clear()
+        self.finalize()
+        self.assertEqual(self.sent, ["FIRST-CALL"])
+
+    def test_meetings_already_sent_are_never_sent_again(self):
+        # Sent from live text before this change, within and after the delivery window.
+        for days in (0, 10):
+            report_dir = self.root / "reports/FIRST-CALL"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            (report_dir / "meeting-report.pdf").write_bytes(b"%PDF old")
+            sent_at = (datetime.now(timezone.utc) - timedelta(days=days, hours=2)).isoformat(timespec="seconds")
+            (report_dir / "report.json").write_text(json.dumps({
+                "generated_at": sent_at, "delivery_started_at": sent_at, "source_signature": "live-text",
+                "pdf_path": str(report_dir / "meeting-report.pdf"), "html": "x", "pdf": "y",
+                "mail_status": "sent", "telegram_status": "sent", "drive_status": "uploaded"}))
+            with patch.object(self.archive, "deliver") as deliver:
+                self.archive.retry_pending_deliveries()
+                self.finalize()
+            deliver.assert_not_called()
+            self.assertEqual(self.sent, [])
+
+
 if __name__ == "__main__":
     unittest.main()

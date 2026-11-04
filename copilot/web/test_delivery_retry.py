@@ -22,7 +22,7 @@ class RetryTests(unittest.TestCase):
         self.path=directory/"report.json"
         self.path.write_text(json.dumps({"mail_status":"failed","generated_at":datetime.now(timezone.utc).isoformat()}))
         self.retry=DeliveryRetry(self.archive)
-        self.detail={"meeting_id":"call-1","status":"finished", "ended_at":(datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat()}
+        self.detail={"meeting_id":"call-1","status":"finished","final_transcript":"1:1","ended_at":(datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat()}
 
     def run_retry(self, confirm=False):
         with patch.object(self.archive,"report_detail",return_value=self.detail), \
@@ -49,6 +49,12 @@ class RetryTests(unittest.TestCase):
         self.detail["status"]="recording"
         self.run_retry().assert_not_called()
         self.assertEqual(self.retry.snapshot()["error"],"meeting_not_finished")
+
+    def test_live_text_is_not_sent_on_request(self):
+        # MEETONTRACK-94: "Send again" waits for the final transcript like any send.
+        del self.detail["final_transcript"]
+        self.run_retry(confirm=True).assert_not_called()
+        self.assertEqual(self.retry.snapshot()["error"],"final_transcript_missing")
 
     def test_invalid_identity_rejected(self):
         with self.assertRaises(ValueError):

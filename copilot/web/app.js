@@ -808,6 +808,7 @@ Object.assign(translations.ru, {
   "delivery.resend": "Отправить снова", "delivery.resending": "Отправляю...",
   "delivery.resend_failed": "Не получилось отправить. Проверьте интернет и нажмите «Отправить снова» еще раз.",
   "delivery.resend_meeting_not_finished": "Встреча еще записывается. Отправьте отчет после ее завершения.",
+  "delivery.resend_final_transcript_missing": "Итоговая расшифровка еще не готова. Отчет уйдет сам, когда она будет готова.",
   "delivery.resend_report_not_ready": "Файл отчета не найден. Откройте отчет в истории встреч и создайте его заново.",
   "delivery.unsure_many.one": "{count} отчет мог не дойти",
   "delivery.unsure_many.few": "{count} отчета могли не дойти",
@@ -834,6 +835,13 @@ Object.assign(translations.ru, {
   "delivery.failed.title": "Отчет по встрече «{title}» не создан",
   "delivery.failed.date": "Отчет по встрече от {date} не создан",
   "delivery.failed.plain": "Отчет по встрече не создан",
+  "delivery.final.title_date": "Отчет по встрече «{title}» от {date} ждет итоговую расшифровку",
+  "delivery.final.title": "Отчет по встрече «{title}» ждет итоговую расшифровку",
+  "delivery.final.date": "Отчет по встрече от {date} ждет итоговую расшифровку",
+  "delivery.final.plain": "Отчет по встрече ждет итоговую расшифровку",
+  "final_wait.waiting": "Отчет ждет итоговую расшифровку и уйдет, как только она будет готова.",
+  "final_wait.final_transcript": "Итоговой расшифровки нет уже {minutes} мин после звонка. Отчет не отправлен: предварительная расшифровка не отправляется. Проверьте, что приложение записи запущено. Отчет уйдет сам, когда итоговая расшифровка будет готова.",
+  "final_wait.speakers_edited": "Спикеры были исправлены в предварительной расшифровке до готовности итоговой, поэтому итоговая расшифровка не применена и отчет не отправлен.",
   "report_failure.pdf": "Отчет не создан: Chrome не смог сохранить PDF. Попыток: {attempts}, последняя в {time}. Приложение само повторит попытку через 30 минут, или нажмите «Создать отчет заново».",
   "report_failure.other": "Отчет не создан ({message}). Попыток: {attempts}, последняя в {time}. Приложение само повторит попытку через 30 минут, или нажмите «Создать отчет заново».",
   "report_failure.short": "Отчет не создан. Откройте встречу и нажмите «Создать отчет заново».",
@@ -863,6 +871,7 @@ Object.assign(translations.en, {
   "delivery.resend": "Send again", "delivery.resending": "Sending...",
   "delivery.resend_failed": "Could not send. Check the internet connection and press Send again.",
   "delivery.resend_meeting_not_finished": "The meeting is still recording. Send the report after it ends.",
+  "delivery.resend_final_transcript_missing": "The final transcript is not ready yet. The report is sent by itself when it is.",
   "delivery.resend_report_not_ready": "The report file is missing. Open the report in meeting history and create it again.",
   "delivery.unsure_many.one": "{count} report may not have arrived",
   "delivery.unsure_many.other": "{count} reports may not have arrived",
@@ -887,6 +896,13 @@ Object.assign(translations.en, {
   "delivery.failed.title": "Report for “{title}” was not created",
   "delivery.failed.date": "Report for the meeting on {date} was not created",
   "delivery.failed.plain": "A meeting report was not created",
+  "delivery.final.title_date": "Report for “{title}” on {date} waits for the final transcript",
+  "delivery.final.title": "Report for “{title}” waits for the final transcript",
+  "delivery.final.date": "Report for the meeting on {date} waits for the final transcript",
+  "delivery.final.plain": "A meeting report waits for the final transcript",
+  "final_wait.waiting": "The report waits for the final transcript and is sent as soon as it is ready.",
+  "final_wait.final_transcript": "There is still no final transcript {minutes} min after the call. The report is not sent: the preliminary transcript is never sent. Check that the recorder is running. The report is sent by itself once the final transcript is ready.",
+  "final_wait.speakers_edited": "Speakers were corrected on the preliminary transcript before the final one was ready, so the final transcript was not applied and the report is not sent.",
   "report_failure.pdf": "The report was not created: Chrome could not save the PDF. Attempts: {attempts}, last at {time}. The app tries again by itself in 30 minutes, or press Create the report again.",
   "report_failure.other": "The report was not created ({message}). Attempts: {attempts}, last at {time}. The app tries again by itself in 30 minutes, or press Create the report again.",
   "report_failure.short": "Report not created. Open the meeting and press Create the report again.",
@@ -978,13 +994,19 @@ const deliveryChannelNames = { drive: "Google Drive", get gmail() { return uiLan
 
 const deliveryResend = {};
 
+// MEETONTRACK-94: a report is sent only from the final transcript; say why it waits.
+function finalWaitText(wait) {
+  if (wait.state !== "missing") return t("final_wait.waiting");
+  return t(`final_wait.${wait.reason === "speakers_edited" ? "speakers_edited" : "final_transcript"}`, {minutes: wait.minutes || 0});
+}
+
 function undeliveredLabel(item) {
   const started = new Date(item.started_at || "");
   const values = {
     title: item.title || "",
     date: Number.isNaN(started.getTime()) ? "" : started.toLocaleDateString(uiLanguage, { day: "numeric", month: "long" }),
   };
-  const family = item.failed ? "failed" : item.missing ? "missing" : item.uncertain ? "unsure" : "undelivered";
+  const family = item.failed ? "failed" : item.missing ? "missing" : item.final_wait ? "final" : item.uncertain ? "unsure" : "undelivered";
   return t(`delivery.${family}.${["title", "date"].filter(key => values[key]).join("_") || "plain"}`, values);
 }
 
@@ -1025,7 +1047,7 @@ async function resendReport(item) {
     auth = item.channels.some(channel => job.report?.[fields[channel]] === "auth_required")
       || deliveryAuthReasons.includes(job.report?.mail_error?.reason);
     unsure = item.channels.some(channel => job.report?.[fields[channel]] === "unknown");
-    blocked = ["meeting_not_finished", "report_not_ready"].includes(job.error) ? job.error : "";
+    blocked = ["meeting_not_finished", "report_not_ready", "final_transcript_missing"].includes(job.error) ? job.error : "";
   } catch (_error) {
     sent = false;
   }
@@ -1086,6 +1108,12 @@ function renderDeliveryHealth(health = {}) {
     const state = deliveryResend[item.meeting_id] || "";
     const row = textNode("div", "delivery-undelivered", "");
     row.append(textNode("p", "", undeliveredLabel(item)));
+    if (item.final_wait) {
+      // Nothing to press: the report goes by itself once the final transcript is ready.
+      row.append(textNode("p", "delivery-reason", finalWaitText(item.final_wait)));
+      resendRows.append(row);
+      continue;
+    }
     const [busyText, idleText] = item.missing ? ["delivery.recreating", "delivery.recreate"] : ["delivery.resending", "delivery.resend"];
     const button = textNode("button", "primary-button", t(state === "sending" ? busyText : idleText));
     button.type = "button";
@@ -1095,7 +1123,7 @@ function renderDeliveryHealth(health = {}) {
     if (item.failed && !deliveryRecreateError[item.meeting_id]) row.append(textNode("p", "delivery-reason", reportFailureText(item.failed)));
     if (deliveryRecreateError[item.meeting_id]) row.append(textNode("p", "delivery-reason", deliveryRecreateError[item.meeting_id]));
     if ((item.uncertain && !state) || state === "unsure") row.append(textNode("p", "delivery-reason", t("delivery.unsure_hint")));
-    if (["failed", "meeting_not_finished", "report_not_ready"].includes(state)) {
+    if (["failed", "meeting_not_finished", "report_not_ready", "final_transcript_missing"].includes(state)) {
       row.append(textNode("p", "delivery-reason", t(`delivery.resend_${state}`)));
     }
     if (state === "auth") {
@@ -2416,6 +2444,7 @@ function renderArchiveList() {
       textNode("span", `archive-library-status ${meeting.library_status || ""}`, t(`library.${meeting.library_status || "transcript_ready"}`)),
       textNode("span", "archive-audio-gap", audioGapText(meeting)),
       textNode("span", "archive-report-failure", meeting.report_failure ? t("report_failure.short") : ""),
+      textNode("span", "archive-final-wait", meeting.final_wait ? finalWaitText(meeting.final_wait) : ""),
       textNode("span", "archive-item-preview", meeting.preview || ""),
       textNode("span", "archive-item-counts", [
         archiveDuration(meeting.duration_seconds), `${meeting.transcript_count} ${t("archive.utterances")}`,
@@ -2495,6 +2524,7 @@ function renderArchiveDetail(meeting) {
   overview.className = "archive-overview";
   overview.append(textNode("h3", "", t("library.overview")));
   if (meeting.audio_gap) overview.append(textNode("p", "archive-quality-note archive-audio-gap", audioGapText(meeting)));
+  if (meeting.final_wait) overview.append(textNode("p", "archive-final-wait", finalWaitText(meeting.final_wait)));
   if (meeting.report_failure) {
     const failure = textNode("div", "archive-report-failure archive-report-failure-detail", "");
     failure.append(textNode("p", "", reportFailureText(meeting.report_failure)));
