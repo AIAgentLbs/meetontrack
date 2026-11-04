@@ -71,21 +71,22 @@ actual="$(shasum -a 256 "$tmp/$ASSET")"
 [[ "${actual%% *}" == "$expected" ]] || fail "Release checksum mismatch; nothing was installed"
 unzip -tq "$tmp/$ASSET" >/dev/null || fail "Release archive is damaged"
 unzip -q "$tmp/$ASSET" -d "$tmp/release"
-[[ -d "$tmp/release/Meeting Copilot Capture.app" ]] || fail "release app is missing"
-[[ -d "$tmp/release/payload/web" ]] || fail "release payload is missing"
-for file in release.json payload/web/server.py payload/bin/meeting-copilot payload/config/refresh-repos.py payload/config/SESSION.md payload/config/delivery.json.example; do
-  [[ -f "$tmp/release/$file" ]] || fail "Release file is missing: $file"
+release_app="$tmp/release/Meeting Copilot Capture.app"
+# One app (MEETONTRACK-109): Python, the web service and helpers are inside it.
+payload_in="Contents/Resources/payload"
+[[ -d "$release_app" ]] || fail "release app is missing"
+[[ -f "$tmp/release/release.json" ]] || fail "Release file is missing: release.json"
+for file in web/server.py bin/meeting-copilot config/refresh-repos.py config/SESSION.md config/delivery.json.example; do
+  [[ -f "$release_app/$payload_in/$file" ]] || fail "Release file is missing: $file"
 done
-python="$tmp/release/payload/python/bin/python3"
+python="$release_app/$payload_in/python/bin/python3"
 [[ -x "$python" ]] || fail "Release Python runtime is missing"
-"$python" -I -c 'import ssl, sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' || fail "Packaged Python runtime cannot start"
-
-# Prepare everything before touching an existing installation.
-mkdir -p "$tmp/helpers"
+"$python" -I -B -c 'import ssl, sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' || fail "Packaged Python runtime cannot start"
 for helper in zoom-window-finder zoom-frame-inspector detect-speech-language; do
-  [[ -x "$tmp/release/payload/bin/$helper" ]] || fail "Release helper is missing: $helper"
-  install -m 0755 "$tmp/release/payload/bin/$helper" "$tmp/helpers/$helper"
+  [[ -x "$release_app/$payload_in/bin/$helper" ]] || fail "Release helper is missing: $helper"
 done
+release_version="$("$python" -I -B -c 'import json, sys; print(json.load(open(sys.argv[1]))["version"])' "$tmp/release/release.json")" \
+  || fail "Release file is invalid: release.json"
 require_capture_closed
 
 # Installers up to 0.1.16 left a backup of every previous version behind. Move
@@ -113,17 +114,15 @@ if [[ ! -w "$app_root" ]]; then
   mkdir -p "$app_root"
 fi
 app="$app_root/Meeting Copilot Capture.app"
-replace "$tmp/release/Meeting Copilot Capture.app" "$app"
+replace "$release_app" "$app"
+payload="$app/$payload_in"
+python="$payload/python/bin/python3"
 
-mkdir -p "$SHARE" "$CONFIG" "$BIN" "$AGENTS" "$SHARE/bin"
-replace "$tmp/release/payload/python" "$SHARE/python"
-python="$SHARE/python/bin/python3"
-replace "$tmp/release/payload/web" "$SHARE/web"
-replace "$tmp/release/release.json" "$SHARE/release.json"
-install -m 0755 "$tmp/release/payload/bin/meeting-copilot" "$BIN/meeting-copilot"
-install -m 0755 "$tmp/release/payload/config/refresh-repos.py" "$CONFIG/refresh-repos.py"
+mkdir -p "$SHARE" "$CONFIG" "$BIN"
+install -m 0755 "$payload/bin/meeting-copilot" "$BIN/meeting-copilot"
+install -m 0755 "$payload/config/refresh-repos.py" "$CONFIG/refresh-repos.py"
 # One-time removal of retired usage-reporting state; preserve all other settings.
-"$python" - "$CONFIG" <<'PY'
+"$python" -I -B - "$CONFIG" <<'PY'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 config = root / "config.json"
@@ -138,23 +137,19 @@ if config.is_file():
 for name in ("analytics.json", "analytics-pending.json"):
     (root / name).unlink(missing_ok=True)
 PY
-[[ -f "$CONFIG/SESSION.md" ]] || install -m 0644 "$tmp/release/payload/config/SESSION.md" "$CONFIG/SESSION.md"
-[[ -f "$CONFIG/delivery.json.example" ]] || install -m 0600 "$tmp/release/payload/config/delivery.json.example" "$CONFIG/delivery.json.example"
-
-install -m 0755 "$tmp/helpers/zoom-window-finder" "$SHARE/bin/zoom-window-finder"
-install -m 0755 "$tmp/helpers/zoom-frame-inspector" "$SHARE/bin/zoom-frame-inspector"
-install -m 0755 "$tmp/helpers/detect-speech-language" "$SHARE/bin/detect-speech-language"
+[[ -f "$CONFIG/SESSION.md" ]] || install -m 0644 "$payload/config/SESSION.md" "$CONFIG/SESSION.md"
+[[ -f "$CONFIG/delivery.json.example" ]] || install -m 0600 "$payload/config/delivery.json.example" "$CONFIG/delivery.json.example"
 
 # Discovery is explicit (meeting-copilot --refresh). A first install must not
 # scan unrelated project directories or write to a different user's config.
 if [[ ! -f "$CONFIG/repos.json" ]]; then
-  "$python" - "$CONFIG/repos.json" <<'PY'
+  "$python" -I -B - "$CONFIG/repos.json" <<'PY'
 import json, pathlib, sys
 pathlib.Path(sys.argv[1]).write_text(json.dumps({"repositories": [], "repository_count": 0, "search_roots": []}) + "\n")
 PY
 fi
 if [[ ! -f "$CONFIG/active-repos.json" ]]; then
-  "$python" - "$CONFIG/repos.json" "$CONFIG/active-repos.json" <<'PY'
+  "$python" -I -B - "$CONFIG/repos.json" "$CONFIG/active-repos.json" <<'PY'
 import json, pathlib, sys
 source, target = map(pathlib.Path, sys.argv[1:])
 data = json.loads(source.read_text())
@@ -164,59 +159,44 @@ target.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 PY
 fi
 
-"$python" - "$AGENTS/$LABEL.plist" "$SHARE" "$BIN" "$LABEL" <<'PY'
-import pathlib, plistlib, sys
-target, share, bin_root, label = sys.argv[1:]
-value = {
-    "Label": label,
-    "ProgramArguments": [sys.executable, str(pathlib.Path(share)/"web/server.py"), "--port", "43121", "--no-open"],
-    "RunAtLoad": True, "KeepAlive": True, "ProcessType": "Interactive",
-    "EnvironmentVariables": {"PATH": f"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{bin_root}"},
-    "StandardOutPath": str(pathlib.Path(share)/"web/server.log"),
-    "StandardErrorPath": str(pathlib.Path(share)/"web/server.log"),
-}
-with pathlib.Path(target).open("wb") as handle:
-    plistlib.dump(value, handle)
-PY
-# Commit: every file is in place. The previous copies are deleted with "$tmp".
+# Commit: the new app is in place. The previous copy is deleted with "$tmp".
 committed=true
 
-if [[ "${MEETING_COPILOT_SKIP_LAUNCH:-0}" != "1" ]]; then
-  # bootout can return before launchd has removed the old job; bootstrapping the
-  # same label then fails with "5: Input/output error" (0.1.9 -> 0.1.11 upgrade).
-  # Wait until the job is gone, and retry a bounded number of times.
-  domain="gui/$(id -u)"
-  bootstrapped=false
-  for attempt in 1 2 3; do
-    launchctl bootout "$domain/$LABEL" >/dev/null 2>&1 || true
-    for wait in {1..40}; do
-      launchctl print "$domain/$LABEL" >/dev/null 2>&1 || break
-      sleep 0.25
-    done
-    if bootstrap_error="$(launchctl bootstrap "$domain" "$AGENTS/$LABEL.plist" 2>&1)"; then
-      bootstrapped=true
-      break
-    fi
-    sleep 1
+# Up to 0.1.18 a launchd agent ran the web service from separate copies of
+# Python and web/ in $SHARE. The app runs its own now: retire the agent (so
+# the port is free for the app) and delete only those program copies.
+# Recordings, archive, reports, models and every setting stay untouched.
+domain="gui/$(id -u)"
+if [[ -f "$AGENTS/$LABEL.plist" ]]; then
+  launchctl bootout "$domain/$LABEL" >/dev/null 2>&1 || true
+  for wait in {1..40}; do
+    launchctl print "$domain/$LABEL" >/dev/null 2>&1 || break
+    sleep 0.25
   done
-  [[ "$bootstrapped" == true ]] || fail "Files installed, but macOS could not start the local assistant service ($bootstrap_error). Rerun the installer."
+  rm -f "$AGENTS/$LABEL.plist"
+  say "retired the separate background service; MeetOnTrack runs it itself now"
+fi
+rm -rf "$SHARE/python" "$SHARE/web" "$SHARE/release.json"
+for helper in zoom-window-finder zoom-frame-inspector detect-speech-language; do rm -f "$SHARE/bin/$helper"; done
+rmdir "$SHARE/bin" 2>/dev/null || true
+
+if [[ "${MEETING_COPILOT_SKIP_LAUNCH:-0}" != "1" ]]; then
   open "$app"
-  # A successful bootstrap is not yet an HTTP-ready assistant. Do not open a
-  # broken browser tab or require a second terminal command from a new user.
+  # The app starts the assistant's local service itself; confirm it is this
+  # version answering, not a leftover, before calling the install done.
   ready=false
-  for attempt in {1..40}; do
+  for attempt in {1..120}; do
     if curl --fail --silent --connect-timeout 1 --max-time 1 \
       "http://127.0.0.1:43121/api/health" \
-      | "$python" -I -c 'import json,sys; value=json.load(sys.stdin); sys.exit(0 if value.get("ok") is True and value.get("service")=="meeting-copilot" else 1)' \
+      | "$python" -I -B -c 'import json,sys; value=json.load(sys.stdin); sys.exit(0 if value.get("ok") is True and value.get("service")=="meeting-copilot" and value.get("version")==sys.argv[1] else 1)' "$release_version" \
         >/dev/null 2>&1; then
       ready=true
       break
     fi
     sleep 0.25
   done
-  [[ "$ready" == true ]] || fail "Files installed, but the local assistant did not become ready. Reopen MeetOnTrack or rerun the installer. Log: $SHARE/web/server.log"
-  open "http://127.0.0.1:43121/" || fail "The assistant is running, but macOS could not open the browser. Use Open MeetOnTrack assistant in the app."
-  say "the assistant is open in your browser; finish first-run permissions and model setup in MeetOnTrack"
+  [[ "$ready" == true ]] || fail "Files installed, but the assistant did not become ready. Quit and reopen MeetOnTrack. Log: $SHARE/server.log"
+  say "MeetOnTrack is open; finish first-run permissions and model setup in its window"
 fi
-say "$VERSION installed; existing recordings and private settings were preserved"
+say "$release_version installed; existing recordings and private settings were preserved"
 say "reopen anytime with Open MeetOnTrack assistant in the app window or menu bar"

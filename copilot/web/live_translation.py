@@ -14,7 +14,13 @@ import threading
 import time
 
 
-DETECTOR = Path.home() / ".local/share/meeting-copilot/bin/detect-speech-language"
+def helper_path(name: str) -> Path:
+    """A compiled helper: next to web/ in the app bundle (and in the old ~/.local/share layout)."""
+    bundled = Path(__file__).resolve().parent.parent / "bin" / name
+    return bundled if bundled.is_file() else Path.home() / ".local/share/meeting-copilot/bin" / name
+
+
+DETECTOR = helper_path("detect-speech-language")
 
 
 class LiveTranslation:

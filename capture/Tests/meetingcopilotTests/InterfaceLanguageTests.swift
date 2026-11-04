@@ -24,6 +24,15 @@ struct InterfaceLanguageTests {
         }
     }
 
+    @Test("First launch preselects Russian only for a Russian Mac")
+    func firstLaunchSuggestion() {
+        #expect(FirstLaunchLanguage.suggestion(preferred: ["ru-RU", "en-US"]) == .russian)
+        #expect(FirstLaunchLanguage.suggestion(preferred: ["ru"]) == .russian)
+        #expect(FirstLaunchLanguage.suggestion(preferred: ["en-GB", "ru-RU"]) == .english)
+        #expect(FirstLaunchLanguage.suggestion(preferred: ["de-DE", "ru-RU"]) == .english)
+        #expect(FirstLaunchLanguage.suggestion(preferred: []) == .english)
+    }
+
     @Test("First-run language is saved before the rest of the interface opens")
     @MainActor
     func savesFirstLaunchChoice() {

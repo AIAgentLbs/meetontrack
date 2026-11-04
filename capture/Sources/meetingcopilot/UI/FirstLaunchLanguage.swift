@@ -8,7 +8,13 @@ enum FirstLaunchLanguage {
         guard InterfaceLanguage.needsFirstLaunchChoice(
             setupPending: SetupState.isPending, configured: Config.interfaceLanguage()
         ) else { return true }
-        return choose(suggested: InterfaceLanguage.current)
+        return choose(suggested: suggestion(preferred: Locale.preferredLanguages))
+    }
+
+    /// Preselected at first launch (owner rule 2026-11-04): Russian when the
+    /// Mac's first preferred language is Russian, English for anything else.
+    nonisolated static func suggestion(preferred: [String]) -> InterfaceLanguage {
+        preferred.first?.lowercased().hasPrefix("ru") == true ? .russian : .english
     }
 
     /// Labels name themselves in both languages, including on an unsupported

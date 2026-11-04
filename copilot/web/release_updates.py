@@ -58,9 +58,13 @@ def installed_release(web_dir: Path, platform=None):
     except (OSError, ValueError, TypeError, AttributeError):
         pass
     if platform == "macos":
-        for root in (Path("/Applications"), Path.home() / "Applications"):
+        # Inside the app bundle (Contents/Resources/payload/web) the bundle itself is the release.
+        contents = web_dir.resolve().parent.parent.parent
+        bundled = [contents / "Info.plist"] if contents.name == "Contents" else []
+        for plist in (*bundled, *(root / "Meeting Copilot Capture.app/Contents/Info.plist"
+                                      for root in (Path("/Applications"), Path.home() / "Applications"))):
             try:
-                with (root / "Meeting Copilot Capture.app/Contents/Info.plist").open("rb") as handle:
+                with plist.open("rb") as handle:
                     data = plistlib.load(handle)
                 value = data.get("CFBundleShortVersionString", "")
                 if version_key(value):

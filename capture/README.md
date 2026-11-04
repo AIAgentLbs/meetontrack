@@ -56,6 +56,7 @@ not credentials to paste into this documentation.
   `window`, `on_stop`.
 
 Short automatic recordings use a 300-second minimum by default; intentional
-manual recordings are preserved. Interface language is chosen on first
-launch and is separate from speech/summary language. This distribution does
+manual recordings are preserved. Interface language is confirmed on first
+launch, preselected Russian for a Russian Mac and English otherwise, and is
+separate from speech/summary language. This distribution does
 not collect or send product-usage statistics.

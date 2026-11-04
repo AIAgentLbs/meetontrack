@@ -12,6 +12,7 @@ import mimetypes
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -30,7 +31,7 @@ from meeting_boundaries import MeetingBoundaries, BoundaryConflict, BoundaryUnav
 from calendar_meetings import CalendarMeetings
 from google_context import GoogleContext
 from call_plan import CallPlans
-from live_translation import LiveTranslation
+from live_translation import LiveTranslation, helper_path
 from frame_relevance import frame_relevance
 from chat_import import parse_chat_export, normalize_chat_times
 from interface_preferences import interface_preferences, save_preferences
@@ -81,8 +82,8 @@ def routed_event(item):
     if item.get("category") and item.get("source") not in {"transcript", "screen", "meeting_chat"}:
         return dict(item)
     return BOUNDARIES.route_event(item)
-WINDOW_FINDER = HOME / ".local/share/meeting-copilot/bin/zoom-window-finder"
-FRAME_INSPECTOR = HOME / ".local/share/meeting-copilot/bin/zoom-frame-inspector"
+WINDOW_FINDER = helper_path("zoom-window-finder")
+FRAME_INSPECTOR = helper_path("zoom-frame-inspector")
 ZOOM_WINDOW_FILE = HOME / ".config/meeting-copilot/zoom-window.json"
 FRAME_TRIGGER_FILE = HOME / ".config/meeting-copilot/capture-frame.trigger"
 RECOGNITION_GUARD = default_guard()
@@ -3263,11 +3264,25 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
+def watch_parent(stream) -> threading.Thread:
+    def gone():
+        while stream.read(65536):
+            pass
+        import signal
+        os.kill(os.getpid(), signal.SIGINT)  # serve_forever ends like Ctrl-C
+    thread = threading.Thread(target=gone, name="parent-watch", daemon=True)
+    thread.start()
+    return thread
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local live meeting copilot")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-open", action="store_true")
     parser.add_argument("--self-test", action="store_true")
+    # The app runs this server as its child and holds the write end of stdin:
+    # EOF means the app is gone, however it went, so never outlive it.
+    parser.add_argument("--exit-with-parent", action="store_true")
     args = parser.parse_args()
 
     if args.self_test:
@@ -3491,6 +3506,8 @@ def main() -> None:
     threading.Thread(target=FACT_CHECKS.loop, args=(TRANSCRIPT.stop,), name="fact-checks", daemon=True).start()
     threading.Thread(target=REBUILDS.loop, args=(TRANSCRIPT.stop, lambda: TRANSCRIPT.status in ARCHIVE_BUSY),
                      name="analysis-rebuilds", daemon=True).start()
+    if args.exit_with_parent:
+        watch_parent(sys.stdin.buffer)
     server = ThreadingHTTPServer((HOST, args.port), Handler)
     url = f"http://{HOST}:{args.port}"
     print(f"MeetOnTrack: {url}", flush=True)

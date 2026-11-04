@@ -25,12 +25,14 @@ source/hash manifest. It is ad-hoc signed, not notarized; automatic installation
 curl -fsSL https://meetontrack.com/install.sh | bash
 ```
 
-The installer starts MeetOnTrack and opens the assistant in your browser
-automatically, after checking that the local service is ready. Approve
-**Microphone** and **Screen & System Audio Recording** and finish model setup
-in the native setup window. No second terminal command is needed. Reopen the
-page anytime with **Open MeetOnTrack assistant** at the top of the recorder
-window or in its menu-bar menu.
+MeetOnTrack is one app: it carries its own Python and web assistant, runs the
+local service itself and shows the assistant in its own window. The installer
+opens it after checking that the service is ready. On first launch confirm the
+interface language (preselected from your Mac: Russian for a Russian Mac,
+English otherwise), approve **Microphone** and **Screen & System Audio
+Recording** and finish model setup. No second terminal command is needed.
+Reopen the assistant anytime with **Open MeetOnTrack assistant** at the top of
+the recorder window or in its menu-bar menu.
 See [INSTALL.md](INSTALL.md) for dependencies, first-run permissions, manual
 updates and troubleshooting. Automatic in-app updates are not enabled in this
 beta. Audio/transcription run locally; AI analysis can send relevant transcript

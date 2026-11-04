@@ -79,10 +79,6 @@ struct Run: ParsableCommand {
             FileHandle.standardError.write(Data(warning.utf8))
         }
 
-        // An explicit first-run choice precedes every persistent window and
-        // permission check. Cancelling starts neither the recorder nor setup.
-        guard FirstLaunchLanguage.confirmIfNeeded() else { return }
-
         // Keep the command line pointing at this bundle, so agents and
         // scripts reach the same signed program the app runs.
         if case .success(true) = AgentCLI.install() {
@@ -260,6 +256,20 @@ struct Run: ParsableCommand {
                         action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
+
+        // The assistant window is a web page: without these, ⌘C and ⌘V do
+        // nothing in its text fields.
+        let editItem = NSMenuItem()
+        let editMenu = NSMenu(title: localised("Edit", "Правка"))
+        editMenu.addItem(withTitle: localised("Undo", "Отменить"), action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: localised("Redo", "Повторить"), action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: localised("Cut", "Вырезать"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: localised("Copy", "Скопировать"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: localised("Paste", "Вставить"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: localised("Select All", "Выбрать все"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = editMenu
+        main.addItem(editItem)
 
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: localised("Window", "Окно"))
@@ -524,7 +534,13 @@ final class AppController {
         window.onOpenAssistant = { AssistantLink.open() }
         window.onShowSetup = { [weak self] in self?.showSetup() }
         window.updateLivePreference(enabled: Config.liveTranscriptionEnabled())
-        if Config.showWindowAtLaunch(), !SetupState.isPending { window.show() }
+        // The assistant's web service is the app's own child now, started
+        // before any window can ask for it and stopped when the app quits.
+        LocalServer.shared.start()
+        if Config.showWindowAtLaunch(), !SetupState.isPending {
+            window.show()
+            AssistantLink.open()
+        }
 
         autoRecord.currentSession = { [weak self] in self?.session }
         autoRecord.startRecording = { [weak self] trigger, context in
@@ -665,6 +681,7 @@ final class AppController {
     /// Idempotent: stopSession does nothing without a session.
     func finishForTermination() {
         stopSession(reason: "app-quit")
+        LocalServer.shared.stop()
     }
 
     /// What `meetingcopilot record` asks for. Asking to start what is already running,

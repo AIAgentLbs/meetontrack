@@ -517,7 +517,9 @@ const translations = {
 
 // config.json (via /api/preferences) is the one store; localStorage only paints the first frame.
 const cachedUiLanguage = localStorage.getItem("meeting-copilot-language");
-let uiLanguage = ["en", "ru"].includes(cachedUiLanguage) ? cachedUiLanguage : "ru";
+// No saved choice yet: Russian when the system's first language is Russian, English otherwise.
+const systemUiLanguage = /^ru\b/i.test((navigator.languages && navigator.languages[0]) || navigator.language || "") ? "ru" : "en";
+let uiLanguage = ["en", "ru"].includes(cachedUiLanguage) ? cachedUiLanguage : systemUiLanguage;
 let preferenceEpoch = 0;
 let preferenceSaves = 0;
 let preferenceQueue = Promise.resolve();

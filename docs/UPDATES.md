@@ -15,9 +15,11 @@ manual check still works when background checks are disabled.
 
 ## Version and channel identity
 
-- macOS: the installer retains the package's `release.json` next to `web/`.
-  Legacy installations fall back to the installed Capture bundle's version;
-  existing unsigned macOS installs are treated as technical beta.
+- macOS: since MEETONTRACK-109 the web service runs from inside the app bundle
+  (`Contents/Resources/payload/web`) and reports that bundle's
+  `CFBundleShortVersionString` as a technical beta. The archive's top-level
+  `release.json` is the package manifest; it is not installed. 0.1.18 and older
+  read `release.json` next to `~/.local/share/meeting-copilot/web`.
 - Windows: `release.json` already lives next to `web/` in each version directory.
 - Unknown versions do not trigger network checks or offer a possible downgrade.
 - Technical-beta installs accept beta releases; stable installs exclude them.
@@ -65,9 +67,17 @@ below applies when that separate feature is resumed; do not describe the current
 checker as an automatic installer.
 
 The release must update Capture, web UI and embedded Python as a single unit.
-macOS currently installs these into separate locations; simply enabling Sparkle
-would leave the web service behind. Windows ZIP installs are not registered with
-Velopack, so its existing update service reports NotInstalled.
+Since MEETONTRACK-109 (2026-11-04) that unit on macOS is the app bundle itself:
+`Meeting Copilot Capture.app/Contents/Resources/payload` holds the Python
+runtime, `web/`, the compiled helpers (`bin/`) and config templates, and the app
+starts the service as its child process (no launchd agent). A Sparkle update of
+the bundle therefore updates the native app, web UI and Python together. The
+first move to this layout needs the installer once: it retires the
+`com.aiagentlbs.meeting-copilot` agent and deletes `~/.local/share/meeting-copilot`
+`python/`, `web/`, `release.json` and the three helpers in `bin/` only after the
+new app is in place; data and settings there are untouched. Sparkle itself
+stays disabled. Windows ZIP installs are not registered with Velopack, so its
+existing update service reports NotInstalled.
 
 Required acceptance before promotion:
 

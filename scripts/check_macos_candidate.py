@@ -1,8 +1,10 @@
 """Verify exact release bytes and install twice into disposable user directories.
 
-No Capture process or LaunchAgent is started. This does not claim hardware or
-Gatekeeper acceptance. The only subprocess fakes are platform/process probes,
-download transport (already verified archive), and launch guards.
+No Capture process or LaunchAgent is started; launchctl and open are fakes.
+The bundled server is started once on a spare port with a disposable HOME to
+prove the payload runs and exits when its parent's stdin closes. This does not
+claim hardware or Gatekeeper acceptance. Upgrade from 0.1.18 is simulated with
+that release's on-disk layout (agent plist, separate python/web/bin copies).
 """
 import argparse
 import hashlib
@@ -10,7 +12,10 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import subprocess
+import time
+import urllib.request
 import zipfile
 
 from test_installer import InstallerTests
@@ -38,45 +43,77 @@ def main():
         info = plistlib.loads(archive.read('Meeting Copilot Capture.app/Contents/Info.plist'))
         assert info['CFBundleDisplayName'] == 'MeetOnTrack'
         assert info['CFBundleShortVersionString'] == manifest['version']
+        assert not any(name.startswith('payload/') for name in names), 'payload must be inside the app'
 
     fixture = InstallerTests()
     fixture.setUp()
     try:
         fixture.env['FIXTURE_PACKAGE'] = str(archive_path)
         fixture.env['MEETING_COPILOT_ASSET_SHA256'] = digest
+        app, share, config = fixture.seed_existing()
+        shutil.rmtree(app)  # the real 0.1.18 app is not needed; its layout around it is
+        settings = (config / 'config.json').read_bytes()
+        fixture.script('launchctl', 'printf "%s\\n" "$*" >> "$FIXTURE_ROOT/launches"; [ "$1" = print ] && exit 113; exit 0')
         result = fixture.run_install()
         assert result.returncode == 0, result.stderr + result.stdout
-        share = Path(fixture.env['MEETING_COPILOT_SHARE_ROOT'])
-        config = Path(fixture.env['MEETING_COPILOT_CONFIG_ROOT'])
-        app = Path(fixture.env['MEETING_COPILOT_APP_ROOT']) / 'Meeting Copilot Capture.app'
-        assert json.loads((config / 'active-repos.json').read_text())['repositories'] == []
+        assert 'bootout' in (fixture.root / 'launches').read_text()
+        assert not (Path(fixture.env['MEETING_COPILOT_AGENTS_ROOT']) / 'com.aiagentlbs.meeting-copilot.plist').exists()
+        for program in ('python', 'web', 'bin', 'release.json'):
+            assert not (share / program).exists(), program
+        assert (config / 'config.json').read_bytes() == settings
+        for data in ('recordings/keep.txt', 'archive/a/meeting.md', 'reports/r.pdf', 'models/m.bin'):
+            assert (share / data).read_text() == 'synthetic-' + data
+        assert [path.name for path in app.parent.iterdir()] == [app.name]
         subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)
-        runtime = share / 'python/bin/python3'
-        subprocess.run([str(runtime), '-I', '-c',
-            'import pathlib, sys; from unittest.mock import patch; '
-            'sys.path.insert(0, sys.argv[1]); '
-            '\nwith patch("pathlib.Path.home", return_value=pathlib.Path(sys.argv[2])):\n import server\n'
-            'assert server.HOST == "127.0.0.1"', str(share / 'web'), str(fixture.root / 'empty-home')], check=True)
+        payload = app / 'Contents/Resources/payload'
+        runtime = payload / 'python/bin/python3'
         for helper in ('zoom-window-finder', 'zoom-frame-inspector', 'detect-speech-language'):
-            subprocess.run(['codesign', '--verify', '--strict', str(share / 'bin' / helper)], check=True)
+            subprocess.run(['codesign', '--verify', '--strict', str(payload / 'bin' / helper)], check=True)
+        subprocess.run([str(runtime), '-I', '-B', '-c', 'import numpy, PIL.Image'], check=True)
+        served = smoke_server(runtime, payload / 'web', fixture.root / 'server-home', manifest['version'], config)
+        subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)  # nothing written into it
         recording = share / 'recordings' / 'synthetic-keep.txt'
-        recording.parent.mkdir()
         recording.write_text('synthetic recording preservation check')
-        settings = config / 'delivery.json'
-        settings.write_text('{"synthetic_preserve":true}')
         result = fixture.run_install()
         assert result.returncode == 0, result.stderr + result.stdout
         assert recording.read_text() == 'synthetic recording preservation check'
-        assert json.loads(settings.read_text()) == {'synthetic_preserve': True}
-        assert not (fixture.root / 'unexpected-launch').exists()
+        assert (config / 'config.json').read_bytes() == settings
         assert not (fixture.root / 'compiled').exists()
         print(json.dumps({'version': manifest['version'], 'source_revision': manifest['source_revision'],
                           'sha256': digest, 'manifest_files': len(manifest['sha256']),
-                          'fresh_install': 'passed', 'reinstall_preserves_data': 'passed',
-                          'signatures': 'ad-hoc valid', 'embedded_server_import': 'passed',
+                          'upgrade_from_0_1_18_layout': 'passed', 'reinstall_preserves_data': 'passed',
+                          'signatures': 'ad-hoc valid', 'bundled_server': served,
                           'hardware_test': 'not performed'}, indent=2))
     finally:
         fixture.doCleanups()
+
+
+def smoke_server(runtime, web, home, version, config, port=43987):
+    """Start the bundled server as the app does, check health, then close stdin."""
+    shutil.copytree(config, home / '.config/meeting-copilot')  # what install.sh wrote
+    process = subprocess.Popen([str(runtime), '-B', str(web / 'server.py'), '--port', str(port), '--no-open',
+                                '--exit-with-parent'], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, env={'HOME': str(home), 'PATH': '/usr/bin:/bin',
+                                                               'PYTHONDONTWRITEBYTECODE': '1'}, cwd=home)
+    try:
+        for _ in range(120):
+            try:
+                with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/health', timeout=1) as response:
+                    health = json.load(response)
+                break
+            except OSError:
+                time.sleep(0.25)
+        else:
+            raise AssertionError('bundled server did not answer')
+        assert health == {'ok': True, 'service': 'meeting-copilot', 'version': version}, health
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=5) as response:
+            assert b'MeetOnTrack' in response.read()
+        process.stdin.close()  # the app is gone
+        process.wait(timeout=10)
+        return 'health, index and exit-with-parent passed'
+    finally:
+        if process.poll() is None:
+            process.kill()
 
 
 if __name__ == '__main__':

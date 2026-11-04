@@ -17,15 +17,20 @@ The command installs the checksum-pinned v0.1.20 archive. Read
 must finish its call and quit Capture first. The installer checks again before
 replacement and puts the previous version back if replacing the files fails.
 
-1. Choose English or Russian on first launch.
+1. On first launch, confirm the interface language. It is preselected from your
+   Mac: Russian when macOS's first preferred language is Russian, English
+   otherwise. Switch it there with one click, or later in Settings.
 2. Approve Microphone and Screen & System Audio Recording for MeetOnTrack in
    macOS settings. Existing installation paths keep the legacy Capture filename.
 3. Complete local speech-model setup. Recording and transcription need no paid
    AI key or AI tool account.
-4. The installer starts the local service and opens the assistant in your browser
-   automatically. Completing setup also opens it. Reopen it anytime with
-   **Open MeetOnTrack assistant** at the top of the recorder window or in the
-   MeetOnTrack menu-bar menu. No second terminal command is required.
+4. MeetOnTrack is one app. It runs its local assistant service itself and shows
+   the assistant in its own window, not in a browser. Completing setup opens it.
+   Reopen it anytime with **Open MeetOnTrack assistant** at the top of the
+   recorder window or in the MeetOnTrack menu-bar menu. Closing the window keeps
+   recording and analysis running from the menu bar; quitting the app stops
+   both. Links to other sites (sign-in pages, Google Drive, PDFs) open in your
+   browser. No second terminal command is required.
 5. Make a short test call and check both sides in the transcript before relying
    on a long meeting. Speaker names can need correction.
 
@@ -96,9 +101,11 @@ preserved backup. See [updates](docs/UPDATES.md).
 
 ## Local files and support
 
-Mac settings: `~/.config/meeting-copilot`. Recordings, reports and the embedded
-runtime: `~/.local/share/meeting-copilot`. The installer retains compatibility
-paths and never modifies connected repositories.
+Mac settings: `~/.config/meeting-copilot`. Recordings, reports and the service
+log (`server.log`): `~/.local/share/meeting-copilot`. Python and the web
+assistant are inside the app. Updating from 0.1.18 or earlier removes the old
+background service and its separate Python/web copies; recordings, archive,
+models and settings are kept. The installer never modifies connected repositories.
 
 Windows application versions: `%LOCALAPPDATA%/MeetingCopilot/versions`.
 User settings and recordings are outside that application version directory.

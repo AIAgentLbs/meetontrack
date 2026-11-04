@@ -47,6 +47,17 @@ class ReleaseSelectionTests(unittest.TestCase):
             (root / "release.json").write_text(json.dumps({"version": "0.1.4-windows-beta.1", "channel": "technical-beta"}))
             self.assertEqual(installed_release(root / "web", "windows")["version"], "0.1.4-windows-beta.1")
 
+    def test_mac_bundle_reports_its_own_version(self):
+        # The web payload lives in Contents/Resources/payload/web of the app.
+        import plistlib
+        with tempfile.TemporaryDirectory() as tmp:
+            contents = Path(tmp) / "MeetOnTrack.app/Contents"
+            web = contents / "Resources/payload/web"
+            web.mkdir(parents=True)
+            (contents / "Info.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": "0.2.0"}))
+            self.assertEqual(installed_release(web, "macos"),
+                             {"version": "0.2.0", "channel": "technical-beta", "platform": "macos"})
+
 
 class ReleaseMonitorTests(unittest.TestCase):
     def setUp(self):

@@ -1,0 +1,225 @@
+import Foundation
+
+/// The assistant's local web service, run as a child of the app.
+///
+/// It used to be a separate launchd agent started by the installer, which made
+/// MeetOnTrack three things: a recorder, a background service and a browser
+/// tab. Now the Python runtime and the web payload live inside the bundle
+/// (`Contents/Resources/payload`), the app starts the server when it starts,
+/// starts it again if it dies or stops answering, and stops it when it quits.
+/// The window can be closed meanwhile: the server belongs to the app, not to
+/// the window, so recording and analysis keep going from the menu bar.
+///
+/// The server also exits by itself when the app disappears without stopping
+/// it (`--exit-with-parent` watches its stdin, the write end of which only this
+/// process holds), so a crash never leaves an orphan holding the port.
+@MainActor
+final class LocalServer {
+    nonisolated static let port = 43121
+    nonisolated static let url = URL(string: "http://127.0.0.1:\(port)/")!
+    static let shared = LocalServer(command: bundledCommand())
+
+    struct Command {
+        var executable: URL
+        var arguments: [String]
+        var environment: [String: String]
+        var directory: URL
+        var log: URL
+    }
+
+    /// A healthy server that stops answering for this long is restarted.
+    var hangLimit: TimeInterval = 60
+    var checkInterval: TimeInterval = 2
+
+    private let command: Command?
+    private let probe: @Sendable () async -> Bool
+    private var process: Process?
+    private var stdin: Pipe?
+    private var timer: Timer?
+    private var probing = false
+    private var stopping = false
+    private var nextLaunch = Date.distantPast
+    private var crashes = 0
+    private var lastHealthy: Date?
+    private var waiters: [() -> Void] = []
+    private(set) var isReady = false
+    private(set) var launches = 0
+    var pid: pid_t? { process?.processIdentifier }
+
+    init(command: Command?, probe: @escaping @Sendable () async -> Bool = { await LocalServer.healthy() }) {
+        self.command = command
+        self.probe = probe
+    }
+
+    /// Whether this copy can run a server at all: a bare `swift run` build has
+    /// no payload, and then the window simply connects to whatever is there.
+    var isBundled: Bool { command != nil }
+
+    func start() {
+        guard timer == nil else { return }
+        stopping = false
+        check()
+        timer = Timer.scheduledTimer(withTimeInterval: checkInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.check() }
+        }
+    }
+
+    /// Run `action` once the server answers; at once if it already does.
+    func whenReady(_ action: @escaping () -> Void) {
+        if isReady { action() } else { waiters.append(action) }
+    }
+
+    /// Stop on quit: SIGINT lets the server close its socket and state files
+    /// (it treats it as Ctrl-C); a server that has not gone in `grace` is killed.
+    func stop(grace: TimeInterval = 4) {
+        stopping = true
+        timer?.invalidate()
+        timer = nil
+        guard let process, process.isRunning else { return }
+        process.interrupt()
+        let deadline = Date().addingTimeInterval(grace)
+        while process.isRunning, Date() < deadline { usleep(50_000) }
+        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        process.waitUntilExit()
+        self.process = nil
+        stdin = nil
+    }
+
+    private func check() {
+        guard !probing, !stopping else { return }
+        probing = true
+        let probe = self.probe
+        Task { @MainActor [weak self] in
+            let healthy = await probe()
+            guard let self else { return }
+            self.probing = false
+            self.observe(healthy: healthy)
+        }
+    }
+
+    private func observe(healthy: Bool) {
+        guard !stopping else { return }
+        if healthy {
+            lastHealthy = Date()
+            crashes = 0
+            if !isReady {
+                isReady = true
+                let ready = waiters
+                waiters = []
+                ready.forEach { $0() }
+            }
+            return
+        }
+        isReady = false
+        if let process, process.isRunning {
+            // Answering nothing for a minute is a hang, not a busy moment:
+            // every request, health included, has its own thread.
+            if let lastHealthy, Date().timeIntervalSince(lastHealthy) > hangLimit {
+                FileHandle.standardError.write(Data("assistant server stopped answering; restarting\n".utf8))
+                self.lastHealthy = nil
+                kill(process.processIdentifier, SIGKILL)
+            }
+            return
+        }
+        guard command != nil, Date() >= nextLaunch else { return }
+        launch()
+    }
+
+    private func launch() {
+        guard let command else { return }
+        let process = Process()
+        process.executableURL = command.executable
+        process.arguments = command.arguments
+        process.environment = command.environment
+        process.currentDirectoryURL = command.directory
+        let input = Pipe()
+        process.standardInput = input
+        if let log = Self.openLog(command.log) {
+            process.standardOutput = log
+            process.standardError = log
+        }
+        process.terminationHandler = { [weak self] ended in
+            let pid = ended.processIdentifier, status = ended.terminationStatus
+            Task { @MainActor in self?.ended(pid: pid, status: status) }
+        }
+        do {
+            try process.run()
+        } catch {
+            FileHandle.standardError.write(Data("could not start the assistant server: \(error)\n".utf8))
+            crashes += 1
+            nextLaunch = Date().addingTimeInterval(Self.backoff(crashes))
+            return
+        }
+        launches += 1
+        self.process = process
+        stdin = input
+    }
+
+    private func ended(pid: Int32, status: Int32) {
+        guard process?.processIdentifier == pid else { return }
+        process = nil
+        stdin = nil
+        isReady = false
+        guard !stopping else { return }
+        crashes += 1
+        nextLaunch = Date().addingTimeInterval(Self.backoff(crashes))
+        FileHandle.standardError.write(Data("assistant server exited (\(status)); restarting\n".utf8))
+    }
+
+    /// 1, 2, 4 … 30 seconds: a server that crashes on start must not spin.
+    nonisolated static func backoff(_ crashes: Int) -> TimeInterval {
+        min(30, pow(2, Double(max(0, crashes - 1))))
+    }
+
+    nonisolated static func healthy() async -> Bool {
+        var request = URLRequest(url: url.appendingPathComponent("api/health"))
+        request.timeoutInterval = 2
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+        return value["ok"] as? Bool == true && value["service"] as? String == "meeting-copilot"
+    }
+
+    private static func openLog(_ url: URL) -> FileHandle? {
+        let manager = FileManager.default
+        try? manager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // ponytail: truncate at 10 MB instead of rotating; rotate if anyone needs history.
+        if let size = (try? manager.attributesOfItem(atPath: url.path))?[.size] as? Int, size > 10_000_000 {
+            try? manager.removeItem(at: url)
+        }
+        if !manager.fileExists(atPath: url.path) { manager.createFile(atPath: url.path, contents: nil) }
+        let handle = try? FileHandle(forWritingTo: url)
+        _ = try? handle?.seekToEnd()
+        return handle
+    }
+
+    /// The bundled runtime and payload, or nil for a build without them.
+    nonisolated static func bundledCommand(
+        resources: URL? = Runtime.appBundle?.resourceURL,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Command? {
+        guard let payload = resources?.appendingPathComponent("payload") else { return nil }
+        let python = payload.appendingPathComponent("python/bin/python3")
+        let server = payload.appendingPathComponent("web/server.py")
+        guard FileManager.default.isExecutableFile(atPath: python.path),
+              FileManager.default.fileExists(atPath: server.path) else { return nil }
+        let data = home.appendingPathComponent(".local/share/meeting-copilot")
+        var env = environment
+        // An app started by LaunchServices gets a bare PATH; AI tools live in
+        // Homebrew and ~/.local/bin, as the retired launchd agent knew.
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:"
+            + home.appendingPathComponent(".local/bin").path
+        // The payload is inside a signed bundle: never write bytecode into it.
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env["PYTHONUNBUFFERED"] = "1"
+        env.removeValue(forKey: Runtime.handOffMarker)
+        return Command(
+            executable: python,
+            arguments: ["-B", server.path, "--port", String(port), "--no-open", "--exit-with-parent"],
+            environment: env,
+            directory: data,
+            log: data.appendingPathComponent("server.log"))
+    }
+}

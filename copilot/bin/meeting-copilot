@@ -9,18 +9,18 @@ refresh_script="$config_dir/refresh-repos.py"
 capture_app="/Applications/Meeting Copilot Capture.app"
 [[ -d "$capture_app" ]] || capture_app="$HOME/Applications/Meeting Copilot Capture.app"
 transcript_file="$HOME/.local/share/meeting-copilot/meeting-copilot-live.json"
-web_server="$HOME/.local/share/meeting-copilot/web/server.py"
-web_log="$HOME/.local/share/meeting-copilot/web/server.log"
-web_label="com.aiagentlbs.meeting-copilot"
-web_agent="$HOME/Library/LaunchAgents/$web_label.plist"
-window_finder="$HOME/.local/share/meeting-copilot/bin/zoom-window-finder"
+# The app bundle carries the Python runtime and the web service and runs it itself.
+payload="$capture_app/Contents/Resources/payload"
+web_server="$payload/web/server.py"
+web_log="$HOME/.local/share/meeting-copilot/server.log"
+window_finder="$payload/bin/zoom-window-finder"
 window_target="$config_dir/zoom-window.json"
 web_port=43121
 web_url="http://127.0.0.1:$web_port"
 check_only=false
 no_open=false
 refresh_only=false
-python="$HOME/.local/share/meeting-copilot/python/bin/python3"
+python="$payload/python/bin/python3"
 [[ -x "$python" ]] || python="$(command -v python3 || true)"
 [[ -x "$python" ]] || { print -u2 "MeetOnTrack Python runtime is missing; reinstall from meetontrack.com."; exit 1; }
 
@@ -129,16 +129,8 @@ if /usr/bin/curl --silent --fail --max-time 1 "$web_url/api/health" \
   exit 0
 fi
 
-print "Starting private local UI; frame capture stays armed: $web_url"
-if [[ ! -f "$web_agent" ]]; then
-  print -u2 "MeetOnTrack LaunchAgent is missing: $web_agent"
-  exit 1
-fi
-if ! launchctl print "gui/$(/usr/bin/id -u)/$web_label" >/dev/null 2>&1; then
-  launchctl bootstrap "gui/$(/usr/bin/id -u)" "$web_agent"
-else
-  launchctl kickstart -k "gui/$(/usr/bin/id -u)/$web_label"
-fi
+print "Starting MeetOnTrack; it runs the private local UI itself: $web_url"
+open -a "$capture_app"
 
 for _ in {1..50}; do
   if /usr/bin/curl --silent --fail --max-time 1 "$web_url/api/health" \

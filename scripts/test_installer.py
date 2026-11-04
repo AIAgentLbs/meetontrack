@@ -22,19 +22,21 @@ class InstallerTests(unittest.TestCase):
         self.mock = self.root / "mock-bin"
         self.mock.mkdir()
         self.package = self.root / "package.zip"
+        app = "Meeting Copilot Capture.app"
+        payload = f"{app}/Contents/Resources/payload"
         files = {
             "release.json": json.dumps({"version": "0.1.9", "channel": "technical-beta"}),
-            "Meeting Copilot Capture.app/Contents/MacOS/MeetingCopilotCapture": "synthetic-app",
-            "payload/web/server.py": "print('synthetic-server')\n",
-            "payload/bin/meeting-copilot": "#!/bin/sh\nexit 0\n",
-            "payload/config/SESSION.md": "synthetic-session\n",
-            "payload/config/delivery.json.example": "{}\n",
-            "payload/config/refresh-repos.py": "from pathlib import Path\np=Path(__file__).parent/'repos.json'\np.write_text('{\"repositories\": []}')\n",
-            "payload/python/bin/python3": '#!/bin/sh\nexec "$TEST_PYTHON" "$@"\n',
+            f"{app}/Contents/MacOS/MeetingCopilotCapture": "synthetic-app",
+            f"{payload}/web/server.py": "print('synthetic-server')\n",
+            f"{payload}/bin/meeting-copilot": "#!/bin/sh\nexit 0\n",
+            f"{payload}/config/SESSION.md": "synthetic-session\n",
+            f"{payload}/config/delivery.json.example": "{}\n",
+            f"{payload}/config/refresh-repos.py": "from pathlib import Path\np=Path(__file__).parent/'repos.json'\np.write_text('{\"repositories\": []}')\n",
+            f"{payload}/python/bin/python3": '#!/bin/sh\nexec "$TEST_PYTHON" "$@"\n',
         }
         helpers = ("zoom-window-finder", "zoom-frame-inspector", "detect-speech-language")
         for name in helpers:
-            files[f"payload/bin/{name}"] = "#!/bin/sh\nexit 0\n"
+            files[f"{payload}/bin/{name}"] = "#!/bin/sh\nexit 0\n"
         with zipfile.ZipFile(self.package, "w") as handle:
             for name, body in files.items():
                 entry = zipfile.ZipInfo(name)
@@ -52,7 +54,7 @@ class InstallerTests(unittest.TestCase):
             "MEETING_COPILOT_TRASH_ROOT": str(self.root / "Trash"),
             "MEETING_COPILOT_SKIP_LAUNCH": "1",
             "FIXTURE_PACKAGE": str(self.package), "FIXTURE_ROOT": str(self.root),
-            "TEST_PYTHON": sys.executable,
+            "TEST_PYTHON": sys.executable, "HOME": str(self.root / "home"),
         }
         Path(self.env["MEETING_COPILOT_APP_ROOT"]).mkdir()
         self.script("python3", 'touch "$FIXTURE_ROOT/system-python"\nexit 99')
@@ -75,18 +77,30 @@ class InstallerTests(unittest.TestCase):
                               text=True, capture_output=True, timeout=30)
 
     def seed_existing(self):
+        """A 0.1.18 install: app, launchd agent, separate python/web/bin copies, user data."""
         app = Path(self.env["MEETING_COPILOT_APP_ROOT"]) / "Meeting Copilot Capture.app"
         app.mkdir()
         (app / "previous").write_text("previous-app")
         share, config = Path(self.env["MEETING_COPILOT_SHARE_ROOT"]), Path(self.env["MEETING_COPILOT_CONFIG_ROOT"])
-        (share / "web").mkdir(parents=True)
+        for program in ("web", "python/bin", "bin"):
+            (share / program).mkdir(parents=True)
         (share / "web/previous").write_text("previous-web")
-        (share / "recordings").mkdir()
-        (share / "recordings/keep.txt").write_text("synthetic-recording")
+        (share / "web/server.log").write_text("old log")
+        (share / "python/bin/python3").write_text("old python")
+        (share / "release.json").write_text('{"version": "0.1.18"}')
+        for helper in ("zoom-window-finder", "zoom-frame-inspector", "detect-speech-language"):
+            (share / "bin" / helper).write_text("old helper")
+        for data in ("recordings/keep.txt", "archive/a/meeting.md", "reports/r.pdf", "models/m.bin", "meeting-copilot-live.json"):
+            (share / data).parent.mkdir(parents=True, exist_ok=True)
+            (share / data).write_text("synthetic-" + data)
         config.mkdir()
         (config / "delivery.json").write_text("synthetic-private-settings")
+        (config / "config.json").write_text('{"interface_language": "ru", "ai": {"choice": "x"}}\n')
         (config / "SESSION.md").write_text("keep-session")
         (config / "active-repos.json").write_text('{"repositories": ["keep-selection"]}')
+        agents = Path(self.env["MEETING_COPILOT_AGENTS_ROOT"])
+        agents.mkdir()
+        (agents / "com.aiagentlbs.meeting-copilot.plist").write_text("legacy agent")
         return app, share, config
 
     def prepare_launch(self):
@@ -137,7 +151,7 @@ case "$*" in
       printf '{"ok":true,"service":"different-app"}'
     else
       touch "$FIXTURE_ROOT/healthy"
-      printf '{"ok":true,"service":"meeting-copilot"}'
+      printf '{"ok":true,"service":"meeting-copilot","version":"%s"}' "${MOCK_HEALTH_VERSION:-0.1.9}"
     fi
     exit 0;;
 esac
@@ -148,59 +162,67 @@ done
 exit 2
 ''')
 
-    def test_install_opens_browser_only_after_its_service_is_ready(self):
+    def test_install_opens_the_app_and_waits_for_its_own_service(self):
         self.prepare_launch()
         result = self.run_install(MEETING_COPILOT_SKIP_LAUNCH="0")
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        opened = (self.root / "opened").read_text().splitlines()
-        self.assertEqual(opened, [str(self.root / "Applications/Meeting Copilot Capture.app"),
-                                  "http://127.0.0.1:43121/"])
-        self.assertEqual((self.root / "health-count").read_text(), "2")
-        self.assertNotIn("run: meeting-copilot", result.stdout)
-
-    def test_unready_or_unrelated_service_never_opens_a_broken_page(self):
-        self.prepare_launch()
-        result = self.run_install(MEETING_COPILOT_SKIP_LAUNCH="0", MOCK_WRONG_SERVICE="1")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("did not become ready", result.stderr)
+        # One app, no browser tab: the app shows the assistant in its own window.
         self.assertEqual((self.root / "opened").read_text().splitlines(),
                          [str(self.root / "Applications/Meeting Copilot Capture.app")])
-        self.assertLessEqual(int((self.root / "health-count").read_text()), 40)
+        self.assertEqual((self.root / "health-count").read_text(), "2")
+        self.assertFalse((self.root / "launches").exists())
 
-    def test_upgrade_restart_waits_for_old_job_and_retries_bootstrap(self):
-        # Regression 2026-10-21: bootstrap right after bootout failed with error 5.
-        for environment in ({"MOCK_UNLOAD_AFTER_PRINTS": "3"}, {"MOCK_BOOTSTRAP_FAILURES": "1"}):
+    def test_unready_unrelated_or_old_service_is_not_success(self):
+        for environment in ({"MOCK_WRONG_SERVICE": "1"}, {"MOCK_HEALTH_VERSION": "0.1.18"}):
             with self.subTest(environment=environment):
-                for name in ("launches", "opened", "health-count", "healthy", "bootstrap-count", "lingering"):
+                for name in ("opened", "health-count", "healthy"):
                     (self.root / name).unlink(missing_ok=True)
                 self.prepare_launch()
-                (self.root / "loaded").touch()
                 result = self.run_install(MEETING_COPILOT_SKIP_LAUNCH="0", **environment)
-                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-                self.assertNotIn("Bootstrap failed", result.stderr)
-                self.assertTrue((self.root / "loaded").exists())
-                self.assertEqual((self.root / "opened").read_text().splitlines()[-1], "http://127.0.0.1:43121/")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("did not become ready", result.stderr)
+                self.assertLessEqual(int((self.root / "health-count").read_text()), 120)
 
-    def test_persistent_bootstrap_failure_stops_with_clear_error(self):
+    def test_upgrade_from_0_1_18_retires_agent_and_program_copies_only(self):
+        app, share, config = self.seed_existing()
+        settings = (config / "config.json").read_bytes()
         self.prepare_launch()
-        result = self.run_install(MEETING_COPILOT_SKIP_LAUNCH="0", MOCK_BOOTSTRAP_FAILURES="99")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("could not start the local assistant service", result.stderr)
-        self.assertIn("Input/output error", result.stderr)
-        self.assertEqual((self.root / "bootstrap-count").read_text(), "3")
-        self.assertFalse((self.root / "opened").exists())
+        (self.root / "loaded").touch()
+        result = self.run_install(MEETING_COPILOT_SKIP_LAUNCH="0", MOCK_UNLOAD_AFTER_PRINTS="3")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        launches = (self.root / "launches").read_text()
+        self.assertIn("bootout", launches)
+        self.assertNotIn("bootstrap", launches)
+        self.assertFalse((self.root / "loaded").exists())
+        self.assertFalse((Path(self.env["MEETING_COPILOT_AGENTS_ROOT"]) / "com.aiagentlbs.meeting-copilot.plist").exists())
+        for program in ("python", "web", "bin", "release.json"):
+            self.assertFalse((share / program).exists(), program)
+        for data in ("recordings/keep.txt", "archive/a/meeting.md", "reports/r.pdf", "models/m.bin", "meeting-copilot-live.json"):
+            self.assertEqual((share / data).read_text(), "synthetic-" + data)
+        self.assertEqual((config / "config.json").read_bytes(), settings)
+        self.assertEqual((config / "delivery.json").read_text(), "synthetic-private-settings")
+        self.assertTrue((app / "Contents/Resources/payload/web/server.py").is_file())
+        self.assert_single_app_and_no_backups(app, share)
+        self.assertEqual((self.root / "opened").read_text().splitlines(), [str(app)])
 
-    def test_fresh_install_and_escaped_launchagent(self):
+    def test_user_files_in_old_bin_survive(self):
+        _, share, _ = self.seed_existing()
+        (share / "bin/mine").write_text("not ours")
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(sorted(path.name for path in (share / "bin").iterdir()), ["mine"])
+
+    def test_fresh_install_is_one_app_with_its_own_service(self):
         result = self.run_install()
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         share = Path(self.env["MEETING_COPILOT_SHARE_ROOT"])
-        self.assertTrue((share / "web/server.py").is_file())
-        self.assertEqual(json.loads((share / "release.json").read_text())["version"], "0.1.9")
-        self.assertTrue((share / "bin/detect-speech-language").is_file())
-        agent = Path(self.env["MEETING_COPILOT_AGENTS_ROOT"]) / "com.aiagentlbs.meeting-copilot.plist"
-        config = plistlib.loads(agent.read_bytes())
-        self.assertEqual(config["ProgramArguments"][1], str(share / "web/server.py"))
-        self.assertIn(self.env["MEETING_COPILOT_BIN_ROOT"], config["EnvironmentVariables"]["PATH"])
+        app = Path(self.env["MEETING_COPILOT_APP_ROOT"]) / "Meeting Copilot Capture.app"
+        self.assertTrue((app / "Contents/Resources/payload/web/server.py").is_file())
+        self.assertTrue((app / "Contents/Resources/payload/bin/detect-speech-language").is_file())
+        for program in ("web", "python", "bin", "release.json"):
+            self.assertFalse((share / program).exists(), program)
+        self.assertFalse(Path(self.env["MEETING_COPILOT_AGENTS_ROOT"]).exists())
+        self.assertTrue((Path(self.env["MEETING_COPILOT_BIN_ROOT"]) / "meeting-copilot").is_file())
         self.assertFalse((self.root / "unexpected-launch").exists())
         self.assertFalse((self.root / "compiled").exists())
         self.assertFalse((self.root / "system-python").exists())
@@ -219,7 +241,7 @@ exit 2
         self.assertTrue((app / "Contents/MacOS/MeetingCopilotCapture").is_file())
         self.assertFalse((app / "previous").exists())
         self.assert_single_app_and_no_backups(app, share)
-        self.assertEqual((share / "recordings/keep.txt").read_text(), "synthetic-recording")
+        self.assertEqual((share / "recordings/keep.txt").read_text(), "synthetic-recordings/keep.txt")
         self.assertEqual((config / "delivery.json").read_text(), "synthetic-private-settings")
         self.assertEqual((config / "SESSION.md").read_text(), "keep-session")
         self.assertEqual(json.loads((config / "active-repos.json").read_text())["repositories"], ["keep-selection"])
@@ -239,14 +261,16 @@ exit 2
 
     def test_failure_partway_restores_previous_version(self):
         app, share, _ = self.seed_existing()
-        # The LaunchAgent is written after app, python and web were replaced.
-        (Path(self.env["MEETING_COPILOT_AGENTS_ROOT"]) / "com.aiagentlbs.meeting-copilot.plist").mkdir(parents=True)
+        # The command-line tool is installed after the app was replaced.
+        Path(self.env["MEETING_COPILOT_BIN_ROOT"]).write_text("not a directory")
         result = self.run_install()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("previous version was restored", result.stderr)
         self.assertEqual((app / "previous").read_text(), "previous-app")
+        # Before the commit point the old install is untouched and still runs.
         self.assertEqual((share / "web/previous").read_text(), "previous-web")
-        self.assertFalse((share / "python").exists())
+        self.assertTrue((share / "python/bin/python3").is_file())
+        self.assertTrue((Path(self.env["MEETING_COPILOT_AGENTS_ROOT"]) / "com.aiagentlbs.meeting-copilot.plist").is_file())
         self.assert_single_app_and_no_backups(app, share)
 
     def test_checksum_failure_never_replaces_app(self):
@@ -282,13 +306,13 @@ exit 2
         self.assertEqual(json.loads((config / "config.json").read_text()), {"keep_audio": True})
         for name in ("analytics.json", "analytics-pending.json"):
             self.assertFalse((config / name).exists())
-        self.assertEqual((share / "recordings/keep.txt").read_text(), "synthetic-recording")
+        self.assertEqual((share / "recordings/keep.txt").read_text(), "synthetic-recordings/keep.txt")
 
     def test_missing_packaged_helper_never_replaces_app(self):
         app, _, _ = self.seed_existing()
         with zipfile.ZipFile(self.package) as archive:
             files = [(entry, archive.read(entry)) for entry in archive.infolist()
-                     if entry.filename != "payload/bin/detect-speech-language"]
+                     if not entry.filename.endswith("payload/bin/detect-speech-language")]
         with zipfile.ZipFile(self.package, "w") as archive:
             for entry, data in files:
                 archive.writestr(entry, data)

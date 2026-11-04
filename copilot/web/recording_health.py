@@ -310,7 +310,9 @@ def default_guard() -> RecognitionGuard:
     if os.name == "nt":
         binaries = [Path(__file__).resolve().parents[1] / "capture/MeetingCopilotCapture.exe"]
     else:
-        binaries = [Path("/Applications/Meeting Copilot Capture.app/Contents/MacOS/MeetingCopilotCapture"),
+        # web/ lives in Contents/Resources/payload of the app it serves.
+        binaries = [Path(__file__).resolve().parents[3] / "MacOS/MeetingCopilotCapture",
+                    Path("/Applications/Meeting Copilot Capture.app/Contents/MacOS/MeetingCopilotCapture"),
                     home / "Applications/Meeting Copilot Capture.app/Contents/MacOS/MeetingCopilotCapture"]
     binary = next((candidate for candidate in binaries if candidate.is_file()), binaries[0])
     return RecognitionGuard(RecordingHealth(locations), root / "meeting-copilot-live.json",

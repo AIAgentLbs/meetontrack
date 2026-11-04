@@ -9,26 +9,38 @@ PYTHON_RUNTIME="${MEETING_COPILOT_PYTHON_RUNTIME:-}"
 "$PYTHON_RUNTIME/bin/python3" -I -c 'import platform, sys; assert platform.machine() == "arm64" and sys.version_info >= (3, 12)'
 stage="$(mktemp -d "${TMPDIR:-/tmp}/meeting-copilot-release.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
-cp -R "$APP" "$stage/Meeting Copilot Capture.app"
-mkdir -p "$stage/payload"
-cp -R "$PYTHON_RUNTIME" "$stage/payload/python"
+bundle="$stage/Meeting Copilot Capture.app"
+cp -R "$APP" "$bundle"
+# One app: the Python runtime, web service, helpers and config templates live
+# inside the bundle, which starts the service itself (MEETONTRACK-109).
+payload="$bundle/Contents/Resources/payload"
+mkdir -p "$payload"
+# Copy the runtime's contents: a runtime path that is itself a symlink (uv's
+# managed Pythons are) must not end up as a link to, and be modified at, the source.
+mkdir -p "$payload/python"
+cp -R "$PYTHON_RUNTIME/." "$payload/python"
 # Visual speaker names need numpy and Pillow; without them every frame silently
-# had no speaker. Install them into the bundled runtime, which install.sh copies
-# on both a fresh install and an update.
-uv pip install --python "$stage/payload/python/bin/python3" --break-system-packages \
+# had no speaker. Install them into the bundled runtime.
+uv pip install --python "$payload/python/bin/python3" --break-system-packages \
   --require-hashes --only-binary :all: -r "$ROOT/scripts/image-requirements.txt"
-"$stage/payload/python/bin/python3" -I -c 'import numpy, PIL.Image'
-cp -R "$ROOT/copilot/web" "$stage/payload/web"
-python3 "$ROOT/scripts/vendor-delivery.py" "$stage/payload/web/_vendor"
-cp -R "$ROOT/copilot/bin" "$stage/payload/bin"
-swiftc "$ROOT/copilot/bin/ZoomWindowFinder.swift" -o "$stage/payload/bin/zoom-window-finder"
-swiftc "$ROOT/copilot/bin/ZoomFrameInspector.swift" -o "$stage/payload/bin/zoom-frame-inspector"
-swiftc "$ROOT/copilot/bin/DetectSpeechLanguage.swift" -o "$stage/payload/bin/detect-speech-language"
+"$payload/python/bin/python3" -I -B -c 'import numpy, PIL.Image'
+cp -R "$ROOT/copilot/web" "$payload/web"
+python3 "$ROOT/scripts/vendor-delivery.py" "$payload/web/_vendor"
+mkdir -p "$payload/bin"
+cp "$ROOT/copilot/bin/meeting-copilot" "$payload/bin/meeting-copilot"
+swiftc "$ROOT/copilot/bin/ZoomWindowFinder.swift" -o "$payload/bin/zoom-window-finder"
+swiftc "$ROOT/copilot/bin/ZoomFrameInspector.swift" -o "$payload/bin/zoom-frame-inspector"
+swiftc "$ROOT/copilot/bin/DetectSpeechLanguage.swift" -o "$payload/bin/detect-speech-language"
 for helper in zoom-window-finder zoom-frame-inspector detect-speech-language; do
-  codesign --force --sign - --timestamp=none "$stage/payload/bin/$helper"
+  codesign --force --sign - --timestamp=none "$payload/bin/$helper"
 done
-cp -R "$ROOT/copilot/config" "$stage/payload/config"
+cp -R "$ROOT/copilot/config" "$payload/config"
 find "$stage" -name '__pycache__' -type d -prune -exec rm -rf {} +
+# Adding the payload changed the bundle: seal it again (nested code keeps its
+# own signatures). Same identity and entitlements as assemble-arm64-app.sh.
+codesign --force --sign - --identifier com.aiagentlbs.meetingcopilot.capture \
+  --entitlements "$ROOT/capture/Packaging/MeetingCopilot.entitlements" --timestamp=none "$bundle"
+codesign --verify --strict --verbose=2 "$bundle"
 python3 - "$stage" "$(git -C "$ROOT" rev-parse HEAD)" <<'PY'
 import hashlib, json, os, pathlib, plistlib, sys
 root = pathlib.Path(sys.argv[1])
