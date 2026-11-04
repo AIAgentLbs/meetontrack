@@ -205,7 +205,7 @@ hashes, Pages removed, and the Windows installer relocated to
   failed report shows in the library and the delivery pill with "Create the report again" and retries itself every 30 minutes;
   Chrome profiles removed after exit and on start. Left (P2): sending (mail, Telegram, Drive upload) still holds the archive
   lock on purpose so settings and the Google profile cannot change mid-send; a slow Drive upload still stalls the library.
-- [ ] MEETONTRACK-94: A meeting followed right away by another call kept its 44 live segments instead of the recorder's
+- [x] MEETONTRACK-94 (shipped in v0.1.19 / windows-v0.1.19, closed 2026-11-04): A meeting followed right away by another call kept its 44 live segments instead of the recorder's
   406-segment final transcript, got no report and showed only "Recording needs attention" (2026-10-22, 0.1.14):
   the final transcript was read only while that meeting owned the single live file (`archive.py` `finalize_history`).
   Owner rule 2026-11-04, fixed on main (closes when released): a report is built and sent only from the recorder's
@@ -214,7 +214,7 @@ hashes, Pages removed, and the Windows installer relocated to
   text: a call without its final transcript an hour after it ended shows "waiting for the final transcript" in the
   library and the delivery header and is sent once the transcript arrives. Split meetings now import their part of
   the final transcript; speakers corrected on live text carry over to it (MEETONTRACK-117).
-- [ ] MEETONTRACK-117: speakers corrected on the preliminary transcript before `transcript.json` arrives kept the final
+- [x] MEETONTRACK-117 (shipped in v0.1.19 / windows-v0.1.19, closed 2026-11-04): speakers corrected on the preliminary transcript before `transcript.json` arrives kept the final
   transcript from being applied, so that report was never sent (`archive.py` `import_final_transcript`).
   Fixed on main 2026-11-04 (closes when released): the final transcript is always imported and the corrections carry
   over by time overlap on the same channel, per line and then per final voice (`speaker_edits.py` `carry_corrections`);
@@ -428,6 +428,11 @@ hashes, Pages removed, and the Windows installer relocated to
 
 ## Windows beta acceptance gaps
 
+- [ ] MEETONTRACK-120: Windows never makes the PDF meeting report, so no report is emailed,
+  uploaded or sent to Telegram (found by the 0.1.19 notes review). `archive.py` `_print_pdf`
+  looks for Chrome only at its macOS path. Find Chrome or Edge on Windows (Program Files,
+  LocalAppData, App Paths), print with the same headless flags, add a path-lookup test.
+  The windows-v0.1.19 notes state the limit.
 - MEETONTRACK-25: Keep the full Python suite platform-aware: three security tests currently
   assume POSIX mode 0600, and a recorder test assumes POSIX path spelling.
   Windows ACL checks must replace, not silently skip, the security assertions.
