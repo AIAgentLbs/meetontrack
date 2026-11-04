@@ -526,6 +526,29 @@ class FinalOnlyDeliveryTests(unittest.TestCase):
         segments, names, review = carry_corrections(live, {"self": "Synthetic Me"}, final)
         self.assertEqual((segments, names, review), (final, {"self": "Synthetic Me"}, None))
 
+    def test_a_live_file_showing_the_final_text_keeps_corrections_for_the_import(self):
+        self.archive.speaker_edits.rename(self.archive.annotate_speakers(self.stored()), "remote-1", "Synthetic Name")
+        self.write_final(self.final)
+        # The live file reads the final transcript before the 60-second import runs.
+        self.archive.sync_transcript({**self.live, "segments": archive.canonical_segments(self.stored())})
+        self.assertTrue(self.stored()["segments"][0]["text"].startswith("Live"), "Corrected live text kept")
+        self.finalize()
+        self.assertEqual(self.sent, ["FIRST-CALL"])
+        system = {item.get("speaker") for item in self.stored()["segments"] if item["source"] == "system"}
+        self.assertEqual(system, {"Synthetic Name"})
+
+    def test_an_uncorrected_line_is_not_given_a_name_from_its_voice(self):
+        at = lambda second: f"2026-10-22T16:00:{second:02d}+00:00"
+        live = [{"source": "system", "timestamp": at(0), "end_timestamp": at(10), "speaker_id": "manual-a",
+                 "speaker": "Synthetic Alpha", "speaker_identity": "manual", "text": "Live"},
+                {"source": "system", "timestamp": at(20), "end_timestamp": at(24), "speaker_id": "remote-1",
+                 "speaker": "Собеседник 1", "text": "Live"}]
+        final = [{"source": "system", "timestamp": at(0), "end_timestamp": at(10), "text": "Final"},
+                 {"source": "system", "timestamp": at(20), "end_timestamp": at(24), "text": "Final"}]
+        segments, _, review = carry_corrections(live, {}, final)
+        self.assertEqual([item.get("speaker") for item in segments], ["Synthetic Alpha", None])
+        self.assertIsNone(review)
+
     def test_one_corrected_line_does_not_rename_its_whole_voice(self):
         at = lambda second: f"2026-10-22T16:00:{second:02d}+00:00"
         live = [{"source": "system", "timestamp": at(second), "end_timestamp": at(second + 4), "speaker_id": "remote-1",

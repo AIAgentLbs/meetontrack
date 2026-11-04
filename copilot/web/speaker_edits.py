@@ -79,52 +79,50 @@ def carry_corrections(live: list[dict], names: dict, final: list[dict]) -> tuple
             spans.append((source, start, end, str(item.get("speaker_id") or "") if manual else "", str(item.get("speaker") or "")))
     labels = {identity: name for _, _, _, identity, name in spans if identity}
 
-    def winner(weights: Counter, length: float = 0.0) -> str | None:
+    def winner(weights: Counter) -> str | None:
         if not weights:
             return None
         identity, weight = weights.most_common(1)[0]
-        confident = weight >= CARRY_CONFIDENCE * sum(weights.values()) and weight >= CARRY_CONFIDENCE * length
-        return identity if confident else None
+        return identity if weight >= CARRY_CONFIDENCE * sum(weights.values()) else None
 
-    lines = []  # (segment, its final voice, overlap weights, length)
+    lines = []  # (segment, its final voice, overlap weights)
     voices: dict[str, Counter] = {}
     for item in final:
         segment = dict(item)
         voice = base_speaker(segment)[0]
         start, end = _seconds(segment.get("timestamp")), _seconds(segment.get("end_timestamp"))
         weights: Counter = Counter()
-        length = 0.0
         if start is not None:
             end = end if end is not None and end > start else start + 1.0
-            length = end - start
             for source, first, last, identity, _ in spans:
                 overlap = min(end, last) - max(start, first)
                 if source == segment.get("source") and overlap > 0:
                     weights[identity] += overlap
         if weights:
             voices.setdefault(voice, Counter()).update(weights)
-        lines.append((segment, voice, weights, length))
+        lines.append((segment, voice, weights))
     by_voice = {voice: winner(weights) for voice, weights in voices.items()}  # Dominance only.
 
     carried = {"self": names["self"]} if names.get("self") else {}
     used: set[str] = set()
     review: list[str] = []
-    for segment, voice, weights, length in lines:
-        identity = winner(weights, length) or by_voice.get(voice)
-        if not identity:  # No correction here, or one the final cannot place with confidence.
+    for segment, voice, weights in lines:
+        # A line's own overlap decides; only a line no live line overlaps follows its voice.
+        identity = winner(weights) if weights else by_voice.get(voice)
+        if not identity:  # Uncorrected here, or corrections the final cannot place with confidence.
             if identity is None and any(weights[key] for key in weights if key):
                 review.append(segment_id(segment))
             continue
         used.add(identity)
-        if identity == "self":
+        if identity == "self" and segment.get("source") == "microphone":
             continue  # The microphone is "self" by channel: its name carries through speaker_names.
         name = labels[identity]
-        target = "manual-" + hashlib.sha256(name.casefold().encode()).hexdigest()[:12]
+        target = "self" if identity == "self" else "manual-" + hashlib.sha256(name.casefold().encode()).hexdigest()[:12]
         segment.update(speaker_id=target, speaker=name, speaker_label=name,
                        speaker_identity="manual", speaker_confidence="manual")
         carried[target] = name
     lost = sorted({name for identity, name in labels.items() if identity not in used and identity != "self"})
-    segments = [segment for segment, _, _, _ in lines]
+    segments = [segment for segment, _, _ in lines]
     if not review and not lost:
         return segments, carried, None
     return segments, carried, {"segment_ids": review, "names": lost}
@@ -159,6 +157,12 @@ class SpeakerEdits:
                 canonical[field] = snapshot[field]
         canonical["segments"] = snapshot["segments"]
         canonical["speaker_names"] = snapshot.get("speaker_names", {})
+        if review := canonical.get("speaker_review"):
+            # Lines the person has now assigned by hand are reviewed (MEETONTRACK-117).
+            done = {segment_id(s) for s in snapshot["segments"] if s.get("speaker_identity") == "manual"}
+            review["segment_ids"] = [key for key in review.get("segment_ids", []) if key not in done]
+            if not review["segment_ids"]:
+                canonical.pop("speaker_review")
         canonical["speaker_revision"] = int(canonical.get("speaker_revision", 0)) + 1
         canonical["speaker_corrected_at"] = datetime.now(timezone.utc).isoformat()
         temporary = path.with_suffix(".tmp")

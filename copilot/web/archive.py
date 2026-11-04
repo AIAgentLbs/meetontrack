@@ -72,6 +72,12 @@ def _mtime(path: Path) -> int | None:
         return None
 
 
+def _drops_corrections(previous: list[dict], segments: list[dict]) -> bool:
+    kept = {(s.get("source"), s.get("timestamp")) for s in segments}
+    return any(s.get("speaker_identity") == "manual" and (s.get("source"), s.get("timestamp")) not in kept
+               for s in previous)
+
+
 def _lines(segments: list[dict]) -> list[tuple]:
     return [(item.get("source"), item.get("timestamp"), item.get("text")) for item in segments]
 
@@ -240,10 +246,17 @@ class MeetingArchive:
                 # the final transcript is then imported again (MEETONTRACK-94).
                 clean["final_transcript"] = previous["final_transcript"]
                 clean["capture_warnings"] = list(previous.get("capture_warnings") or [])
+                if previous.get("speaker_review"):
+                    clean["speaker_review"] = previous["speaker_review"]
                 if _lines(clean["segments"]) != _lines(previous.get("segments", [])):
                     clean["segments"] = previous.get("segments", [])
                     clean["latest_at"] = str(previous.get("latest_at") or "")
-            elif not clean.get("explicit_boundary") and len(previous.get("segments", [])) > len(clean["segments"]):
+            elif not clean.get("explicit_boundary") and (
+                    len(previous.get("segments", [])) > len(clean["segments"])
+                    or clean["status"] == "finished"
+                    and _drops_corrections(previous.get("segments", []), clean["segments"])):
+                # A live file now showing other text (the final transcript) must not drop
+                # hand corrections: the final import carries them over (MEETONTRACK-117).
                 clean["segments"] = previous["segments"]
             corrected = self.annotate_speakers(clean)
             clean["segments"] = corrected["segments"]
