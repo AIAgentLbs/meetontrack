@@ -195,7 +195,7 @@
       const button=document.createElement("button"); button.type="button"; button.className="quiet-button";
       const prior=meeting.report?.[field];
       button.textContent = text(channel === "email" && prior === "sent" ? "resend" : key);
-      button.disabled = !meeting.report?.pdf;
+      button.disabled = !meeting.report?.html;
       button.addEventListener("click", async () => {
         const confirm = ["sent","uploaded","unknown"].includes(meeting.report?.[field]);
         if(confirm && !window.confirm(text("confirm"))) return;

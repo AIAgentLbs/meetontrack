@@ -61,7 +61,7 @@ async def deliver(args: argparse.Namespace) -> dict:
             return {"ok": True, "status": "connected"}
         text = (
             f"MeetOnTrack by aiagentlbs.com\n{args.title}\n{args.date}\n\n"
-            "PDF приложен к сообщению."
+            + (args.note or "PDF приложен к сообщению.")
         )
         links = [
             ("Папка", args.drive_folder_url),
@@ -88,7 +88,8 @@ def main() -> int:
     parser.add_argument("--account", required=True)
     parser.add_argument("--target", default="me")
     parser.add_argument("--check", action="store_true", help="Verify existing authorization without sending anything")
-    parser.add_argument("--pdf", type=Path)
+    parser.add_argument("--pdf", type=Path, help="The report file: PDF, or HTML when no PDF could be made")
+    parser.add_argument("--note", default="", help="Replaces the 'PDF attached' line")
     parser.add_argument("--title", default="")
     parser.add_argument("--date", default="")
     parser.add_argument("--drive-folder-url", default="")

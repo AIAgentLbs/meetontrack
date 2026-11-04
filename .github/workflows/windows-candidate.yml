@@ -33,6 +33,27 @@ jobs:
         with:
           python-version: '3.13'
       - uses: astral-sh/setup-uv@v6
+      - name: Meeting report PDF with Chrome, then with Edge only (MEETONTRACK-120)
+        shell: pwsh
+        working-directory: copilot/web
+        env:
+          MEETONTRACK_REAL_PDF: '1'
+        run: |
+          $env:MEETONTRACK_EXPECT_BROWSER = 'chrome'
+          uv run --with pillow python -m unittest -v test_report_without_pdf
+          if ($LASTEXITCODE -ne 0) { throw 'Report PDF with Chrome failed' }
+          # Hide every Chrome at its standard places: Edge must print the same report.
+          $hidden = @("$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:LOCALAPPDATA") |
+            ForEach-Object { Join-Path $_ 'Google\Chrome\Application\chrome.exe' } | Where-Object { Test-Path $_ }
+          if (-not $hidden) { throw 'The runner has no Chrome to hide' }
+          try {
+            foreach ($exe in $hidden) { Rename-Item $exe 'chrome-hidden.exe' }
+            $env:MEETONTRACK_EXPECT_BROWSER = 'msedge'
+            uv run --with pillow python -m unittest -v test_report_without_pdf.RealBrowserReportTests
+            if ($LASTEXITCODE -ne 0) { throw 'Report PDF with Edge failed' }
+          } finally {
+            foreach ($exe in $hidden) { Rename-Item (Join-Path (Split-Path $exe) 'chrome-hidden.exe') 'chrome.exe' -ErrorAction SilentlyContinue }
+          }
       - name: Recorder core and live regression tests
         shell: pwsh
         run: |

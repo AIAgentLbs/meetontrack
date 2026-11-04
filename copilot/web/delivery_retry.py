@@ -50,7 +50,9 @@ class DeliveryRetry:
                         raise ValueError("final_transcript_missing" if detail and detail.get("status") == "finished"
                                          and not detail.get("final_transcript") else "meeting_not_finished")
                     pdf = self.archive.report_path(identity, "meeting-report.pdf")
-                    if not pdf or not pdf.is_file() or not self.archive.report_matches(detail, report):
+                    # MEETONTRACK-120: a report saved without a PDF goes out as its HTML file.
+                    standalone = self.archive.report_path(identity, "meeting-report.html")
+                    if not (pdf or standalone) or not self.archive.report_matches(detail, report):
                         raise ValueError("report_not_ready")
                     settings = self.archive.delivery_settings.read()
                     if any(not enabled(settings, c) for c in channels):
@@ -72,7 +74,7 @@ class DeliveryRetry:
                     if "telegram" in channels:
                         report["telegram_status"] = "unknown"
                     write_json(path, report)
-                    delivery = self.archive.deliver(detail, {**report, "pdf_path": str(pdf)},
+                    delivery = self.archive.deliver(detail, {**report, "pdf_path": str(pdf or "")},
                                                     previous=previous, channels=channels, manual=True)
                     report.update(delivery)
                     report["delivery_checked_at"] = datetime.now(timezone.utc).isoformat()

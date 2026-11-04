@@ -105,6 +105,8 @@ def _shared_indexes(method):
 
 PRINT_PROFILE_PREFIX = "meeting-copilot-report-"
 REPORT_FAILURE = "report-failure.json"
+# The report as one HTML file with its frames inside, sent when no PDF can be made.
+STANDALONE_REPORT = "meeting-report.html"
 # A finished call whose final transcript is still missing this long after it
 # ended needs attention (MEETONTRACK-94); its report keeps waiting, unsent.
 FINAL_WAIT_ATTENTION_SECONDS = 3600
@@ -724,7 +726,7 @@ class MeetingArchive:
         failure = _json(self.reports_root / _safe(detail["meeting_id"]) / REPORT_FAILURE, None)
         detail["report_failure"] = failure if isinstance(failure, dict) else None
         detail["library_status"] = ("recording" if active
-                                    else "report_ready" if report.get("html") and report.get("pdf")
+                                    else "report_ready" if report.get("html")
                                     else "analysis_ready" if points else "transcript_ready" if transcript
                                     else "no_speech")
         detail["overview"] = {"points": list(dict.fromkeys(filter(None, points)))[:5],
@@ -1001,7 +1003,7 @@ class MeetingArchive:
             "frame_count": len(detail["frames"]),
             "chat_count": len(detail["meeting_chat"]),
             "has_audio": bool(detail["audio_file"]),
-            "has_report": bool(report.get("html") and report.get("pdf")),
+            "has_report": bool(report.get("html")),
             "drive_status": str(report.get("drive_status") or ""),
             "mail_status": str(report.get("mail_status") or ""),
             "telegram_status": str(report.get("telegram_status") or ""),
@@ -1033,12 +1035,17 @@ class MeetingArchive:
             except Exception as exc:
                 self._record_report_failure(identity, exc)
                 raise
+            if meta.get("pdf_error"):
+                # Saved (and sent) as HTML: the PDF is still missing, shown and retried.
+                error = ReportPdfError(meta["pdf_error"])
+                self._record_report_failure(identity, error, fallback="html")
+                raise error
             for folder in {identity, _safe(str(meta.get("meeting_id") or identity))}:
                 (self.reports_root / folder / REPORT_FAILURE).unlink(missing_ok=True)
             meta.pop("meeting_id", None)
             return meta
 
-    def _record_report_failure(self, meeting_id: str, exc: Exception) -> None:
+    def _record_report_failure(self, meeting_id: str, exc: Exception, fallback: str = "") -> None:
         path = self.reports_root / _safe(str(meeting_id)) / REPORT_FAILURE
         try:
             previous = _json(path, {})
@@ -1046,6 +1053,7 @@ class MeetingArchive:
             private_dir(path.parent)
             _atomic_json(path, {"reason": "pdf" if isinstance(exc, ReportPdfError) else "other",
                                 "message": str(exc)[:300], "attempts": attempts + 1,
+                                **({"fallback": fallback} if fallback else {}),
                                 "failed_at": datetime.now().astimezone().isoformat(timespec="seconds")})
         except Exception as error:  # The original failure is what the caller reports.
             print(f"report failure marker not saved: {type(error).__name__}", flush=True)
@@ -1078,18 +1086,35 @@ class MeetingArchive:
             html_path.chmod(0o600)
             pdf_path = report_dir / "meeting-report.pdf"
             printed = report_dir / "meeting-report.next.pdf"
-            self._print_pdf(html_path, printed)
+            standalone = report_dir / STANDALONE_REPORT
+            pdf_error: ReportPdfError | None = None
+            try:
+                self._print_pdf(html_path, printed)
+            except ReportPdfError as exc:
+                # MEETONTRACK-120: no PDF (no Chrome/Edge, or it failed) must not lose
+                # the report. A current PDF already on disk stays as it is; otherwise
+                # the report is kept and sent as one self-contained HTML file.
+                if self._report_current(detail["meeting_id"]):
+                    raise
+                pdf_error = exc
 
             with self.lock:
                 fresh = self.report_detail(meeting_id)
                 if fresh and self.source_signature(fresh) != source_signature and attempt < 2:
                     printed.unlink(missing_ok=True)
                     continue  # The meeting changed while Chrome printed: print the new text.
-                printed.replace(pdf_path)
-                pdf_path.chmod(0o600)
-                meta, previous_report, previous_delivery = self._report_meta(detail, report_dir, html_path, pdf_path,
+                if pdf_error:
+                    pdf_path.unlink(missing_ok=True)  # It shows older text: never send it.
+                    self._write_standalone_html(html_path, standalone)
+                else:
+                    printed.replace(pdf_path)
+                    pdf_path.chmod(0o600)
+                    standalone.unlink(missing_ok=True)
+                meta, previous_report, previous_delivery = self._report_meta(detail, report_dir, html_path,
+                                                            None if pdf_error else pdf_path,
                                                             len(rendered_frames), source_signature,
-                                                            deliver=deliver, on_request=on_request)
+                                                            deliver=deliver, on_request=on_request,
+                                                            pdf_error=str(pdf_error or ""))
                 ready = self._ready_for_delivery(detail)
                 sending = deliver and not meta.get("delivery_on_request") and ready
                 # ponytail: sending holds the archive lock (settings and the Google
@@ -1150,8 +1175,9 @@ class MeetingArchive:
             return {**meta, "meeting_id": detail["meeting_id"]}
         raise AssertionError("unreachable")  # The last attempt always saves.
 
-    def _report_meta(self, detail: dict, report_dir: Path, html_path: Path, pdf_path: Path, frames: int,
-                     source_signature: str, *, deliver: bool, on_request: bool) -> tuple[dict, dict, dict]:
+    def _report_meta(self, detail: dict, report_dir: Path, html_path: Path, pdf_path: Path | None, frames: int,
+                     source_signature: str, *, deliver: bool, on_request: bool,
+                     pdf_error: str = "") -> tuple[dict, dict, dict]:
         previous_report = {**(detail.get("report") or {}),
                            **_json(report_dir / "report.json", {}),
                            **_json(report_dir / "delivery-receipts.json", {})}
@@ -1165,9 +1191,10 @@ class MeetingArchive:
             **{key: previous_report[key] for key in ("last_delivery_request", "last_delivery_result", "mail_error") if key in previous_report},
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "html": f"/api/archive/report/{detail['meeting_id']}/index.html",
-            "pdf": f"/api/archive/report/{detail['meeting_id']}/meeting-report.pdf",
+            "pdf": f"/api/archive/report/{detail['meeting_id']}/meeting-report.pdf" if pdf_path else "",
             "html_path": str(html_path),
-            "pdf_path": str(pdf_path),
+            "pdf_path": str(pdf_path or ""),
+            **({"pdf_error": pdf_error} if pdf_error else {}),
             "included_frames": frames,
             "drive_status": "pending",
             # Keep sent markers durable even if the process exits during
@@ -1231,7 +1258,8 @@ class MeetingArchive:
                 self._history_checked.pop(_safe(str(detail.get("meeting_id") or "")), None)
                 continue
             if (not detail or not self._ready_for_delivery(detail)
-                    or not Path(str(meta.get("pdf_path") or "")).is_file()):
+                    or not (Path(str(meta.get("pdf_path") or "")).is_file()
+                            or (path.parent / STANDALONE_REPORT).is_file())):
                 continue
             gate = self.report_gate(path.parent.name)
             if not gate.acquire(blocking=False):
@@ -1387,11 +1415,43 @@ class MeetingArchive:
         return self.delivery_monitor.refresh(settings if isinstance(settings, dict) else {})
 
     @staticmethod
-    def _print_pdf(html_path: Path, pdf_path: Path) -> None:
-        """Print with Chrome, then terminate its lingering headless helper."""
-        chrome = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-        if not chrome.is_file():
-            raise ReportPdfError("Google Chrome не найден для создания PDF")
+    def _pdf_browser_candidates() -> list[Path]:
+        """Standard install places of Chrome, then Edge (every Windows 11 has it), then Chromium."""
+        if os.name == "nt":
+            roots = [os.environ.get(name) for name in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA")]
+            found: list[Path] = []
+            for exe, relative in (("chrome.exe", r"Google\Chrome\Application\chrome.exe"),
+                                  ("msedge.exe", r"Microsoft\Edge\Application\msedge.exe")):
+                found += [Path(root) / relative for root in roots if root]
+                try:
+                    import winreg
+                    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                        try:
+                            key = rf"Software\Microsoft\Windows\CurrentVersion\App Paths\{exe}"
+                            found.append(Path(winreg.QueryValue(hive, key).strip('"')))
+                        except OSError:
+                            pass
+                except ImportError:
+                    pass
+            return found
+        if sys.platform == "darwin":
+            return [root / app for app in ("Google Chrome.app/Contents/MacOS/Google Chrome",
+                                           "Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                                           "Chromium.app/Contents/MacOS/Chromium")
+                    for root in (Path("/Applications"), Path.home() / "Applications")]
+        return [Path(path) for name in ("google-chrome", "microsoft-edge", "chromium", "chromium-browser")
+                if (path := shutil.which(name))]
+
+    @classmethod
+    def pdf_browser(cls) -> Path | None:
+        return next((path for path in cls._pdf_browser_candidates() if path.is_file()), None)
+
+    @classmethod
+    def _print_pdf(cls, html_path: Path, pdf_path: Path) -> None:
+        """Print with Chrome or Edge, then terminate its lingering headless helper."""
+        chrome = cls.pdf_browser()
+        if chrome is None:
+            raise ReportPdfError("Не найден браузер Chrome или Edge для создания PDF")
         profile = Path(tempfile.mkdtemp(prefix=PRINT_PROFILE_PREFIX))
         temporary = pdf_path.with_suffix(".tmp.pdf")
         temporary.unlink(missing_ok=True)
@@ -1424,9 +1484,9 @@ class MeetingArchive:
                     stable = 0
                 prior = size
             if not temporary.is_file() or temporary.stat().st_size <= 4096:
-                raise ReportPdfError("Chrome не создал PDF")
+                raise ReportPdfError(f"{chrome.stem} не создал PDF")
             if temporary.read_bytes()[:4] != b"%PDF":
-                raise ReportPdfError("Chrome создал поврежденный PDF")
+                raise ReportPdfError(f"{chrome.stem} создал поврежденный PDF")
             temporary.replace(pdf_path)
         finally:
             process.terminate()
@@ -1442,6 +1502,21 @@ class MeetingArchive:
                     break
                 time.sleep(0.25)
             temporary.unlink(missing_ok=True)
+
+    @staticmethod
+    def _write_standalone_html(html_path: Path, target: Path) -> None:
+        """index.html with its frames inlined, readable as a lone email/Telegram attachment."""
+        import base64
+        folder = html_path.parent
+
+        def inline(match: re.Match) -> str:
+            frame = folder / html.unescape(match.group(1))
+            if frame.parent.name != "assets" or not frame.is_file():
+                return match.group(0)
+            return 'src="data:image/jpeg;base64,' + base64.b64encode(frame.read_bytes()).decode() + '"'
+        target.write_text(re.sub(r'src="(assets/[^"]+)"', inline, html_path.read_text(encoding="utf-8")),
+                          encoding="utf-8")
+        target.chmod(0o600)
 
     @staticmethod
     def remove_print_leftovers() -> int:
@@ -1561,133 +1636,6 @@ class MeetingArchive:
                  "silence": number("silence_stop_minutes", 10) * 60,
                  "calendar-event-ended": 60}.get(detail.get("stop_reason"), 0)
         return duration - quiet < minimum
-
-    @staticmethod
-    def _drive_items(
-        gog: str, account: str, parent_id: str, name: str
-    ) -> list[dict]:
-        """Read exact child metadata without changing Drive permissions."""
-        escaped = name.replace("'", "\\'")
-        command = [
-            gog, "--account", account, "--no-input", "--json", "drive", "ls",
-            "--parent", parent_id,
-            "--query", f"name = '{escaped}' and trashed = false",
-            "--fields", "files(id,name,mimeType,webViewLink),nextPageToken",
-            "--max", "20",
-        ]
-        result = subprocess.run(
-            command, capture_output=True, text=True, timeout=30,
-            env=os.environ | {"PATH": "/opt/homebrew/bin:/usr/bin:/bin"},
-        )
-        if result.returncode != 0:
-            return []
-        try:
-            payload = json.loads(result.stdout or "{}")
-        except ValueError:
-            return []
-        if isinstance(payload, list):
-            return [item for item in payload if isinstance(item, dict)]
-        items = payload.get("files") or payload.get("results") or []
-        return [item for item in items if isinstance(item, dict)]
-
-    @classmethod
-    def _drive_links(
-        cls,
-        gog: str,
-        account: str,
-        reports_folder_id: str,
-        folder_name: str,
-        wait_seconds: int = 75,
-    ) -> dict[str, str]:
-        """Wait for Drive for Desktop sync, then return provider URLs."""
-        if not account or not reports_folder_id:
-            return {}
-        deadline = time.monotonic() + wait_seconds
-        while time.monotonic() < deadline:
-            folders = cls._drive_items(gog, account, reports_folder_id, folder_name)
-            folder = next(
-                (
-                    item for item in folders
-                    if item.get("name") == folder_name
-                    and item.get("mimeType") == "application/vnd.google-apps.folder"
-                ),
-                None,
-            )
-            folder_id = str((folder or {}).get("id") or "")
-            folder_url = str((folder or {}).get("webViewLink") or "")
-            if folder_id and folder_url:
-                children: dict[str, dict] = {}
-                for filename in ("index.html", "meeting-report.pdf"):
-                    matches = cls._drive_items(gog, account, folder_id, filename)
-                    exact = next(
-                        (item for item in matches if item.get("name") == filename), None
-                    )
-                    if exact:
-                        children[filename] = exact
-                html_url = str(children.get("index.html", {}).get("webViewLink") or "")
-                pdf_url = str(
-                    children.get("meeting-report.pdf", {}).get("webViewLink") or ""
-                )
-                if html_url and pdf_url:
-                    return {
-                        "drive_folder_url": folder_url,
-                        "drive_html_url": html_url,
-                        "drive_pdf_url": pdf_url,
-                    }
-            time.sleep(3)
-        return {}
-
-    @classmethod
-    def _upload_drive_report(
-        cls,
-        gog: str,
-        account: str,
-        reports_folder_id: str,
-        folder_name: str,
-        source: Path,
-    ) -> tuple[str, dict[str, str]]:
-        """Upload a report tree through Drive API and read back real URLs."""
-        folders = cls._drive_items(gog, account, reports_folder_id, folder_name)
-        folder = next(
-            (
-                item for item in folders
-                if item.get("name") == folder_name
-                and item.get("mimeType") == "application/vnd.google-apps.folder"
-            ),
-            None,
-        )
-        if not folder:
-            created = subprocess.run(
-                [
-                    gog, "--account", account, "--no-input", "--json", "drive",
-                    "mkdir", folder_name, "--parent", reports_folder_id,
-                ],
-                capture_output=True, text=True, timeout=60,
-                env=os.environ | {"PATH": "/opt/homebrew/bin:/usr/bin:/bin"},
-            )
-            if created.returncode != 0:
-                return ("auth_required" if created.returncode in {4, 6} else "failed", {})
-            folders = cls._drive_items(gog, account, reports_folder_id, folder_name)
-            folder = next(
-                (item for item in folders if item.get("name") == folder_name), None
-            )
-        folder_id = str((folder or {}).get("id") or "")
-        if not folder_id:
-            return "failed", {}
-        pushed = subprocess.run(
-            [
-                gog, "--account", account, "--no-input", "--json", "drive",
-                "sync", "push", str(source), "--parent", folder_id,
-            ],
-            capture_output=True, text=True, timeout=180,
-            env=os.environ | {"PATH": "/opt/homebrew/bin:/usr/bin:/bin"},
-        )
-        if pushed.returncode != 0:
-            return ("auth_required" if pushed.returncode in {4, 6} else "failed", {})
-        links = cls._drive_links(
-            gog, account, reports_folder_id, folder_name, wait_seconds=15
-        )
-        return ("uploaded" if links else "failed"), links
 
     def _gws_call(self, *args: str, timeout: int = 60, diagnostics: dict | None = None) -> dict | None:
         """Use the already-authorized Workspace CLI without exposing tokens."""
@@ -1845,6 +1793,12 @@ class MeetingArchive:
         title = re.sub(r"[/\\:*?\"<>|]+", "-", detail["title"]).strip()[:80]
         folder_name = f"{stamp} {time_stamp} {title} [{detail['meeting_id'][-8:]}]"
         source = self.reports_root / detail["meeting_id"]
+        # MEETONTRACK-120: without a PDF the report goes out as one HTML file;
+        # Drive waits for the PDF (it stores both files), email and Telegram do not.
+        attachment = Path(str(report.get("pdf_path") or ""))
+        has_pdf = attachment.suffix == ".pdf" and attachment.is_file()
+        if not has_pdf:
+            attachment = source / STANDALONE_REPORT
         receipts = _json(source / "delivery-receipts.json", {})
         if not manual:
             previous = {**previous, **receipts}
@@ -1870,13 +1824,13 @@ class MeetingArchive:
         if self.delivery_settings.profile() == "custom":
             google_account = self.delivery_settings.own_google_status().get("account", "")
         reports_folder_id = str(settings.get("drive_folder_id") or "").strip()
-        if not allowed("drive"):
+        if not allowed("drive") or not has_pdf:
             reports_folder_id, local_drive, remote = "", None, ""
 
         # The API upload is authoritative: delivery proceeds only after Google
         # returns private webViewLink values for both report files.
         if drive_status == "uploaded":
-            if not drive_links and gws and reports_folder_id:
+            if not drive_links and gws and reports_folder_id and has_pdf:
                 refreshed, links = self._upload_drive_report_gws(
                     reports_folder_id, folder_name, source
                 )
@@ -1906,14 +1860,14 @@ class MeetingArchive:
         elif remote:
             destination = f"{remote.rstrip('/')}/{folder_name}"
             command = [
-                "/opt/homebrew/bin/rclone", "copy", str(source), destination,
+                shutil.which("rclone") or "/opt/homebrew/bin/rclone", "copy", str(source), destination,
                 "--include", "index.html", "--include", "meeting-report.pdf",
                 "--include", "assets/**", "--create-empty-src-dirs",
             ]
             try:
                 result = subprocess.run(
                     command, capture_output=True, text=True, timeout=180,
-                    env=os.environ | {"PATH": "/opt/homebrew/bin:/usr/bin:/bin"},
+                    env=os.environ | ({"PATH": "/opt/homebrew/bin:/usr/bin:/bin"} if os.name != "nt" else {}),
                 )
                 drive_status = "uploaded" if result.returncode == 0 else "auth_required"
             except (OSError, subprocess.TimeoutExpired):
@@ -1942,9 +1896,12 @@ class MeetingArchive:
             body = (
                 f"Отчет по встрече «{detail['title']}» от {stamp}.\n\n"
                 f"Сформирован {self.product_name}.\n"
-                + ("HTML и PDF сохранены в Google Drive. " if drive_status == "uploaded"
-                   else "Google Drive пока недоступен; PDF сохранен локально. ")
-                + "PDF приложен к письму."
+                + (("HTML и PDF сохранены в Google Drive. " if drive_status == "uploaded"
+                    else "Google Drive пока недоступен; PDF сохранен локально. ")
+                   + "PDF приложен к письму." if has_pdf else
+                   "PDF создать не удалось: на компьютере не найден браузер Chrome или Edge, "
+                   "либо он не смог сохранить файл. Отчет приложен как HTML-файл, он открывается "
+                   "в любом браузере. Приложение продолжит попытки создать PDF.")
                 + links_text
             )
             if smtp:
@@ -1956,7 +1913,10 @@ class MeetingArchive:
                 message.set_content(body)
                 accepted = False
                 try:
-                    message.add_attachment(Path(report["pdf_path"]).read_bytes(), maintype="application", subtype="pdf", filename="meeting-report.pdf")
+                    if has_pdf:
+                        message.add_attachment(attachment.read_bytes(), maintype="application", subtype="pdf", filename="meeting-report.pdf")
+                    else:
+                        message.add_attachment(attachment.read_bytes(), maintype="text", subtype="html", filename=STANDALONE_REPORT)
                     with self.delivery_settings.smtp_client() as client:
                         refused = client.send_message(message)
                         accepted = not refused
@@ -1974,7 +1934,7 @@ class MeetingArchive:
                 mail_error.clear()
                 sent = self._gws_call(
                     "gmail", "+send", "--to", recipient, "--subject", subject,
-                    "--body", body, "--attach", report["pdf_path"], timeout=180,
+                    "--body", body, "--attach", str(attachment), timeout=180,
                     diagnostics=mail_error,
                 )
                 mail_status = "sent" if sent and sent.get("id") else "failed"
@@ -2001,10 +1961,12 @@ class MeetingArchive:
                 "--config", str(telegram_config),
                 "--account", telegram_account,
                 "--target", telegram_target,
-                "--pdf", report["pdf_path"],
+                "--pdf", str(attachment),
                 "--title", detail["title"],
                 "--date", stamp,
             ]
+            if not has_pdf:
+                command.extend(["--note", "PDF создать не удалось; отчет приложен как HTML-файл."])
             for key, flag in (
                 ("drive_folder_url", "--drive-folder-url"),
                 ("drive_html_url", "--drive-html-url"),

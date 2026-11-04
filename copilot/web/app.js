@@ -831,6 +831,10 @@ Object.assign(translations.ru, {
   "delivery.missing.date": "Отчет по встрече от {date} не найден",
   "delivery.missing.plain": "Отчет по встрече не найден",
   "delivery.recreate": "Создать отчет заново", "delivery.recreating": "Создаю отчет...",
+  "delivery.nopdf.title_date": "PDF отчета по встрече «{title}» от {date} не создан",
+  "delivery.nopdf.title": "PDF отчета по встрече «{title}» не создан",
+  "delivery.nopdf.date": "PDF отчета по встрече от {date} не создан",
+  "delivery.nopdf.plain": "PDF отчета по встрече не создан",
   "delivery.failed.title_date": "Отчет по встрече «{title}» от {date} не создан",
   "delivery.failed.title": "Отчет по встрече «{title}» не создан",
   "delivery.failed.date": "Отчет по встрече от {date} не создан",
@@ -842,6 +846,7 @@ Object.assign(translations.ru, {
   "final_wait.waiting": "Отчет ждет итоговую расшифровку и уйдет, как только она будет готова.",
   "final_wait.final_transcript": "Итоговой расшифровки нет уже {minutes} мин после звонка. Отчет не отправлен: предварительная расшифровка не отправляется. Проверьте, что приложение записи запущено. Отчет уйдет сам, когда итоговая расшифровка будет готова.",
   "speaker_review": "Итоговая расшифровка применена. Часть исправлений спикеров из предварительной расшифровки не удалось перенести уверенно: проверьте спикеров ({count} реплик{names}).",
+  "report_failure.pdf_html": "PDF не создан: на компьютере не найден браузер Chrome или Edge, либо он не смог сохранить файл. Отчет сохранен как HTML, и письмо и Telegram, если они включены, получают его HTML-файлом вместо PDF. Попыток: {attempts}, последняя в {time}. Приложение само повторит попытку через 30 минут, или нажмите «Создать отчет заново».",
   "report_failure.pdf": "Отчет не создан: Chrome не смог сохранить PDF. Попыток: {attempts}, последняя в {time}. Приложение само повторит попытку через 30 минут, или нажмите «Создать отчет заново».",
   "report_failure.other": "Отчет не создан ({message}). Попыток: {attempts}, последняя в {time}. Приложение само повторит попытку через 30 минут, или нажмите «Создать отчет заново».",
   "report_failure.short": "Отчет не создан. Откройте встречу и нажмите «Создать отчет заново».",
@@ -892,6 +897,10 @@ Object.assign(translations.en, {
   "delivery.missing.date": "Report for the meeting on {date} was not found",
   "delivery.missing.plain": "A meeting report was not found",
   "delivery.recreate": "Create the report again", "delivery.recreating": "Creating the report...",
+  "delivery.nopdf.title_date": "The PDF of the report for “{title}” on {date} was not created",
+  "delivery.nopdf.title": "The PDF of the report for “{title}” was not created",
+  "delivery.nopdf.date": "The PDF of the report for the meeting on {date} was not created",
+  "delivery.nopdf.plain": "The PDF of a meeting report was not created",
   "delivery.failed.title_date": "Report for “{title}” on {date} was not created",
   "delivery.failed.title": "Report for “{title}” was not created",
   "delivery.failed.date": "Report for the meeting on {date} was not created",
@@ -903,6 +912,7 @@ Object.assign(translations.en, {
   "final_wait.waiting": "The report waits for the final transcript and is sent as soon as it is ready.",
   "final_wait.final_transcript": "There is still no final transcript {minutes} min after the call. The report is not sent: the preliminary transcript is never sent. Check that the recorder is running. The report is sent by itself once the final transcript is ready.",
   "speaker_review": "The final transcript is applied. Some speaker corrections from the preliminary transcript could not be carried over with confidence: check the speakers ({count} lines{names}).",
+  "report_failure.pdf_html": "The PDF was not created: no Chrome or Edge browser was found on this computer, or it could not save the file. The report is saved as HTML, and email and Telegram, if turned on, get it as an HTML file instead of a PDF. Attempts: {attempts}, last at {time}. The app tries again by itself in 30 minutes, or press Create the report again.",
   "report_failure.pdf": "The report was not created: Chrome could not save the PDF. Attempts: {attempts}, last at {time}. The app tries again by itself in 30 minutes, or press Create the report again.",
   "report_failure.other": "The report was not created ({message}). Attempts: {attempts}, last at {time}. The app tries again by itself in 30 minutes, or press Create the report again.",
   "report_failure.short": "Report not created. Open the meeting and press Create the report again.",
@@ -1011,7 +1021,7 @@ function undeliveredLabel(item) {
     title: item.title || "",
     date: Number.isNaN(started.getTime()) ? "" : started.toLocaleDateString(uiLanguage, { day: "numeric", month: "long" }),
   };
-  const family = item.failed ? "failed" : item.missing ? "missing" : item.final_wait ? "final" : item.uncertain ? "unsure" : "undelivered";
+  const family = item.failed?.fallback === "html" ? "nopdf" : item.failed ? "failed" : item.missing ? "missing" : item.final_wait ? "final" : item.uncertain ? "unsure" : "undelivered";
   return t(`delivery.${family}.${["title", "date"].filter(key => values[key]).join("_") || "plain"}`, values);
 }
 
@@ -2344,7 +2354,8 @@ function reportFailureText(failure) {
   if (!failure) return "";
   const at = new Date(failure.failed_at || "");
   const time = Number.isNaN(at.getTime()) ? "" : new Intl.DateTimeFormat(uiLanguage === "ru" ? "ru-RU" : "en-GB", {timeStyle: "short"}).format(at);
-  return t(`report_failure.${failure.reason === "pdf" ? "pdf" : "other"}`, {attempts: failure.attempts || 1, time, message: failure.message || ""});
+  const key = failure.reason !== "pdf" ? "other" : failure.fallback === "html" ? "pdf_html" : "pdf";
+  return t(`report_failure.${key}`, {attempts: failure.attempts || 1, time, message: failure.message || ""});
 }
 
 function audioGapText(meeting) {
@@ -2652,8 +2663,10 @@ function renderArchiveDetail(meeting) {
     });
     reportActions.append(open);
   }
-  if (meeting.report?.html && meeting.report?.pdf) {
+  if (meeting.report?.html) {
+    // A report saved without a PDF (MEETONTRACK-120) still opens as HTML.
     for (const [label, href] of [[t("archive.open_html"), meeting.report.html], [t("archive.open_pdf"), meeting.report.pdf]]) {
+      if (!href) continue;
       const link = document.createElement("a");
       link.href = href;
       link.target = "_blank";
