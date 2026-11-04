@@ -18,7 +18,7 @@ manual check still works when background checks are disabled.
 - macOS: since MEETONTRACK-109 the web service runs from inside the app bundle
   (`Contents/Resources/payload/web`) and reports that bundle's
   `CFBundleShortVersionString` as a technical beta. The archive's top-level
-  `release.json` is the package manifest; it is not installed. 0.1.18 and older
+  `release.json` is the package manifest; it is not installed. 0.1.20 and older
   read `release.json` next to `~/.local/share/meeting-copilot/web`.
 - Windows: `release.json` already lives next to `web/` in each version directory.
 - Unknown versions do not trigger network checks or offer a possible downgrade.

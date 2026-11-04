@@ -12,7 +12,7 @@ included in the package. No compiler, SDK or separate Python is required.
 curl -fsSL https://meetontrack.com/install.sh | bash
 ```
 
-The command installs the checksum-pinned v0.1.20 archive. Read
+The command installs the checksum-pinned v0.1.21 archive. Read
 [install.sh](install.sh) before running it if desired. An existing installation
 must finish its call and quit Capture first. The installer checks again before
 replacement and puts the previous version back if replacing the files fails.
@@ -103,7 +103,7 @@ preserved backup. See [updates](docs/UPDATES.md).
 
 Mac settings: `~/.config/meeting-copilot`. Recordings, reports and the service
 log (`server.log`): `~/.local/share/meeting-copilot`. Python and the web
-assistant are inside the app. Updating from 0.1.18 or earlier removes the old
+assistant are inside the app. Updating from 0.1.20 or earlier removes the old
 background service and its separate Python/web copies; recordings, archive,
 models and settings are kept. The installer never modifies connected repositories.
 
