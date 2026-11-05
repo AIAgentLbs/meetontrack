@@ -78,6 +78,7 @@ hashes, Pages removed, and the Windows installer relocated to
 - [ ] MEETONTRACK-125: `install.sh` rewrites `config.json` to drop the retired analytics key before the
   new app is proven; a rolled-back install keeps the rewritten file. Move the migration after the commit
   point or add config.json to the rollback set.
+  Fixed on main 2026-11-05; closes on release.
 - [x] MEETONTRACK-109 (shipped in v0.1.21, Mac, closed 2026-11-04): One MeetOnTrack app with its own window: Python and the web
   payload inside the bundle, the app runs the local service itself (no launchd
   agent) and shows the UI in a WKWebView window instead of a browser tab. Signed,

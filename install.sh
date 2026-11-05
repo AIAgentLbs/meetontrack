@@ -75,6 +75,12 @@ replace() {
   replaced+=("$2")
   cp -R "$1" "$2"
 }
+# keep TARGET: a file migrated in place; a copy goes back if the install is rolled back (MEETONTRACK-125).
+keep() {
+  mkdir -p "$rollback"
+  [[ ! -e "$1" ]] || cp -p "$1" "$rollback/${#replaced[@]}"
+  replaced+=("$1")
+}
 url="${MEETING_COPILOT_ASSET_URL:-https://github.com/$REPO/releases/download/$VERSION/$ASSET}"
 expected="${MEETING_COPILOT_ASSET_SHA256:-$SHA256}"
 if [[ -n "${MEETING_COPILOT_ASSET_URL:-}" && -z "${MEETING_COPILOT_ASSET_SHA256:-}" ]]; then
@@ -138,6 +144,7 @@ mkdir -p "$SHARE" "$CONFIG" "$BIN"
 replace "$payload/bin/meeting-copilot" "$BIN/meeting-copilot"
 install -m 0755 "$payload/config/refresh-repos.py" "$CONFIG/refresh-repos.py"
 # One-time removal of retired usage-reporting state; preserve all other settings.
+for retired in config.json analytics.json analytics-pending.json; do keep "$CONFIG/$retired"; done
 "$python" -I -B - "$CONFIG" <<'PY'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])

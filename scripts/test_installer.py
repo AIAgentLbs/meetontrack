@@ -227,6 +227,21 @@ exit 2
         self.assertTrue(launches[-1].startswith("bootstrap"))
         self.assertTrue((self.root / "loaded").exists())
 
+    def test_rolled_back_install_restores_the_settings_it_migrated(self):
+        """MEETONTRACK-125: the retired-key removal is undone when the new app is not proven."""
+        app, share, config = self.seed_existing()
+        settings = json.dumps({"analytics": True, "keep_audio": True}).encode()
+        (config / "config.json").write_bytes(settings)
+        (config / "analytics.json").write_text("synthetic-retired-state")
+        self.prepare_launch()
+        (self.root / "loaded").touch()
+        result = self.run_install(MEETING_COPILOT_SKIP_LAUNCH="0", MOCK_HEALTH_VERSION="0.1.18")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((config / "config.json").read_bytes(), settings)
+        self.assertEqual((config / "analytics.json").read_text(), "synthetic-retired-state")
+        self.assertFalse((config / "analytics-pending.json").exists())
+        self.assert_0_1_18_intact(app, share)
+
     def test_old_service_that_will_not_stop_changes_nothing(self):
         app, share, _ = self.seed_existing()
         self.prepare_launch()
