@@ -141,7 +141,7 @@ printf "%s\\n" "$*" >> "$FIXTURE_ROOT/opened"
         self.script("sleep", 'exit 0')
         self.script("curl", '''
 case "$*" in
-  *http://127.0.0.1:43121/api/health*)
+  *http://127.0.0.1:${MOCK_HEALTH_PORT:-43121}/api/health*)
     count=0
     [ ! -f "$FIXTURE_ROOT/health-count" ] || count=$(<"$FIXTURE_ROOT/health-count")
     count=$((count+1))
@@ -171,6 +171,20 @@ exit 2
                          [str(self.root / "Applications/Meeting Copilot Capture.app")])
         self.assertEqual((self.root / "health-count").read_text(), "2")
         self.assertFalse((self.root / "launches").exists())
+
+    def test_install_finds_the_service_on_the_port_the_app_recorded(self):
+        """MEETONTRACK-130: another program held 43121, so the app runs its service elsewhere."""
+        share = Path(self.env["MEETING_COPILOT_SHARE_ROOT"])
+        share.mkdir()
+        (share / "server-port").write_text("50123\n")
+        for port in ("50123", "43121"):  # a stale record must not break the install either
+            with self.subTest(port=port):
+                for name in ("opened", "health-count", "healthy"):
+                    (self.root / name).unlink(missing_ok=True)
+                self.prepare_launch()
+                result = self.run_install(MEETING_COPILOT_SKIP_LAUNCH="0", MOCK_HEALTH_PORT=port)
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                self.assertEqual((self.root / "health-count").read_text(), "2")
 
     def test_unready_unrelated_or_old_service_is_not_success(self):
         for environment in ({"MOCK_WRONG_SERVICE": "1"}, {"MOCK_HEALTH_VERSION": "0.1.18"},

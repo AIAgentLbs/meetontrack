@@ -17,6 +17,17 @@ window_finder="$payload/bin/zoom-window-finder"
 window_target="$config_dir/zoom-window.json"
 web_port=43121
 web_url="http://127.0.0.1:$web_port"
+# The app records its port when 43121 is taken (MEETONTRACK-130); use it only if it answers.
+resolve_web_url() {
+  local port
+  port="$(<"$HOME/.local/share/meeting-copilot/server-port" 2>/dev/null || true)"
+  port="${port//[[:space:]]/}"
+  web_url="http://127.0.0.1:$web_port"
+  if [[ "$port" == <-> ]] && /usr/bin/curl --silent --fail --max-time 1 "http://127.0.0.1:$port/api/health" \
+    | /usr/bin/grep -q 'meeting-copilot'; then
+    web_url="http://127.0.0.1:$port"
+  fi
+}
 check_only=false
 no_open=false
 refresh_only=false
@@ -109,6 +120,7 @@ else
   print "Zoom screenshots: waiting for a visible Zoom/Meet window"
 fi
 
+resolve_web_url
 if [[ "$check_only" == true ]]; then
   print "Local UI: $web_url"
   print "Run: meeting-copilot"
@@ -128,6 +140,7 @@ print "Starting MeetOnTrack; it runs the private local UI itself: $web_url"
 open -a "$capture_app"
 
 for _ in {1..50}; do
+  resolve_web_url
   if /usr/bin/curl --silent --fail --max-time 1 "$web_url/api/health" \
     | /usr/bin/grep -q 'meeting-copilot'; then
     print "MeetOnTrack is ready: $web_url"

@@ -13,10 +13,16 @@ import Foundation
 /// The server also exits by itself when the app disappears without stopping
 /// it (`--exit-with-parent` watches its stdin, the write end of which only this
 /// process holds), so a crash never leaves an orphan holding the port.
+///
+/// The port is 43121 unless something else holds it (MEETONTRACK-130): a stale
+/// MeetOnTrack service is stopped and the port taken over; any other program is
+/// left alone and the service runs on a free port instead. The port in use is
+/// recorded in `server-port` next to the log for the installer and the CLI.
 @MainActor
 final class LocalServer {
-    nonisolated static let port = 43121
-    nonisolated static let url = URL(string: "http://127.0.0.1:\(port)/")!
+    nonisolated static let defaultPort = 43121
+    private(set) var port: Int
+    var url: URL { URL(string: "http://127.0.0.1:\(port)/")! }
     static let shared = LocalServer(
         command: bundledCommand(),
         expectedVersion: Runtime.appBundle?.infoDictionary?["CFBundleShortVersionString"] as? String)
@@ -49,7 +55,7 @@ final class LocalServer {
     private let expectedVersion: String?
     /// This app run's token, handed to the child in its environment.
     let instance: String
-    private let probe: @Sendable () async -> Health?
+    private let probe: @Sendable (Int) async -> Health?
     private var process: Process?
     private var stdin: Pipe?
     private var timer: Timer?
@@ -61,13 +67,20 @@ final class LocalServer {
     /// never answers after starting is as hung as one that stopped answering.
     private var lastAlive: Date?
     private var waiters: [() -> Void] = []
+    private var troubleWaiters: [() -> Void] = []
+    /// Stale MeetOnTrack services stopped on this port; after two the port is given up.
+    private var evictions = 0
     private(set) var isReady = false
+    /// Neither the usual port nor a free one gave a working service: the window says so.
+    private(set) var cannotStart = false
     private(set) var launches = 0
     var pid: pid_t? { process?.processIdentifier }
 
     init(command: Command?, expectedVersion: String? = nil, instance: String = UUID().uuidString,
-         probe: @escaping @Sendable () async -> Health? = { await LocalServer.health() }) {
+         port: Int = LocalServer.defaultPort,
+         probe: @escaping @Sendable (Int) async -> Health? = { await LocalServer.health(port: $0) }) {
         self.command = command
+        self.port = port
         self.expectedVersion = expectedVersion
         self.instance = instance
         self.probe = probe
@@ -102,6 +115,11 @@ final class LocalServer {
         if isReady { action() } else { waiters.append(action) }
     }
 
+    /// Run `action` if the service cannot be started at all (at once if that is already known).
+    func whenCannotStart(_ action: @escaping () -> Void) {
+        if cannotStart { action() } else { troubleWaiters.append(action) }
+    }
+
     /// Stop on quit: SIGINT lets the server close its socket and state files
     /// (it treats it as Ctrl-C); a server that has not gone in `grace` is killed.
     func stop(grace: TimeInterval = 4) {
@@ -131,22 +149,25 @@ final class LocalServer {
     private func check() {
         guard !probing, !stopping else { return }
         probing = true
-        let probe = self.probe
+        let probe = self.probe, port = self.port
         Task { @MainActor [weak self] in
-            let health = await probe()
+            let health = await probe(port)
             guard let self else { return }
             self.probing = false
-            self.observe(healthy: self.isOurs(health))
+            guard port == self.port else { return }
+            self.observe(health)
         }
     }
 
-    private func observe(healthy: Bool) {
+    private func observe(_ health: Health?) {
         guard !stopping else { return }
-        if healthy {
+        if isOurs(health) {
             lastAlive = Date()
             crashes = 0
             if !isReady {
                 isReady = true
+                cannotStart = false
+                recordPort()
                 let ready = waiters
                 waiters = []
                 ready.forEach { $0() }
@@ -165,15 +186,102 @@ final class LocalServer {
             }
             return
         }
-        guard command != nil, Date() >= nextLaunch else { return }
+        guard command != nil, Date() >= nextLaunch, claimPort(health) else { return }
         launch()
+    }
+
+    /// Before a launch: is the port ours to take? A MeetOnTrack service that is not
+    /// this run's child (an older version, a previous launch) is stopped, gently and
+    /// then for good; a port held by anything else, or a service that keeps coming
+    /// back, is left alone and a free port is used instead (MEETONTRACK-130).
+    private func claimPort(_ health: Health?) -> Bool {
+        if health != nil {
+            if evictions < 2, let pid = Self.listener(port), pid != getpid() {
+                evictions += 1
+                FileHandle.standardError.write(Data("stopping a stale assistant server (pid \(pid))\n".utf8))
+                kill(pid, evictions == 1 ? SIGINT : SIGKILL)
+                nextLaunch = Date().addingTimeInterval(1)
+                return false
+            }
+        } else if Self.isFree(port) {
+            return true
+        }
+        guard let free = Self.freePort() else {
+            giveUp()
+            return false
+        }
+        FileHandle.standardError.write(Data("port \(port) is held by another program; using \(free)\n".utf8))
+        port = free
+        evictions = 0
+        return true
+    }
+
+    private func giveUp() {
+        guard !cannotStart else { return }
+        cannotStart = true
+        let trouble = troubleWaiters
+        troubleWaiters = []
+        trouble.forEach { $0() }
+    }
+
+    /// For the installer and `meeting-copilot`, which cannot ask the app; they check it answers.
+    private func recordPort() {
+        guard let command else { return }
+        try? Data("\(port)\n".utf8).write(to: command.directory.appendingPathComponent("server-port"), options: .atomic)
+    }
+
+    /// Whether a listener could bind 127.0.0.1:`port` now, the way server.py binds (SO_REUSEADDR).
+    nonisolated static func isFree(_ port: Int) -> Bool {
+        bound(port) != nil
+    }
+
+    /// A port nobody listens on, picked by the system.
+    nonisolated static func freePort() -> Int? {
+        bound(0)
+    }
+
+    private nonisolated static func bound(_ port: Int) -> Int? {
+        let socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard socket >= 0 else { return nil }
+        defer { close(socket) }
+        var reuse: Int32 = 1
+        setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(UInt16(port).bigEndian)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let result = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
+                bind(socket, pointer, length) == 0 && getsockname(socket, pointer, &length) == 0
+            }
+        }
+        return result ? Int(UInt16(bigEndian: address.sin_port)) : nil
+    }
+
+    /// The process listening on `port`, if this user may see it.
+    nonisolated static func listener(_ port: Int) -> pid_t? {
+        let lsof = Process(), output = Pipe()
+        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lsof.arguments = ["-nP", "-t", "-iTCP:\(port)", "-sTCP:LISTEN"]
+        lsof.standardOutput = output
+        lsof.standardError = FileHandle.nullDevice
+        guard (try? lsof.run()) != nil else { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        lsof.waitUntilExit()
+        return String(decoding: data, as: UTF8.self).split(separator: "\n").first.flatMap { pid_t($0) }
     }
 
     private func launch() {
         guard let command else { return }
         let process = Process()
         process.executableURL = command.executable
-        process.arguments = command.arguments
+        var arguments = command.arguments
+        if let index = arguments.firstIndex(of: "--port"), index + 1 < arguments.count {
+            arguments[index + 1] = String(port)
+        }
+        process.arguments = arguments
         process.environment = command.environment.merging([Self.instanceVariable: instance]) { _, own in own }
         process.currentDirectoryURL = command.directory
         let input = Pipe()
@@ -212,6 +320,7 @@ final class LocalServer {
         crashes += 1
         nextLaunch = Date().addingTimeInterval(Self.backoff(crashes))
         FileHandle.standardError.write(Data("assistant server exited (\(status)); restarting\n".utf8))
+        if crashes >= 4 { giveUp() }  // still retried; the window says what to do meanwhile
     }
 
     /// 1, 2, 4 … 30 seconds: a server that crashes on start must not spin.
@@ -220,8 +329,9 @@ final class LocalServer {
     }
 
     /// What a MeetOnTrack server on the port reports, or nil.
-    nonisolated static func health() async -> Health? {
-        var request = URLRequest(url: url.appendingPathComponent("api/health"))
+    nonisolated static func health(port: Int) async -> Health? {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/api/health") else { return nil }
+        var request = URLRequest(url: url)
         request.timeoutInterval = 2
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
@@ -267,7 +377,7 @@ final class LocalServer {
         env.removeValue(forKey: Runtime.handOffMarker)
         return Command(
             executable: python,
-            arguments: ["-B", server.path, "--port", String(port), "--no-open", "--exit-with-parent"],
+            arguments: ["-B", server.path, "--port", String(defaultPort), "--no-open", "--exit-with-parent"],
             environment: env,
             directory: data,
             log: data.appendingPathComponent("server.log"))

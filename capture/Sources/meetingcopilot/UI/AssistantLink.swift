@@ -22,10 +22,10 @@ enum AssistantLink {
 enum AssistantLinkPolicy: Equatable {
     case load, openExternally, ignore
 
-    static func decide(_ url: URL?, newWindow: Bool) -> AssistantLinkPolicy {
+    static func decide(_ url: URL?, newWindow: Bool, port: Int) -> AssistantLinkPolicy {
         guard let url, let scheme = url.scheme?.lowercased() else { return .ignore }
         if ["about", "data", "blob"].contains(scheme) { return newWindow ? .ignore : .load }
-        let local = ["127.0.0.1", "localhost"].contains(url.host ?? "") && url.port == LocalServer.port
+        let local = ["127.0.0.1", "localhost"].contains(url.host ?? "") && url.port == port
         if local, scheme == "http" { return newWindow ? .openExternally : .load }
         return ["http", "https", "mailto"].contains(scheme) ? .openExternally : .ignore
     }
@@ -66,18 +66,36 @@ final class AssistantWindow: NSObject, WKNavigationDelegate, WKUIDelegate {
     private func load() {
         loaded = true
         guard server.isReady else {
-            webView.loadHTMLString(Self.startingPage, baseURL: nil)
-            server.whenReady { [weak self] in self?.webView.load(URLRequest(url: LocalServer.url)) }
+            webView.loadHTMLString(Self.page(Self.startingText), baseURL: nil)
+            server.whenReady { [weak self] in self?.loadAssistant() }
+            server.whenCannotStart { [weak self] in
+                guard let self, !self.server.isReady else { return }
+                self.webView.loadHTMLString(Self.page(Self.cannotStartText), baseURL: nil)
+            }
             return
         }
-        webView.load(URLRequest(url: LocalServer.url))
+        loadAssistant()
     }
 
-    private static var startingPage: String {
-        let text = localised(
+    private func loadAssistant() {
+        webView.load(URLRequest(url: server.url))
+    }
+
+    private static var startingText: String {
+        localised(
             "Starting MeetOnTrack… If this takes more than a minute, quit and reopen the app. Log: ~/.local/share/meeting-copilot/server.log",
             "Запускаем MeetOnTrack… Если это длится дольше минуты, закройте и снова откройте приложение. Журнал: ~/.local/share/meeting-copilot/server.log")
-        return "<html><body style=\"font:15px -apple-system;color:#555;padding:48px\">\(text)</body></html>"
+    }
+
+    /// Shown only when the app could not resolve a start problem by itself (MEETONTRACK-130).
+    private static var cannotStartText: String {
+        localised(
+            "MeetOnTrack could not start its assistant. Restart the Mac and open MeetOnTrack again.",
+            "MeetOnTrack не смог запустить помощника. Перезагрузите Mac и снова откройте MeetOnTrack.")
+    }
+
+    private static func page(_ text: String) -> String {
+        "<html><body style=\"font:15px -apple-system;color:#555;padding:48px\">\(text)</body></html>"
     }
 
     // MARK: navigation
@@ -87,7 +105,7 @@ final class AssistantWindow: NSObject, WKNavigationDelegate, WKUIDelegate {
         // Subframes (none today) follow their page; only top-level loads are routed.
         let newWindow = action.targetFrame == nil
         guard newWindow || action.targetFrame?.isMainFrame == true else { return decisionHandler(.allow) }
-        switch AssistantLinkPolicy.decide(action.request.url, newWindow: newWindow) {
+        switch AssistantLinkPolicy.decide(action.request.url, newWindow: newWindow, port: server.port) {
         case .load: decisionHandler(.allow)
         case .openExternally:
             if let url = action.request.url { NSWorkspace.shared.open(url) }
@@ -103,7 +121,7 @@ final class AssistantWindow: NSObject, WKNavigationDelegate, WKUIDelegate {
         let attachment = (response.response as? HTTPURLResponse)?
             .value(forHTTPHeaderField: "Content-Disposition")?.lowercased().hasPrefix("attachment") == true
         guard response.isForMainFrame, !response.canShowMIMEType || attachment else { return decisionHandler(.allow) }
-        if let url = response.response.url, AssistantLinkPolicy.decide(url, newWindow: true) == .openExternally {
+        if let url = response.response.url, AssistantLinkPolicy.decide(url, newWindow: true, port: server.port) == .openExternally {
             NSWorkspace.shared.open(url)
         }
         decisionHandler(.cancel)
@@ -121,7 +139,7 @@ final class AssistantWindow: NSObject, WKNavigationDelegate, WKUIDelegate {
     private func retryWhenReady() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self else { return }
-            self.server.whenReady { [weak self] in self?.webView.load(URLRequest(url: LocalServer.url)) }
+            self.server.whenReady { [weak self] in self?.loadAssistant() }
         }
     }
 
@@ -129,7 +147,7 @@ final class AssistantWindow: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if AssistantLinkPolicy.decide(action.request.url, newWindow: true) == .openExternally,
+        if AssistantLinkPolicy.decide(action.request.url, newWindow: true, port: server.port) == .openExternally,
            let url = action.request.url {
             NSWorkspace.shared.open(url)
         }

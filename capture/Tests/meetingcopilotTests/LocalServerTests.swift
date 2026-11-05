@@ -21,7 +21,7 @@ struct LocalServerTests {
 
     @Test("A server that dies is started again, and quit stops it for good")
     func restartsThenStops() async throws {
-        let server = LocalServer(command: try command("sleep 30"), probe: { nil })
+        let server = LocalServer(command: try command("sleep 30"), probe: { _ in nil })
         server.checkInterval = 0.05
         server.start()
         await wait { server.launches == 1 }
@@ -42,7 +42,7 @@ struct LocalServerTests {
     @Test("The app's own server is used, not started twice")
     func adoptsOwnServer() async throws {
         let server = LocalServer(command: try command("sleep 30"), instance: "own",
-                                 probe: { .init(version: "0.1.19", instance: "own") })
+                                 probe: { _ in .init(version: "0.1.19", instance: "own") })
         var ready = false
         server.whenReady { ready = true }
         server.start()
@@ -55,7 +55,7 @@ struct LocalServerTests {
     @Test("A same-version server the app did not start is not adopted (MEETONTRACK-116)")
     func refusesForeignInstance() async throws {
         let server = LocalServer(command: try command("sleep 30"), expectedVersion: "0.1.19", instance: "own",
-                                 probe: { .init(version: "0.1.19", instance: "someone-else") })
+                                 probe: { _ in .init(version: "0.1.19", instance: "someone-else") })
         server.checkInterval = 0.05
         server.start()
         await wait { server.launches == 1 }
@@ -70,7 +70,7 @@ struct LocalServerTests {
     func passesInstance() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let server = LocalServer(command: try command("echo \"$MEETONTRACK_INSTANCE\" > '\(root.path)'; sleep 30"),
-                                 instance: "token-1", probe: { nil })
+                                 instance: "token-1", probe: { _ in nil })
         server.start()
         await wait { (try? String(contentsOf: root, encoding: .utf8)) != nil }
         #expect((try? String(contentsOf: root, encoding: .utf8)) == "token-1\n")
@@ -84,7 +84,7 @@ struct LocalServerTests {
         // and leaves a child that ignores SIGINT behind.
         let script = "exec /usr/bin/perl -e 'setpgrp(0,0); $SIG{INT}=sub{exit 0}; "
             + "if (!fork) { $SIG{INT}=q(IGNORE); open my $f, q(>), q(\(root.path)); print $f $$; close $f; sleep 60; exit } sleep 60'"
-        let server = LocalServer(command: try command(script), probe: { nil })
+        let server = LocalServer(command: try command(script), probe: { _ in nil })
         server.start()
         await wait { (try? String(contentsOf: root, encoding: .utf8)).flatMap { Int32($0) } != nil }
         let grandchild = try #require((try? String(contentsOf: root, encoding: .utf8)).flatMap { Int32($0) })
@@ -97,7 +97,7 @@ struct LocalServerTests {
     @Test("An old server still holding the port is not adopted")
     func refusesOtherVersion() async throws {
         let server = LocalServer(command: try command("sleep 30"), expectedVersion: "0.1.19",
-                                 probe: { .init(version: "0.1.18", instance: "") })
+                                 probe: { _ in .init(version: "0.1.18", instance: "") })
         server.checkInterval = 0.05
         server.start()
         await wait { server.launches == 1 }
@@ -108,13 +108,79 @@ struct LocalServerTests {
 
     @Test("A server that never answers after starting is restarted")
     func startupHang() async throws {
-        let server = LocalServer(command: try command("sleep 30"), probe: { nil })
+        let server = LocalServer(command: try command("sleep 30"), probe: { _ in nil })
         server.checkInterval = 0.05
         server.hangLimit = 0.2
         server.start()
         await wait { server.launches == 2 }
         #expect(server.launches == 2)
         server.stop(grace: 1)
+    }
+
+    /// A listener on a system-picked port, standing in for whatever holds the assistant's port.
+    private func holder() throws -> (Process, Int) {
+        let port = try #require(LocalServer.freePort())
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        process.arguments = ["-MIO::Socket::INET", "-e",
+                             "my $s = IO::Socket::INET->new(LocalAddr=>q(127.0.0.1),LocalPort=>\(port),Listen=>5,ReuseAddr=>1) or die; sleep 60"]
+        try process.run()
+        for _ in 0..<100 where LocalServer.isFree(port) { usleep(20_000) }
+        #expect(!LocalServer.isFree(port))
+        return (process, port)
+    }
+
+    @Test("A stale MeetOnTrack service on the port is stopped and the port taken over (MEETONTRACK-130)")
+    func takesOverStaleService() async throws {
+        let (stale, port) = try holder()
+        defer { if stale.isRunning { kill(stale.processIdentifier, SIGKILL) } }
+        let pid = stale.processIdentifier
+        let server = LocalServer(command: try command("sleep 30"), expectedVersion: "0.1.22", instance: "own", port: port,
+                                 probe: { _ in kill(pid, 0) == 0 ? .init(version: "0.1.21", instance: "old") : nil })
+        server.checkInterval = 0.05
+        server.start()
+        await wait { server.launches == 1 }
+        #expect(!stale.isRunning)
+        #expect(server.launches == 1)
+        #expect(server.port == port)
+        server.stop(grace: 1)
+    }
+
+    @Test("A port held by another program is left alone; the service runs on a free one (MEETONTRACK-130)")
+    func fallsBackFromForeignHolder() async throws {
+        let (foreign, port) = try holder()
+        defer { kill(foreign.processIdentifier, SIGKILL) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let ports = root.appendingPathComponent("ports")
+        let command = LocalServer.Command(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "echo \"$2\" > '\(ports.path)'; sleep 30", "sh", "--port", String(port)],
+            environment: [:], directory: root, log: root.appendingPathComponent("server.log"))
+        let server = LocalServer(command: command, instance: "own", port: port, probe: { _ in nil })
+        server.checkInterval = 0.05
+        server.start()
+        await wait { server.launches == 1 }
+        #expect(foreign.isRunning)
+        #expect(server.port != port)
+        await wait { (try? String(contentsOf: ports, encoding: .utf8)) != nil }
+        #expect((try? String(contentsOf: ports, encoding: .utf8)) == "\(server.port)\n")
+        #expect(server.url.port == server.port)
+        server.stop(grace: 1)
+    }
+
+    @Test("The port in use is recorded once the app's own service answers")
+    func recordsPort() async throws {
+        let command = try command("sleep 30")
+        let server = LocalServer(command: command, instance: "own", port: 50123,
+                                 probe: { _ in .init(version: "", instance: "own") })
+        var ready = false
+        server.whenReady { ready = true }
+        server.start()
+        await wait { ready }
+        let recorded = try? String(contentsOf: command.directory.appendingPathComponent("server-port"), encoding: .utf8)
+        #expect(recorded == "50123\n")
+        server.stop()
     }
 
     @Test("Crash restarts back off up to thirty seconds")
@@ -148,13 +214,13 @@ struct LocalServerTests {
     @Test("Local pages stay in the window; everything else goes to the browser")
     func linkPolicy() {
         let local = URL(string: "http://127.0.0.1:43121/")!
-        #expect(AssistantLinkPolicy.decide(local, newWindow: false) == .load)
-        #expect(AssistantLinkPolicy.decide(URL(string: "http://localhost:43121/api/archive/report/x/report.pdf"), newWindow: true) == .openExternally)
-        #expect(AssistantLinkPolicy.decide(URL(string: "https://accounts.google.com/o/oauth2"), newWindow: false) == .openExternally)
-        #expect(AssistantLinkPolicy.decide(URL(string: "https://drive.google.com/file/d/1"), newWindow: true) == .openExternally)
-        #expect(AssistantLinkPolicy.decide(URL(string: "http://127.0.0.1:9999/"), newWindow: false) == .openExternally)
-        #expect(AssistantLinkPolicy.decide(URL(string: "file:///etc/passwd"), newWindow: false) == .ignore)
-        #expect(AssistantLinkPolicy.decide(URL(string: "about:blank"), newWindow: false) == .load)
-        #expect(AssistantLinkPolicy.decide(nil, newWindow: false) == .ignore)
+        #expect(AssistantLinkPolicy.decide(local, newWindow: false, port: 43121) == .load)
+        #expect(AssistantLinkPolicy.decide(URL(string: "http://localhost:43121/api/archive/report/x/report.pdf"), newWindow: true, port: 43121) == .openExternally)
+        #expect(AssistantLinkPolicy.decide(URL(string: "https://accounts.google.com/o/oauth2"), newWindow: false, port: 43121) == .openExternally)
+        #expect(AssistantLinkPolicy.decide(URL(string: "https://drive.google.com/file/d/1"), newWindow: true, port: 43121) == .openExternally)
+        #expect(AssistantLinkPolicy.decide(URL(string: "http://127.0.0.1:9999/"), newWindow: false, port: 43121) == .openExternally)
+        #expect(AssistantLinkPolicy.decide(URL(string: "file:///etc/passwd"), newWindow: false, port: 43121) == .ignore)
+        #expect(AssistantLinkPolicy.decide(URL(string: "about:blank"), newWindow: false, port: 43121) == .load)
+        #expect(AssistantLinkPolicy.decide(nil, newWindow: false, port: 43121) == .ignore)
     }
 }

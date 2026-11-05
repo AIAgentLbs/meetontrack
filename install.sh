@@ -206,14 +206,20 @@ if [[ "${MEETING_COPILOT_SKIP_LAUNCH:-0}" != "1" ]]; then
   # service an app started carries a launch token (MEETONTRACK-116): one started
   # by hand on the port does not count.
   ready=false
+  # The app records the port it runs on when 43121 is taken (MEETONTRACK-130); a
+  # stale record is harmless, only a service that answers as this version counts.
   for attempt in {1..120}; do
-    if curl --fail --silent --connect-timeout 1 --max-time 1 \
-      "http://127.0.0.1:43121/api/health" \
-      | "$python" -I -B -c 'import json,sys; value=json.load(sys.stdin); sys.exit(0 if value.get("ok") is True and value.get("service")=="meeting-copilot" and value.get("version")==sys.argv[1] and value.get("instance") else 1)' "$release_version" \
-        >/dev/null 2>&1; then
-      ready=true
-      break
-    fi
+    recorded="$(cat "$SHARE/server-port" 2>/dev/null || true)"
+    [[ "$recorded" =~ ^[0-9]+$ ]] || recorded=""
+    for port in $recorded 43121; do
+      if curl --fail --silent --connect-timeout 1 --max-time 1 \
+        "http://127.0.0.1:$port/api/health" \
+        | "$python" -I -B -c 'import json,sys; value=json.load(sys.stdin); sys.exit(0 if value.get("ok") is True and value.get("service")=="meeting-copilot" and value.get("version")==sys.argv[1] and value.get("instance") else 1)' "$release_version" \
+          >/dev/null 2>&1; then
+        ready=true
+        break 2
+      fi
+    done
     sleep 0.25
   done
   [[ "$ready" == true ]] || fail "The new version's assistant did not become ready. Log: $SHARE/server.log"

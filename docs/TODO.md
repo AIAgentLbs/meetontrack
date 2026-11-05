@@ -79,6 +79,12 @@ hashes, Pages removed, and the Windows installer relocated to
   new app is proven; a rolled-back install keeps the rewritten file. Move the migration after the commit
   point or add config.json to the rollback set.
   Fixed on main 2026-11-05; closes on release.
+- [ ] MEETONTRACK-130: a server on port 43121 that is not the app's own child left the Mac window waiting.
+  The app now resolves it itself (`LocalServer.swift`): a stale MeetOnTrack service is stopped and the port
+  taken over; any other program is left alone and the service runs on a free port, recorded in
+  `~/.local/share/meeting-copilot/server-port` for `install.sh` and `meeting-copilot`, which check that it
+  answers. Only if both fail does the window ask to restart the Mac. The Windows runner and the operator deploy
+  scripts still assume 43121. Fixed on main 2026-11-05; closes on release.
 - [x] MEETONTRACK-109 (shipped in v0.1.21, Mac, closed 2026-11-04): One MeetOnTrack app with its own window: Python and the web
   payload inside the bundle, the app runs the local service itself (no launchd
   agent) and shows the UI in a WKWebView window instead of a browser tab. Signed,
