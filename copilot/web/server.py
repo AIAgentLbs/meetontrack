@@ -3515,6 +3515,10 @@ def main() -> None:
     # Bind first: a port someone else holds must fail before any worker can
     # touch the archive or start a delivery next to that other service.
     server = ThreadingHTTPServer((HOST, args.port), Handler)
+    # Lead the group before any worker runs: a helper started earlier would escape stop_process_group (MEETONTRACK-126).
+    leads_group = False
+    if args.exit_with_parent:
+        leads_group = own_process_group()
     ARCHIVE.remove_print_leftovers()  # Ours now: before any report prints.
     poller = threading.Thread(target=TRANSCRIPT.loop, name="meeting-copilot-poller", daemon=True)
     poller.start()
@@ -3537,9 +3541,7 @@ def main() -> None:
     threading.Thread(target=FACT_CHECKS.loop, args=(TRANSCRIPT.stop,), name="fact-checks", daemon=True).start()
     threading.Thread(target=REBUILDS.loop, args=(TRANSCRIPT.stop, lambda: TRANSCRIPT.status in ARCHIVE_BUSY),
                      name="analysis-rebuilds", daemon=True).start()
-    leads_group = False
     if args.exit_with_parent:
-        leads_group = own_process_group()
         watch_parent(sys.stdin.buffer)
     url = f"http://{HOST}:{args.port}"
     print(f"MeetOnTrack: {url}", flush=True)

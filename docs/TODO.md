@@ -73,6 +73,7 @@ hashes, Pages removed, and the Windows installer relocated to
 - [ ] MEETONTRACK-126: worker threads start before `own_process_group()` in `server.py` `main()`, so a helper
   (printing browser, AI CLI) spawned in that first moment escapes shutdown cleanup. Create the group right after
   bind, before any worker (with `--exit-with-parent`); extend `test_parent_watch.py`. Found by the 0.1.21 release review.
+  Fixed on main 2026-11-05; closes on release.
 - [ ] MEETONTRACK-125: `install.sh` rewrites `config.json` to drop the retired analytics key before the
   new app is proven; a rolled-back install keeps the rewritten file. Move the migration after the commit
   point or add config.json to the rollback set.
