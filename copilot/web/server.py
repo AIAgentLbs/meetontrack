@@ -3555,6 +3555,7 @@ def main() -> None:
     finally:
         TRANSCRIPT.stop.set()
         server.server_close()
+        SIGN_INS.stop_all()  # own sessions, outside the group (MEETONTRACK-124)
         if leads_group:
             stop_process_group()
 

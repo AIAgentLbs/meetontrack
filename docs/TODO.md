@@ -70,6 +70,7 @@ hashes, Pages removed, and the Windows installer relocated to
   bind failure, it does not name the conflict.
 - [ ] MEETONTRACK-124: AI sign-in CLIs run in their own session (`ai_providers.py` `_spawn`), so an open
   sign-in outlives the app-run service on quit. Track them and stop each group on server shutdown.
+  Fixed on main 2026-11-05; closes on release.
 - [ ] MEETONTRACK-126: worker threads start before `own_process_group()` in `server.py` `main()`, so a helper
   (printing browser, AI CLI) spawned in that first moment escapes shutdown cleanup. Create the group right after
   bind, before any worker (with `--exit-with-parent`); extend `test_parent_watch.py`. Found by the 0.1.21 release review.

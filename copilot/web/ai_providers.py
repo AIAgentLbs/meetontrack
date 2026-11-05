@@ -1042,7 +1042,7 @@ class SignIns:
 
     def __init__(self, service, log_dir, done=None):
         self.service, self.log_dir, self.done = service, Path(log_dir), done
-        self.lock, self.running, self.failed = threading.Lock(), set(), {}
+        self.lock, self.running, self.failed, self.processes = threading.Lock(), set(), {}, {}
 
     def state(self):
         with self.lock:
@@ -1068,6 +1068,8 @@ class SignIns:
                 self.running.discard(provider)
                 self.failed[provider] = str(error)
             raise ValueError(f"Could not start the {adapter.label} sign-in: {error}") from None
+        with self.lock:
+            self.processes[provider] = process
         threading.Thread(target=self._wait, args=(adapter, process), daemon=True).start()
         return True
 
@@ -1082,6 +1084,23 @@ class SignIns:
         with open(self.log_dir / f"sign-in-{adapter.name}.log", "wb") as log:  # the CLI's own output, no tokens
             return subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                                     cwd=_workdir(), env=self.service.env, **detached)
+
+    @staticmethod
+    def _stop(process, sig):
+        try:
+            if WINDOWS:
+                process.kill()  # ponytail: the CLI only, not a browser helper it may have started
+            else:
+                os.killpg(process.pid, sig)  # its own session, see _spawn
+        except OSError:
+            pass
+
+    def stop_all(self):
+        """Server shutdown: an open sign-in runs in its own session, so it is stopped here (MEETONTRACK-124)."""
+        with self.lock:
+            processes = list(self.processes.values())
+        for process in processes:
+            self._stop(process, signal.SIGTERM)
 
     def _wait(self, adapter, process):
         """Everything ends within WINDOW: a browser tab closed without signing in leaves the CLI
@@ -1109,15 +1128,10 @@ class SignIns:
             if signed_in or not window:
                 break
         if code is None and not signed_in:
-            try:
-                if WINDOWS:
-                    process.kill()  # ponytail: the CLI only, not a browser helper it may have started
-                else:
-                    os.killpg(process.pid, signal.SIGKILL)  # its own session, see _spawn
-            except OSError:
-                pass
+            self._stop(process, getattr(signal, "SIGKILL", None))
         with self.lock:
             self.running.discard(adapter.name)
+            self.processes.pop(adapter.name, None)
             if not signed_in:
                 self.failed[adapter.name] = ("timed out" if code is None else f"exit {code}" if code
                                              else "sign-in did not finish")

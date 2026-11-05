@@ -1044,6 +1044,31 @@ class SignInTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     ai_providers.SignIns(AIService(Path(tmp) / "d.json", {}, adapters=[adapter]), tmp).start("fake")
 
+    def test_an_open_sign_in_stops_with_the_server(self):
+        """MEETONTRACK-124: the sign-in runs in its own session, so shutdown stops it explicitly."""
+        adapter = FakeAdapter()
+        adapter.sign_in_command = lambda: ["/x/fake", "login"]
+        process = self.Process()
+        process.kill = lambda: setattr(process, "killed", True)
+        with tempfile.TemporaryDirectory() as tmp:
+            sign_ins = ai_providers.SignIns(AIService(Path(tmp) / "c.json", {}, adapters=[adapter]), tmp)
+            with patch.object(ai_providers.subprocess, "Popen", return_value=process), \
+                    patch.object(ai_providers.os, "killpg") as killpg:
+                self.assertTrue(sign_ins.start("fake"))
+                sign_ins.stop_all()
+                if ai_providers.WINDOWS:
+                    self.assertTrue(process.killed)
+                else:
+                    killpg.assert_called_once_with(4242, ai_providers.signal.SIGTERM)
+                process.released.set()
+                for _ in range(100):
+                    if not sign_ins.state()["running"]:
+                        break
+                    time.sleep(0.05)
+                killpg.reset_mock()
+                sign_ins.stop_all()  # a finished sign-in is forgotten
+                killpg.assert_not_called()
+
     def test_a_sign_in_window_left_open_succeeds_once_signed_in(self):
         adapter = FakeAdapter("unavailable")
         adapter.sign_in_command, adapter.sign_in_window = lambda: ["/x/fake"], True
