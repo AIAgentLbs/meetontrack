@@ -55,10 +55,12 @@ final class AssistantWindow: NSObject, WKNavigationDelegate, WKUIDelegate {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = false
-        // A restarted service may run on another port: move a loaded assistant along (MEETONTRACK-130).
+        // Whenever the service is ready, a shown window leaves the starting or failure page,
+        // and follows a restarted service to another port (MEETONTRACK-130).
         server.onEveryReady { [weak self] in
-            guard let self, let current = self.webView.url, current.scheme == "http",
-                  current.port != self.server.port else { return }
+            guard let self, self.loaded else { return }
+            let current = self.webView.url
+            guard current?.scheme != "http" || current?.port != self.server.port else { return }
             self.loadAssistant()
         }
     }
@@ -73,7 +75,6 @@ final class AssistantWindow: NSObject, WKNavigationDelegate, WKUIDelegate {
         loaded = true
         guard server.isReady else {
             webView.loadHTMLString(Self.page(Self.startingText), baseURL: nil)
-            server.whenReady { [weak self] in self?.loadAssistant() }
             server.whenCannotStart { [weak self] in
                 guard let self, !self.server.isReady else { return }
                 self.webView.loadHTMLString(Self.page(Self.cannotStartText), baseURL: nil)

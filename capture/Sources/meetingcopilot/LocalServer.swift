@@ -121,7 +121,7 @@ final class LocalServer {
         readyObservers.append(action)
     }
 
-    /// Run `action` if the service cannot be started at all (at once if that is already known).
+    /// Run `action` whenever the service turns out not to start at all (at once if that is already known).
     func whenCannotStart(_ action: @escaping () -> Void) {
         if cannotStart { action() } else { troubleWaiters.append(action) }
     }
@@ -204,7 +204,9 @@ final class LocalServer {
     /// anything else (or by another user's service, which lsof cannot see) is left alone
     /// and a free port is used instead.
     private func claimPort(_ health: Health?) -> Bool {
-        if health != nil, let pid = Self.listener(port), pid != getpid() {
+        if health == nil, Self.isFree(port) { return true }
+        // A hung service answers no health check: its command line still tells.
+        if let pid = Self.listener(port), pid != getpid(), health != nil || Self.isAssistantServer(pid) {
             guard evictions < 2 else {
                 giveUp()
                 return false
@@ -214,9 +216,6 @@ final class LocalServer {
             kill(pid, evictions == 1 ? SIGINT : SIGKILL)
             nextLaunch = Date().addingTimeInterval(1)
             return false
-        }
-        if health == nil, Self.isFree(port) {
-            return true
         }
         guard let free = Self.freePort() else {
             giveUp()
@@ -231,9 +230,7 @@ final class LocalServer {
     private func giveUp() {
         guard !cannotStart else { return }
         cannotStart = true
-        let trouble = troubleWaiters
-        troubleWaiters = []
-        trouble.forEach { $0() }
+        troubleWaiters.forEach { $0() }
     }
 
     /// For the installer and `meeting-copilot`, which cannot ask the app; they check it answers.
@@ -272,17 +269,30 @@ final class LocalServer {
         return result ? Int(UInt16(bigEndian: address.sin_port)) : nil
     }
 
+    /// Whether `pid` runs a MeetOnTrack server.py: the bundled one or the retired launchd agent's copy.
+    nonisolated static func isAssistantServer(_ pid: pid_t) -> Bool {
+        let command = run("/bin/ps", ["-o", "command=", "-p", String(pid)])
+        return command.contains("/web/server.py")
+            && (command.contains("Meeting Copilot Capture.app") || command.contains("meeting-copilot"))
+    }
+
+    private nonisolated static func run(_ tool: String, _ arguments: [String]) -> String {
+        let process = Process(), output = Pipe()
+        process.executableURL = URL(fileURLWithPath: tool)
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return "" }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
+    }
+
     /// The process listening on `port`, if this user may see it.
     nonisolated static func listener(_ port: Int) -> pid_t? {
-        let lsof = Process(), output = Pipe()
-        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        lsof.arguments = ["-nP", "-t", "-iTCP@127.0.0.1:\(port)", "-sTCP:LISTEN"]  // the address probed, not ::1
-        lsof.standardOutput = output
-        lsof.standardError = FileHandle.nullDevice
-        guard (try? lsof.run()) != nil else { return nil }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        lsof.waitUntilExit()
-        return String(decoding: data, as: UTF8.self).split(separator: "\n").first.flatMap { pid_t($0) }
+        // The address probed, not ::1.
+        run("/usr/sbin/lsof", ["-nP", "-t", "-iTCP@127.0.0.1:\(port)", "-sTCP:LISTEN"])
+            .split(separator: "\n").first.flatMap { pid_t($0) }
     }
 
     private func launch() {

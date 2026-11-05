@@ -150,6 +150,30 @@ struct LocalServerTests {
         server.stop(grace: 1)
     }
 
+    @Test("A hung MeetOnTrack service that answers no health check is still recognised and stopped")
+    func stopsHungOwnService() async throws {
+        let port = try #require(LocalServer.freePort())
+        let script = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)/meeting-copilot/web/server.py")
+        try FileManager.default.createDirectory(at: script.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "use IO::Socket::INET; my $s = IO::Socket::INET->new(LocalAddr=>q(127.0.0.1),LocalPort=>\(port),Listen=>5,ReuseAddr=>1) or die; sleep 60;\n"
+            .write(to: script, atomically: true, encoding: .utf8)
+        let hung = Process()
+        hung.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        hung.arguments = [script.path]
+        try hung.run()
+        defer { if hung.isRunning { kill(hung.processIdentifier, SIGKILL) } }
+        for _ in 0..<100 where LocalServer.isFree(port) { usleep(20_000) }
+        #expect(LocalServer.isAssistantServer(hung.processIdentifier))
+        let server = LocalServer(command: try command("sleep 30"), instance: "own", port: port, probe: { _ in nil })
+        server.checkInterval = 0.05
+        server.start()
+        await wait { server.launches == 1 }
+        #expect(!hung.isRunning)
+        #expect(server.port == port)
+        server.stop(grace: 1)
+    }
+
     @Test("A MeetOnTrack service that keeps coming back is reported, never run beside (MEETONTRACK-130)")
     func reportsUnstoppableService() async throws {
         let (supervisor, port) = try holder(respawning: true)
