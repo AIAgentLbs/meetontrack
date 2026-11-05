@@ -15,13 +15,16 @@ struct LocalServerTests {
             environment: [:], directory: root, log: root.appendingPathComponent("server.log"))
     }
 
+    /// Never the real 43121: a server under test must not touch an installed assistant.
+    private var spare: Int { LocalServer.freePort() ?? 0 }
+
     private func wait(_ condition: () -> Bool) async {
         for _ in 0..<100 where !condition() { try? await Task.sleep(for: .milliseconds(50)) }
     }
 
     @Test("A server that dies is started again, and quit stops it for good")
     func restartsThenStops() async throws {
-        let server = LocalServer(command: try command("sleep 30"), probe: { _ in nil })
+        let server = LocalServer(command: try command("sleep 30"), port: spare, probe: { _ in nil })
         server.checkInterval = 0.05
         server.start()
         await wait { server.launches == 1 }
@@ -42,7 +45,7 @@ struct LocalServerTests {
     @Test("The app's own server is used, not started twice")
     func adoptsOwnServer() async throws {
         let server = LocalServer(command: try command("sleep 30"), instance: "own",
-                                 probe: { _ in .init(version: "0.1.19", instance: "own") })
+                                 port: spare, probe: { _ in .init(version: "0.1.19", instance: "own") })
         var ready = false
         server.whenReady { ready = true }
         server.start()
@@ -55,7 +58,7 @@ struct LocalServerTests {
     @Test("A same-version server the app did not start is not adopted (MEETONTRACK-116)")
     func refusesForeignInstance() async throws {
         let server = LocalServer(command: try command("sleep 30"), expectedVersion: "0.1.19", instance: "own",
-                                 probe: { _ in .init(version: "0.1.19", instance: "someone-else") })
+                                 port: spare, probe: { _ in .init(version: "0.1.19", instance: "someone-else") })
         server.checkInterval = 0.05
         server.start()
         await wait { server.launches == 1 }
@@ -70,7 +73,7 @@ struct LocalServerTests {
     func passesInstance() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let server = LocalServer(command: try command("echo \"$MEETONTRACK_INSTANCE\" > '\(root.path)'; sleep 30"),
-                                 instance: "token-1", probe: { _ in nil })
+                                 instance: "token-1", port: spare, probe: { _ in nil })
         server.start()
         await wait { (try? String(contentsOf: root, encoding: .utf8)) != nil }
         #expect((try? String(contentsOf: root, encoding: .utf8)) == "token-1\n")
@@ -84,7 +87,7 @@ struct LocalServerTests {
         // and leaves a child that ignores SIGINT behind.
         let script = "exec /usr/bin/perl -e 'setpgrp(0,0); $SIG{INT}=sub{exit 0}; "
             + "if (!fork) { $SIG{INT}=q(IGNORE); open my $f, q(>), q(\(root.path)); print $f $$; close $f; sleep 60; exit } sleep 60'"
-        let server = LocalServer(command: try command(script), probe: { _ in nil })
+        let server = LocalServer(command: try command(script), port: spare, probe: { _ in nil })
         server.start()
         await wait { (try? String(contentsOf: root, encoding: .utf8)).flatMap { Int32($0) } != nil }
         let grandchild = try #require((try? String(contentsOf: root, encoding: .utf8)).flatMap { Int32($0) })
@@ -97,7 +100,7 @@ struct LocalServerTests {
     @Test("An old server still holding the port is not adopted")
     func refusesOtherVersion() async throws {
         let server = LocalServer(command: try command("sleep 30"), expectedVersion: "0.1.19",
-                                 probe: { _ in .init(version: "0.1.18", instance: "") })
+                                 port: spare, probe: { _ in .init(version: "0.1.18", instance: "") })
         server.checkInterval = 0.05
         server.start()
         await wait { server.launches == 1 }
@@ -108,7 +111,7 @@ struct LocalServerTests {
 
     @Test("A server that never answers after starting is restarted")
     func startupHang() async throws {
-        let server = LocalServer(command: try command("sleep 30"), probe: { _ in nil })
+        let server = LocalServer(command: try command("sleep 30"), port: spare, probe: { _ in nil })
         server.checkInterval = 0.05
         server.hangLimit = 0.2
         server.start()
@@ -118,12 +121,13 @@ struct LocalServerTests {
     }
 
     /// A listener on a system-picked port, standing in for whatever holds the assistant's port.
-    private func holder() throws -> (Process, Int) {
+    private func holder(respawning: Bool = false) throws -> (Process, Int) {
         let port = try #require(LocalServer.freePort())
+        let listen = "/usr/bin/perl -MIO::Socket::INET -e 'my $s = IO::Socket::INET->new(LocalAddr=>q(127.0.0.1),"
+            + "LocalPort=>\(port),Listen=>5,ReuseAddr=>1) or die; sleep 60'"
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        process.arguments = ["-MIO::Socket::INET", "-e",
-                             "my $s = IO::Socket::INET->new(LocalAddr=>q(127.0.0.1),LocalPort=>\(port),Listen=>5,ReuseAddr=>1) or die; sleep 60"]
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", respawning ? "while :; do \(listen); sleep 0.1; done" : "exec \(listen)"]
         try process.run()
         for _ in 0..<100 where LocalServer.isFree(port) { usleep(20_000) }
         #expect(!LocalServer.isFree(port))
@@ -142,6 +146,23 @@ struct LocalServerTests {
         await wait { server.launches == 1 }
         #expect(!stale.isRunning)
         #expect(server.launches == 1)
+        #expect(server.port == port)
+        server.stop(grace: 1)
+    }
+
+    @Test("A MeetOnTrack service that keeps coming back is reported, never run beside (MEETONTRACK-130)")
+    func reportsUnstoppableService() async throws {
+        let (supervisor, port) = try holder(respawning: true)
+        defer { kill(supervisor.processIdentifier, SIGKILL) }
+        let server = LocalServer(command: try command("sleep 30"), instance: "own", port: port,
+                                 probe: { _ in .init(version: "0.1.18", instance: "") })
+        server.checkInterval = 0.05
+        var reported = false
+        server.whenCannotStart { reported = true }
+        server.start()
+        for _ in 0..<100 where !reported { try? await Task.sleep(for: .milliseconds(50)) }
+        #expect(reported)
+        #expect(server.launches == 0)
         #expect(server.port == port)
         server.stop(grace: 1)
     }

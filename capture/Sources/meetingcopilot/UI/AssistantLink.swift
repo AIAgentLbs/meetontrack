@@ -55,6 +55,12 @@ final class AssistantWindow: NSObject, WKNavigationDelegate, WKUIDelegate {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = false
+        // A restarted service may run on another port: move a loaded assistant along (MEETONTRACK-130).
+        server.onEveryReady { [weak self] in
+            guard let self, let current = self.webView.url, current.scheme == "http",
+                  current.port != self.server.port else { return }
+            self.loadAssistant()
+        }
     }
 
     func show() {

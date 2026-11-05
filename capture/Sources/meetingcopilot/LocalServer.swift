@@ -67,6 +67,7 @@ final class LocalServer {
     /// never answers after starting is as hung as one that stopped answering.
     private var lastAlive: Date?
     private var waiters: [() -> Void] = []
+    private var readyObservers: [() -> Void] = []
     private var troubleWaiters: [() -> Void] = []
     /// Stale MeetOnTrack services stopped on this port; after two the port is given up.
     private var evictions = 0
@@ -113,6 +114,11 @@ final class LocalServer {
     /// Run `action` once the server answers; at once if it already does.
     func whenReady(_ action: @escaping () -> Void) {
         if isReady { action() } else { waiters.append(action) }
+    }
+
+    /// Run `action` every time the service becomes ready again (it may be on another port then).
+    func onEveryReady(_ action: @escaping () -> Void) {
+        readyObservers.append(action)
     }
 
     /// Run `action` if the service cannot be started at all (at once if that is already known).
@@ -171,6 +177,7 @@ final class LocalServer {
                 let ready = waiters
                 waiters = []
                 ready.forEach { $0() }
+                readyObservers.forEach { $0() }
             }
             return
         }
@@ -190,20 +197,25 @@ final class LocalServer {
         launch()
     }
 
-    /// Before a launch: is the port ours to take? A MeetOnTrack service that is not
-    /// this run's child (an older version, a previous launch) is stopped, gently and
-    /// then for good; a port held by anything else, or a service that keeps coming
-    /// back, is left alone and a free port is used instead (MEETONTRACK-130).
+    /// Before a launch: is the port ours to take? (MEETONTRACK-130.) A MeetOnTrack service
+    /// of this user that is not this run's child (an older version, a previous launch) is
+    /// stopped, gently and then for good; it shares this user's archive, so a second server
+    /// never runs beside it: one that will not go is reported instead. A port held by
+    /// anything else (or by another user's service, which lsof cannot see) is left alone
+    /// and a free port is used instead.
     private func claimPort(_ health: Health?) -> Bool {
-        if health != nil {
-            if evictions < 2, let pid = Self.listener(port), pid != getpid() {
-                evictions += 1
-                FileHandle.standardError.write(Data("stopping a stale assistant server (pid \(pid))\n".utf8))
-                kill(pid, evictions == 1 ? SIGINT : SIGKILL)
-                nextLaunch = Date().addingTimeInterval(1)
+        if health != nil, let pid = Self.listener(port), pid != getpid() {
+            guard evictions < 2 else {
+                giveUp()
                 return false
             }
-        } else if Self.isFree(port) {
+            evictions += 1
+            FileHandle.standardError.write(Data("stopping a stale assistant server (pid \(pid))\n".utf8))
+            kill(pid, evictions == 1 ? SIGINT : SIGKILL)
+            nextLaunch = Date().addingTimeInterval(1)
+            return false
+        }
+        if health == nil, Self.isFree(port) {
             return true
         }
         guard let free = Self.freePort() else {
@@ -264,7 +276,7 @@ final class LocalServer {
     nonisolated static func listener(_ port: Int) -> pid_t? {
         let lsof = Process(), output = Pipe()
         lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        lsof.arguments = ["-nP", "-t", "-iTCP:\(port)", "-sTCP:LISTEN"]
+        lsof.arguments = ["-nP", "-t", "-iTCP@127.0.0.1:\(port)", "-sTCP:LISTEN"]  // the address probed, not ::1
         lsof.standardOutput = output
         lsof.standardError = FileHandle.nullDevice
         guard (try? lsof.run()) != nil else { return nil }
