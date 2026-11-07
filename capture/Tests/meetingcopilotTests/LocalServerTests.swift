@@ -177,7 +177,16 @@ struct LocalServerTests {
     @Test("A MeetOnTrack service that keeps coming back is reported, never run beside (MEETONTRACK-130)")
     func reportsUnstoppableService() async throws {
         let (supervisor, port) = try holder(respawning: true)
-        defer { kill(supervisor.processIdentifier, SIGKILL) }
+        defer {
+            kill(supervisor.processIdentifier, SIGSTOP)  // no new listener, then the current one, then the loop
+            let children = Process()
+            children.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            children.arguments = ["-KILL", "-P", String(supervisor.processIdentifier)]
+            try? children.run()
+            children.waitUntilExit()
+            kill(supervisor.processIdentifier, SIGKILL)
+            supervisor.waitUntilExit()
+        }
         let server = LocalServer(command: try command("sleep 30"), instance: "own", port: port,
                                  probe: { _ in .init(version: "0.1.18", instance: "") })
         server.checkInterval = 0.05
