@@ -269,11 +269,30 @@ final class LocalServer {
         return result ? Int(UInt16(bigEndian: address.sin_port)) : nil
     }
 
-    /// Whether `pid` runs a MeetOnTrack server.py: the bundled one or the retired launchd agent's copy.
+    /// Whether `pid` runs a MeetOnTrack server.py: the bundled one, the retired launchd agent's
+    /// copy, or one started by hand from a checkout under any name (`python3 web/server.py`).
     nonisolated static func isAssistantServer(_ pid: pid_t) -> Bool {
         let command = run("/bin/ps", ["-o", "command=", "-p", String(pid)])
-        return command.contains("/web/server.py")
-            && (command.contains("Meeting Copilot Capture.app") || command.contains("meeting-copilot"))
+        if command.contains("/web/server.py")
+            && (command.contains("Meeting Copilot Capture.app") || command.contains("meeting-copilot")) {
+            return true
+        }
+        // ponytail: space-split arguments; a script path with spaces is caught by the check above only.
+        // The script the interpreter runs: its first argument that is not an option (`python3 -B web/server.py`).
+        guard let script = command.split(whereSeparator: \.isWhitespace).dropFirst().first(where: { !$0.hasPrefix("-") }),
+              script.hasSuffix("server.py"), let cwd = workingDirectory(pid) else { return false }
+        let path = URL(fileURLWithPath: String(script), relativeTo: URL(fileURLWithPath: cwd, isDirectory: true))
+            .standardizedFileURL
+        // The service's own neighbour, so an unrelated server.py is not mistaken for it.
+        return path.path.hasSuffix("/web/server.py")
+            && FileManager.default.fileExists(atPath: path.deletingLastPathComponent()
+                .appendingPathComponent("ai_providers.py").path)
+    }
+
+    /// The working directory of `pid`, if this user may see it.
+    private nonisolated static func workingDirectory(_ pid: pid_t) -> String? {
+        run("/usr/sbin/lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"])
+            .split(separator: "\n").first(where: { $0.hasPrefix("n") }).map { String($0.dropFirst()) }
     }
 
     private nonisolated static func run(_ tool: String, _ arguments: [String]) -> String {

@@ -86,11 +86,10 @@ hashes, Pages removed, and the Windows installer relocated to
   answers. A service of this user that will not stop is never run beside (it shares the archive); then, or
   if the service cannot start at all, the window asks to restart the Mac. The Windows runner and the operator deploy
   scripts still assume 43121. Fixed on main 2026-11-05; closes on release.
-- [ ] MEETONTRACK-130 follow-up (Codex P2, 2026-11-07): `LocalServer.isAssistantServer` recognises a hung
-  server only by an absolute `.../web/server.py` path containing `meeting-copilot` or the bundle name. A hung
-  server started by hand as `python3 copilot/web/server.py` from a checkout is not recognised, so the app would
-  run a second server on a free port beside it. Resolve the listener's working directory (`lsof -p PID -d cwd`)
-  or add a per-user data lock in `server.py` before workers start.
+- [ ] MEETONTRACK-130 follow-up (Codex P2, 2026-11-07): a hung server started by hand from a checkout
+  (`python3 web/server.py`, any folder name) was not recognised, so the app could run a second server beside it.
+  `LocalServer.isAssistantServer` now resolves the script against the listener's working directory and accepts
+  a `web/server.py` with `ai_providers.py` beside it. Fixed on main 2026-11-08; closes on release with 130.
 - [x] MEETONTRACK-109 (shipped in v0.1.21, Mac, closed 2026-11-04): One MeetOnTrack app with its own window: Python and the web
   payload inside the bundle, the app runs the local service itself (no launchd
   agent) and shows the UI in a WKWebView window instead of a browser tab. Signed,

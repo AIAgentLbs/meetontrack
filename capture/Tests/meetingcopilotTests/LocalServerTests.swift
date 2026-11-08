@@ -174,6 +174,46 @@ struct LocalServerTests {
         server.stop(grace: 1)
     }
 
+    @Test("A hung service started by hand from a checkout under any name is recognised by its working directory")
+    func recognisesCheckoutServer() throws {
+        let port = try #require(LocalServer.freePort())
+        let checkout = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString)/my-fork")
+        let web = checkout.appendingPathComponent("web")
+        try FileManager.default.createDirectory(at: web, withIntermediateDirectories: true)
+        try "use IO::Socket::INET; my $s = IO::Socket::INET->new(LocalAddr=>q(127.0.0.1),LocalPort=>\(port),Listen=>5,ReuseAddr=>1) or die; sleep 60;\n"
+            .write(to: web.appendingPathComponent("server.py"), atomically: true, encoding: .utf8)
+        func start() throws -> Process {
+            let hung = Process()
+            hung.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+            hung.arguments = ["web/server.py"]
+            hung.currentDirectoryURL = checkout
+            try hung.run()
+            return hung
+        }
+        // Without the service's neighbour it is some other server.py.
+        let other = try start()
+        for _ in 0..<100 where LocalServer.isFree(port) { usleep(20_000) }
+        #expect(!LocalServer.isAssistantServer(other.processIdentifier))
+        kill(other.processIdentifier, SIGKILL)
+        other.waitUntilExit()
+        try "".write(to: web.appendingPathComponent("ai_providers.py"), atomically: true, encoding: .utf8)
+        // Named only as data, not run, it is still some other program.
+        let script = try String(contentsOf: web.appendingPathComponent("server.py"), encoding: .utf8)
+        let inline = Process()
+        inline.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        inline.arguments = ["-e", script, "web/server.py"]
+        inline.currentDirectoryURL = checkout
+        try inline.run()
+        for _ in 0..<100 where LocalServer.isFree(port) { usleep(20_000) }
+        #expect(!LocalServer.isAssistantServer(inline.processIdentifier))
+        kill(inline.processIdentifier, SIGKILL)
+        inline.waitUntilExit()
+        let hung = try start()
+        defer { if hung.isRunning { kill(hung.processIdentifier, SIGKILL) } }
+        for _ in 0..<100 where LocalServer.isFree(port) { usleep(20_000) }
+        #expect(LocalServer.isAssistantServer(hung.processIdentifier))
+    }
+
     @Test("A MeetOnTrack service that keeps coming back is reported, never run beside (MEETONTRACK-130)")
     func reportsUnstoppableService() async throws {
         let (supervisor, port) = try holder(respawning: true)
