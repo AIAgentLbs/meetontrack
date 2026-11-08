@@ -68,28 +68,38 @@ hashes, Pages removed, and the Windows installer relocated to
   Fixed on main 2026-11-04; closes on release. (`MEETONTRACK_INSTANCE`, echoed as `instance` by `/api/health`.) A foreign
   server on the port is not adopted; the window then waits and `server.log` shows the
   bind failure, it does not name the conflict.
-- [ ] MEETONTRACK-124: AI sign-in CLIs run in their own session (`ai_providers.py` `_spawn`), so an open
+- [x] MEETONTRACK-124 (shipped in v0.1.22, Mac, closed 2026-11-08): AI sign-in CLIs run in their own session (`ai_providers.py` `_spawn`), so an open
   sign-in outlives the app-run service on quit. Track them and stop each group on server shutdown.
   Fixed on main 2026-11-05; closes on release.
-- [ ] MEETONTRACK-126: worker threads start before `own_process_group()` in `server.py` `main()`, so a helper
+- [x] MEETONTRACK-126 (shipped in v0.1.22, Mac, closed 2026-11-08): worker threads start before `own_process_group()` in `server.py` `main()`, so a helper
   (printing browser, AI CLI) spawned in that first moment escapes shutdown cleanup. Create the group right after
   bind, before any worker (with `--exit-with-parent`); extend `test_parent_watch.py`. Found by the 0.1.21 release review.
   Fixed on main 2026-11-05; closes on release.
-- [ ] MEETONTRACK-125: `install.sh` rewrites `config.json` to drop the retired analytics key before the
+- [x] MEETONTRACK-125 (shipped in v0.1.22, Mac, closed 2026-11-08): `install.sh` rewrites `config.json` to drop the retired analytics key before the
   new app is proven; a rolled-back install keeps the rewritten file. Move the migration after the commit
   point or add config.json to the rollback set.
   Fixed on main 2026-11-05; closes on release.
-- [ ] MEETONTRACK-130: a server on port 43121 that is not the app's own child left the Mac window waiting.
+- [x] MEETONTRACK-130 (shipped in v0.1.22, Mac, closed 2026-11-08): a server on port 43121 that is not the app's own child left the Mac window waiting.
   The app now resolves it itself (`LocalServer.swift`): a stale MeetOnTrack service is stopped and the port
   taken over; any other program is left alone and the service runs on a free port, recorded in
   `~/.local/share/meeting-copilot/server-port` for `install.sh` and `meeting-copilot`, which check that it
   answers. A service of this user that will not stop is never run beside (it shares the archive); then, or
   if the service cannot start at all, the window asks to restart the Mac. The Windows runner and the operator deploy
   scripts still assume 43121. Fixed on main 2026-11-05; closes on release.
-- [ ] MEETONTRACK-130 follow-up (Codex P2, 2026-11-07): a hung server started by hand from a checkout
+- [x] MEETONTRACK-130 follow-up (shipped in v0.1.22 with 130; Codex P2, 2026-11-07): a hung server started by hand from a checkout
   (`python3 web/server.py`, any folder name) was not recognised, so the app could run a second server beside it.
   `LocalServer.isAssistantServer` now resolves the script against the listener's working directory and accepts
   a `web/server.py` with `ai_providers.py` beside it. Fixed on main 2026-11-08; closes on release with 130.
+- [ ] MEETONTRACK-131: Windows still binds the assistant to port 43121 only: another program on it stops the
+  web assistant (`scripts/windows/meeting-copilot.ps1`), and the tray/settings links and operator deploy scripts
+  (`scripts/deploy-*.py`) assume 43121. Resolve it like the Mac (`LocalServer.swift`, MEETONTRACK-130): stop a stale
+  own service, leave a foreign program alone and use a free port recorded in `server-port`. Split out of 130 at the
+  0.1.22 release.
+- [ ] MEETONTRACK-132: when the Mac app quits, its server ends with "Fatal Python error: _enter_buffered_busy: could
+  not acquire lock for <stdin> at interpreter shutdown" in `server.log` (seen on 0.1.21 quits on the owner's Mac,
+  2026-11-08). `watch_parent()` reads `sys.stdin.buffer` in a daemon thread. Cleanup in `main()`'s `finally` runs
+  first, but the process aborts. Read the raw fd or `os._exit` after cleanup; assert a clean exit in
+  `test_parent_watch.py`.
 - [x] MEETONTRACK-109 (shipped in v0.1.21, Mac, closed 2026-11-04): One MeetOnTrack app with its own window: Python and the web
   payload inside the bundle, the app runs the local service itself (no launchd
   agent) and shows the UI in a WKWebView window instead of a browser tab. Signed,
