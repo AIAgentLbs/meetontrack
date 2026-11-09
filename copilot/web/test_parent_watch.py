@@ -1,4 +1,3 @@
-import io
 import os
 import subprocess
 import sys
@@ -16,9 +15,32 @@ import server
 class ParentWatchTests(unittest.TestCase):
     def test_stdin_eof_stops_the_server_like_ctrl_c(self):
         # The app holds the write end of stdin; EOF means it is gone.
-        with patch.object(server.os, "kill") as kill:
-            server.watch_parent(io.BytesIO(b"noise")).join(5)
+        read, write = os.pipe()
+        os.write(write, b"noise")
+        os.close(write)
+        try:
+            with patch.object(server.os, "kill") as kill:
+                server.watch_parent(read).join(5)
+        finally:
+            os.close(read)
         kill.assert_called_once_with(server.os.getpid(), signal.SIGINT)
+
+    def test_a_server_stopped_while_the_app_holds_stdin_exits_cleanly(self):
+        """MEETONTRACK-132: no "_enter_buffered_busy ... <stdin>" abort at interpreter shutdown."""
+        code = "import time, server; server.watch_parent(); time.sleep(0.3)"
+        with tempfile.TemporaryDirectory() as home:
+            child = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     cwd=Path(server.__file__).parent, env={**os.environ, "HOME": home})
+            try:
+                # stdin stays open, as the app's pipe does while it stops the server.
+                code = child.wait(60)
+                stderr = child.stderr.read().decode(errors="replace")
+            finally:
+                child.kill()
+                child.stdin.close()
+                child.stderr.close()
+        self.assertNotIn("Fatal Python error", stderr)
+        self.assertEqual(code, 0, stderr[-2000:])
 
     @unittest.skipIf(os.name == "nt", "process groups are POSIX")
     def test_what_the_server_started_stops_with_it(self):

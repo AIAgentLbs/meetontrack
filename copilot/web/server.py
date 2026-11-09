@@ -3270,9 +3270,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
-def watch_parent(stream) -> threading.Thread:
+def watch_parent(fd: int = 0) -> threading.Thread:
+    # The raw descriptor, not sys.stdin.buffer: a daemon thread parked in a
+    # buffered read holds that object's lock, and a server stopped by a signal
+    # while the app still holds the pipe aborts at interpreter shutdown with
+    # "_enter_buffered_busy: could not acquire lock for <stdin>" (MEETONTRACK-132).
     def gone():
-        while stream.read(65536):
+        while os.read(fd, 65536):
             pass
         import signal
         os.kill(os.getpid(), signal.SIGINT)  # serve_forever ends like Ctrl-C
@@ -3544,7 +3548,7 @@ def main() -> None:
     threading.Thread(target=REBUILDS.loop, args=(TRANSCRIPT.stop, lambda: TRANSCRIPT.status in ARCHIVE_BUSY),
                      name="analysis-rebuilds", daemon=True).start()
     if args.exit_with_parent:
-        watch_parent(sys.stdin.buffer)
+        watch_parent()
     url = f"http://{HOST}:{args.port}"
     print(f"MeetOnTrack: {url}", flush=True)
     print("Press Ctrl+C to stop the local UI.", flush=True)
