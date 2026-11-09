@@ -142,6 +142,13 @@ struct NoCallAudioStopTests {
         }
     }
 
+    @Test("A paused automatic recording is not stopped for missing call audio")
+    func pausedKeepsGoing() {
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, paused: true,
+            micQuietFor: 1, farEndQuietFor: window + 1, settings: settings) == nil)
+    }
+
     @Test("A manual recording is never stopped for missing call audio")
     func manualNeverStops() {
         #expect(AutoRecordController.backstopStop(

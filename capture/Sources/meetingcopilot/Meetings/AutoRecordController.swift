@@ -233,7 +233,7 @@ final class AutoRecordController {
 
         if let reason = Self.backstopStop(
             trigger: session.trigger, levelsMeasurable: session.levelsMeasurable,
-            callCaptureSuspect: session.callCaptureSuspect,
+            callCaptureSuspect: session.callCaptureSuspect, paused: session.isPaused,
             micQuietFor: micQuietFor, farEndQuietFor: farEndQuietFor, settings: settings) {
             let minutes = Int(settings.silenceStop / 60)
             lastDecision = reason == "silence"
@@ -288,6 +288,7 @@ final class AutoRecordController {
         trigger: RecordingSession.Trigger,
         levelsMeasurable: Bool,
         callCaptureSuspect: Bool = false,
+        paused: Bool = false,
         micQuietFor: TimeInterval,
         farEndQuietFor: TimeInterval,
         settings: Config.AutoRecordSettings
@@ -298,7 +299,8 @@ final class AutoRecordController {
         if micQuietFor > settings.silenceStop { return "silence" }
         // A capture that may be failing (stalled file, or the call app playing
         // output the tap does not hear) is our outage, not the call ending.
-        return callCaptureSuspect ? nil : "no-call-audio"
+        // A paused recording is the user's choice; stopping it would make it unresumable.
+        return callCaptureSuspect || paused ? nil : "no-call-audio"
     }
 
     // MARK: - discard
