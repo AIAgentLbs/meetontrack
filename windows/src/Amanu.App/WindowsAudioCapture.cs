@@ -127,10 +127,11 @@ public sealed class WindowsAudioCapture : IAudioCapture, ILiveAudioSource
         var systemStopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         microphone.RecordingStopped += (_, _) => microphoneStopped.TrySetResult();
         system.RecordingStopped += (_, _) => systemStopped.TrySetResult();
-        microphone.StopRecording();
-        system.StopRecording();
+        var result = new CaptureStopResult(microphoneTrack?.OffsetMs ?? 0, systemTrack?.OffsetMs ?? 0);
         try
         {
+            microphone.StopRecording();
+            system.StopRecording();
             await Task.WhenAll(microphoneStopped.Task, systemStopped.Task).WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
         }
         catch (TimeoutException)
@@ -138,9 +139,10 @@ public sealed class WindowsAudioCapture : IAudioCapture, ILiveAudioSource
             // A device that went away does not always say it stopped; what was
             // written is on disk either way.
         }
-
-        var result = new CaptureStopResult(microphoneTrack?.OffsetMs ?? 0, systemTrack?.OffsetMs ?? 0);
-        await DisposeCaptureAsync();
+        finally
+        {
+            await DisposeCaptureAsync();
+        }
         return result;
     }
 
@@ -184,27 +186,40 @@ public sealed class WindowsAudioCapture : IAudioCapture, ILiveAudioSource
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { return DateTime.MaxValue; }
     }
 
+    /// <remarks>
+    /// Every step runs whatever the one before it did: a track left open keeps
+    /// its WAV locked against the transcriber for as long as the app runs
+    /// (MEETONTRACK-139). The first failure is rethrown once all are done.
+    /// </remarks>
     private async Task DisposeCaptureAsync()
     {
         running = false;
-        if (LiveStopping is { } stopLive) await stopLive().ConfigureAwait(false);
-        if (microphone is not null)
+        Exception? failure = null;
+        async Task Step(Func<Task> step)
         {
-            microphone.DataAvailable -= OnMicrophoneData;
-            await microphone.DisposeAsync();
+            try { await step().ConfigureAwait(false); }
+            catch (Exception exception) { failure ??= exception; }
         }
-        if (system is not null)
+        if (LiveStopping is { } stopLive) await Step(stopLive);
+        if (microphone is { } mic)
         {
-            system.DataAvailable -= OnSystemData;
-            await system.DisposeAsync();
+            mic.DataAvailable -= OnMicrophoneData;
+            await Step(() => mic.DisposeAsync().AsTask());
         }
-        microphoneTrack?.Dispose();
-        systemTrack?.Dispose();
+        if (system is { } loopback)
+        {
+            loopback.DataAvailable -= OnSystemData;
+            await Step(() => loopback.DisposeAsync().AsTask());
+        }
+        var tracks = new[] { microphoneTrack, systemTrack };
         microphoneTrack = null;
         systemTrack = null;
         microphone = null;
         system = null;
         paused = false;
+        foreach (var track in tracks)
+            await Step(() => { track?.Dispose(); return Task.CompletedTask; });
+        if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failure);
     }
 
     public async ValueTask DisposeAsync()
@@ -243,6 +258,7 @@ internal sealed class TrackWriter : IDisposable
 {
     private static readonly long MaximumGap100ns = TimeSpan.FromMinutes(30).Ticks;
     private readonly Lock gate = new();
+    private readonly Stream file;
     private readonly WaveFileWriter writer;
     private readonly WaveFormat format;
     private readonly long origin100ns;
@@ -256,10 +272,17 @@ internal sealed class TrackWriter : IDisposable
     private readonly record struct Packet(byte[] Data, int Length, bool Silent, long At100ns);
 
     public TrackWriter(string path, WaveFormat format, long origin100ns)
+        : this(new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read), format, origin100ns)
+    {
+    }
+
+    /// <summary>Writes to <paramref name="file"/>, which it owns and closes.</summary>
+    internal TrackWriter(Stream file, WaveFormat format, long origin100ns)
     {
         this.format = format;
         this.origin100ns = origin100ns;
-        writer = new WaveFileWriter(path, format);
+        this.file = file;
+        writer = new WaveFileWriter(file, format);
         zeros = new byte[Math.Max(format.BlockAlign, format.AverageBytesPerSecond / 10 / format.BlockAlign * format.BlockAlign)];
         drain = Task.Run(DrainAsync);
     }
@@ -286,10 +309,12 @@ internal sealed class TrackWriter : IDisposable
             {
                 lock (gate) WritePacket(packet);
             }
-            catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+            catch (Exception)
             {
-                // A full disk or a closed file: the rest of this track is lost, and
-                // the recording carries on with what was written.
+                // A full disk, a closed file, or NAudio refusing to grow a WAV past
+                // 4 GB (ArgumentException): the rest of this track is lost, and the
+                // recording carries on with what was written. The drain must not
+                // die of it, or Dispose would never close the file (MEETONTRACK-139).
             }
             finally
             {
@@ -337,10 +362,17 @@ internal sealed class TrackWriter : IDisposable
     public void Dispose()
     {
         packets.Writer.TryComplete();
-        drain.Wait(TimeSpan.FromSeconds(30));
-        lock (gate)
+        try
         {
-            writer.Dispose();
+            drain.Wait(TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            lock (gate)
+            {
+                try { writer.Dispose(); }
+                finally { file.Dispose(); }
+            }
         }
     }
 }

@@ -104,11 +104,11 @@ hashes, Pages removed, and the Windows installer relocated to
   signed in. `AmanuRuntime.OpenAssistant` and `scripts/windows/meeting-copilot.ps1` now open an app window of the default
   https browser when it is Chromium (`AppWindowBrowser.FromOpenCommand`), a plain tab of any other default browser, and
   Edge only when the default can't be read.
-- [ ] MEETONTRACK-132: when the Mac app quits, its server ends with "Fatal Python error: _enter_buffered_busy: could
-  not acquire lock for <stdin> at interpreter shutdown" in `server.log` (seen on 0.1.21 quits on the owner's Mac,
-  2026-11-08). `watch_parent()` reads `sys.stdin.buffer` in a daemon thread. Cleanup in `main()`'s `finally` runs
-  first, but the process aborts. Read the raw fd or `os._exit` after cleanup; assert a clean exit in
-  `test_parent_watch.py`.
+- [ ] MEETONTRACK-132 (fixed on main 2026-11-09, closes with the next release): when the Mac app quits, its server
+  ended with "Fatal Python error: _enter_buffered_busy: could not acquire lock for <stdin> at interpreter shutdown" in
+  `server.log` (0.1.21 quits on the owner's Mac, 2026-11-08). Cause: `watch_parent()` parked a daemon thread in
+  `sys.stdin.buffer.read()`, which holds the buffered object's lock; a server stopped by a signal while the app still
+  held the pipe aborted at shutdown. It now reads fd 0 with `os.read`; `test_parent_watch.py` asserts a clean exit.
 - [x] MEETONTRACK-109 (shipped in v0.1.21, Mac, closed 2026-11-04): One MeetOnTrack app with its own window: Python and the web
   payload inside the bundle, the app runs the local service itself (no launchd
   agent) and shows the UI in a WKWebView window instead of a browser tab. Signed,
@@ -312,8 +312,12 @@ hashes, Pages removed, and the Windows installer relocated to
   recording runs to the duration ceiling. Now only a stalled call-track file suppresses the stop indefinitely; open
   output alone defers it by one more `silence_stop_minutes` window (20 min at the default), after which "no-call-audio"
   fires. Fixed on main 2026-11-09; closes on the next Mac release. Confirm with a Meet tab left open after a call.
-- [ ] MEETONTRACK-139: Windows final transcription of 2026.11.08-1734 found `mic.wav` locked by another process
-  (`transcribe.log`); find the holder after recording ends and make the transcriber wait or retry.
+- [ ] MEETONTRACK-139 (fixed on main 2026-11-09, closes with the next release): Windows final transcription of
+  2026.11.08-1734 found `mic.wav` locked by another process (`transcribe.log`). Holder: the recorder's own
+  `TrackWriter`. NAudio throws `ArgumentException` when a WAV would pass 4 GB; the drain caught only I/O errors and
+  died, `Dispose` rethrew from `drain.Wait` before closing the file, and the stop went on to queue the session with
+  the writer still open until the app quit. The drain now survives any write error, `Dispose` always closes the file,
+  and `DisposeCaptureAsync` disposes every track whatever failed before it (`TrackWriterTests`).
 - [ ] MEETONTRACK-118: a final transcript that never arrives stops being flagged after the 3-day delivery window
   (`archive.py` `_final_wait`, `delivery_health`), and a late final makes the report on request only.
 - [ ] MEETONTRACK-89: Mac call-audio capture fades to silence during Chrome calls (39 of 53 min lost on 2026-10-21);
