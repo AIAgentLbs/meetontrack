@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Amanu.Core;
 using Amanu.Core.Configuration;
 using Amanu.Core.Localization;
 using Amanu.Core.Processing;
@@ -530,9 +531,10 @@ public sealed class AmanuRuntime : IAsyncDisposable
         NotificationRequested?.Invoke(this, (title, message, kind));
 
     /// <summary>
-    /// The assistant gets one window of its own: an open one comes forward, otherwise Edge opens it
-    /// as an app window (no tab strip, the page's icon), not a new browser tab on every launch.
-    /// Same rule as meeting-copilot.ps1.
+    /// The assistant gets one window of its own: an open one comes forward, otherwise the default
+    /// browser opens it as an app window (no tab strip, the page's icon) when it is Chromium, so links
+    /// such as Google sign-in open where the user is signed in; another default browser gets a plain
+    /// tab, and Edge is used only when the default can't be read. Same rule as meeting-copilot.ps1.
     /// </summary>
     public static void OpenAssistant()
     {
@@ -547,13 +549,25 @@ public sealed class AmanuRuntime : IAsyncDisposable
                 if (IsIconic(window)) ShowWindow(window, 9 /* SW_RESTORE */);
                 return;
             }
-            Process.Start(new ProcessStartInfo("msedge", $"--app={url}") { UseShellExecute = true });
+            var browser = AppBrowser();
+            if (browser is null) Open(url);
+            else Process.Start(new ProcessStartInfo(browser, $"--app={url}") { UseShellExecute = true });
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException
-                                              or System.Runtime.InteropServices.COMException or ArgumentNullException)
+                                              or System.Runtime.InteropServices.COMException or ArgumentNullException
+                                              or System.Security.SecurityException or UnauthorizedAccessException)
         {
             Open(url);
         }
+    }
+
+    /// <summary>The default https browser when it can open an app window, null when it can't, Edge when unknown.</summary>
+    private static string? AppBrowser()
+    {
+        using var choice = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice");
+        using var command = choice?.GetValue("ProgId") is string progId && progId.Length > 0
+            ? Registry.ClassesRoot.OpenSubKey(progId + @"\shell\open\command") : null;
+        return command?.GetValue(null) is string line && line.Trim().Length > 0 ? AppWindowBrowser.FromOpenCommand(line) : "msedge";
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();

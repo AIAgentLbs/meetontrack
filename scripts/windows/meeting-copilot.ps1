@@ -82,14 +82,23 @@ if(-not $ready){
     for($i=0;$i -lt 40 -and -not $ready;$i++){Start-Sleep -Milliseconds 250; $ready=Test-Ready}
 }
 if(-not $ready){throw "MeetOnTrack $release web service did not start; port 43121 may be used by another program"}
-# One assistant window, not a new tab per launch: bring an open one forward, else an Edge app window
-# (no tab strip, the page's icon). Same rule as AmanuRuntime.OpenAssistant.
+# One assistant window, not a new tab per launch: bring an open one forward, else an app window (no tab
+# strip, the page's icon) of the default browser when it is Chromium, so links such as Google sign-in open
+# where the user is signed in; another default browser gets a plain tab, Edge only when the default can't
+# be read. Same rule as AmanuRuntime.OpenAssistant and AppWindowBrowser.cs (same browser list).
+function Get-AppBrowser{
+    $progId=(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice' -ErrorAction SilentlyContinue).ProgId
+    $command=if($progId){(Get-ItemProperty -LiteralPath "Registry::HKEY_CLASSES_ROOT\$progId\shell\open\command" -ErrorAction SilentlyContinue).'(default)'}
+    if(-not "$command".Trim()){return 'msedge'}
+    if("$command".Trim() -match '^"([^"]+)"' -or "$command".Trim() -match '^([^"]*?\.exe)'){$exe=$Matches[1]}else{return $null}
+    if(@('chrome.exe','msedge.exe','brave.exe','vivaldi.exe','chromium.exe') -contains ($exe -split '[\\/]')[-1]){$exe}else{$null}
+}
 if($args -notcontains '--no-open'){
     # A service started now (first run, upgrade) gets a fresh window: an open page may be an older release.
     if(-not $restarted -and (New-Object -ComObject WScript.Shell).AppActivate('MeetOnTrack by aiagentlbs.com')){
         # Activation leaves a minimized window minimized. The page reloads itself after an upgrade.
         Add-Type -Namespace MeetOnTrack -Name Win -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr w); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr w, int c);'
         $window=[MeetOnTrack.Win]::GetForegroundWindow(); if([MeetOnTrack.Win]::IsIconic($window)){[void][MeetOnTrack.Win]::ShowWindow($window,9)}
-    }else{try{Start-Process msedge -ArgumentList '--app=http://127.0.0.1:43121/' -ErrorAction Stop}catch{Start-Process 'http://127.0.0.1:43121/'}}
+    }else{try{$browser=Get-AppBrowser; if(-not $browser){throw 'no app-window browser'}; Start-Process $browser -ArgumentList '--app=http://127.0.0.1:43121/' -ErrorAction Stop}catch{Start-Process 'http://127.0.0.1:43121/'}}
 }
 Write-Host 'MeetOnTrack: http://127.0.0.1:43121'
