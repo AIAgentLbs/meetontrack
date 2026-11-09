@@ -109,13 +109,13 @@ internal sealed class SetupWindow : Window
         var done = Ui.Button(T("Done", "Готово"), async () =>
         {
             await runtime.CompleteSetupAsync();
-            AmanuRuntime.Open("http://127.0.0.1:43121/");
-            Close();
+            Close(); // first: closing setup brings the recorder forward, the assistant goes on top of it
+            AmanuRuntime.OpenAssistant();
         }, accent: true);
         var later = Ui.Button(T("Open assistant", "Перейти в помощник"), () =>
         {
-            AmanuRuntime.Open("http://127.0.0.1:43121/");
-            Close();
+            Close(); // first: closing setup brings the recorder forward, the assistant goes on top of it
+            AmanuRuntime.OpenAssistant();
         });
         later.Margin = new Thickness(8, 0, 0, 0);
         done.Margin = new Thickness(8, 0, 0, 0);

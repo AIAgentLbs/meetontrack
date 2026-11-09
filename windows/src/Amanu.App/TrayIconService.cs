@@ -43,7 +43,7 @@ internal sealed class TrayIconService : IDisposable
         {
             if (!Ui.TryUpdate(null, () => runtime.SetAutoRecord(autoRecordItem.IsChecked))) Refresh();
         };
-        menu.Items.Add(Item(T("Open MeetOnTrack assistant", "Открыть помощник MeetOnTrack"), () => AmanuRuntime.Open("http://127.0.0.1:43121/")));
+        menu.Items.Add(Item(T("Open MeetOnTrack assistant", "Открыть помощник MeetOnTrack"), AmanuRuntime.OpenAssistant));
         menu.Items.Add(stateItem);
         menu.Items.Add(recordItem);
         menu.Items.Add(pauseItem);

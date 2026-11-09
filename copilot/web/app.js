@@ -626,6 +626,13 @@ let projectMeetingId = "";
 let transcriptView = "transcript";
 let frameSignature = "";
 let stateRequestInFlight = false;
+// Release this page was loaded from; a reused window reloads once the service is upgraded.
+let pageVersion = "";
+// ponytail: any edit since load blocks the automatic reload (no draft is ever lost); such a page
+// stays on the old release until it is reloaded by hand. Per-form dirty tracking if that matters.
+let pageEdited = false;
+document.addEventListener("input", () => { pageEdited = true; }, true);
+document.addEventListener("change", () => { pageEdited = true; }, true);
 let stateConnectionFailed = false;
 let stateFailures = 0;
 let activeTranscript = null;
@@ -2992,6 +2999,9 @@ async function state() {
     if (!response.ok) throw apiError({}, response);
     const data = await response.json();
     stateFailures = 0;
+    const serverVersion = (data.updates || {}).version || "";
+    if (pageVersion && serverVersion && serverVersion !== pageVersion && !pageEdited) return location.reload();
+    pageVersion ||= serverVersion;
     // A change made here while this request ran wins over the older snapshot.
     if (epoch === preferenceEpoch && !preferenceSaves) applyPreferences(data.preferences || {});
     const project = data.project || {};

@@ -76,10 +76,20 @@ if($check){
 Stop-OtherVersions $root
 if(-not(Get-Process MeetingCopilotCapture -ErrorAction SilentlyContinue)){Start-Process -FilePath $capture}
 $ready=Test-Ready
+$restarted=-not $ready
 if(-not $ready){
     Start-Process -FilePath $pythonw -ArgumentList @('-X','utf8',"`"$server`"",'--no-open') -WorkingDirectory $root
     for($i=0;$i -lt 40 -and -not $ready;$i++){Start-Sleep -Milliseconds 250; $ready=Test-Ready}
 }
 if(-not $ready){throw "MeetOnTrack $release web service did not start; port 43121 may be used by another program"}
-if($args -notcontains '--no-open'){Start-Process 'http://127.0.0.1:43121'}
+# One assistant window, not a new tab per launch: bring an open one forward, else an Edge app window
+# (no tab strip, the page's icon). Same rule as AmanuRuntime.OpenAssistant.
+if($args -notcontains '--no-open'){
+    # A service started now (first run, upgrade) gets a fresh window: an open page may be an older release.
+    if(-not $restarted -and (New-Object -ComObject WScript.Shell).AppActivate('MeetOnTrack by aiagentlbs.com')){
+        # Activation leaves a minimized window minimized. The page reloads itself after an upgrade.
+        Add-Type -Namespace MeetOnTrack -Name Win -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr w); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr w, int c);'
+        $window=[MeetOnTrack.Win]::GetForegroundWindow(); if([MeetOnTrack.Win]::IsIconic($window)){[void][MeetOnTrack.Win]::ShowWindow($window,9)}
+    }else{try{Start-Process msedge -ArgumentList '--app=http://127.0.0.1:43121/' -ErrorAction Stop}catch{Start-Process 'http://127.0.0.1:43121/'}}
+}
 Write-Host 'MeetOnTrack: http://127.0.0.1:43121'

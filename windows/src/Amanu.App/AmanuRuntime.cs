@@ -525,6 +525,37 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public void Notify(string title, string message, NotificationKind kind) =>
         NotificationRequested?.Invoke(this, (title, message, kind));
 
+    /// <summary>
+    /// The assistant gets one window of its own: an open one comes forward, otherwise Edge opens it
+    /// as an app window (no tab strip, the page's icon), not a new browser tab on every launch.
+    /// Same rule as meeting-copilot.ps1.
+    /// </summary>
+    public static void OpenAssistant()
+    {
+        const string url = "http://127.0.0.1:43121/";
+        try
+        {
+            dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
+            if ((bool)shell.AppActivate("MeetOnTrack by aiagentlbs.com"))
+            {
+                // Activation leaves a minimized window minimized.
+                var window = GetForegroundWindow();
+                if (IsIconic(window)) ShowWindow(window, 9 /* SW_RESTORE */);
+                return;
+            }
+            Process.Start(new ProcessStartInfo("msedge", $"--app={url}") { UseShellExecute = true });
+        }
+        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException
+                                              or System.Runtime.InteropServices.COMException or ArgumentNullException)
+        {
+            Open(url);
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
+
     /// <summary>Opens a file, folder or link the way Explorer would, and says so when Windows can't.</summary>
     public static void Open(string target)
     {
