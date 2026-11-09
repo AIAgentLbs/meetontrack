@@ -291,11 +291,11 @@ hashes, Pages removed, and the Windows installer relocated to
   installed browser is tried in order before the HTML fallback. Fixed on main 2026-11-04; closes on release.
 - [ ] MEETONTRACK-135: Telegram delivery has no in-app setup and cannot work on Windows (no telethon in the
   bundled Python; it relies on a Telethon env file from a developer checkout). Proposed: in-app "Connect Telegram" via a bot.
-- [ ] MEETONTRACK-136: Windows calls never got their final transcript or report: the recorder writes `transcript.json`
+- [x] MEETONTRACK-136 (shipped in v0.1.24 / windows-v0.1.24, closed 2026-11-09; fixed on main 8f1587a): Windows calls never got their final transcript or report: the recorder writes `transcript.json`
   with a UTF-8 byte order mark (.NET `Encoding.UTF8`, `TranscriptDocument.cs`) and `canonical_transcript.py` failed on it
   silently. The web service now reads `utf-8-sig`; the recorder writes no BOM; existing meetings import on the first
   pass after start. Fixed on main 2026-11-09; closes on the Windows release.
-- [ ] MEETONTRACK-137: an automatic recording ran 4.8 h on Windows (2026-11-08): Chrome kept the mic after the call and room
+- [x] MEETONTRACK-137 (shipped in v0.1.24 / windows-v0.1.24, closed 2026-11-09; fixed on main d3ab7fb, c6882e2): an automatic recording ran 4.8 h on Windows (2026-11-08): Chrome kept the mic after the call and room
   noise defeated the both-tracks silence stop. Now an automatic recording stops after `silence_stop_minutes` with no call
   audio (`stop_reason` "no-call-audio"; `AutoRecordPolicy.cs`, `AutoRecordController.swift`), and backstop stops stand down
   until the call app lets go of the mic on Mac too. Fixed on main 2026-11-09; closes on the Mac and Windows release.
