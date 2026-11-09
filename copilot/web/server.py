@@ -38,7 +38,7 @@ from frame_relevance import frame_relevance
 from chat_import import parse_chat_export, normalize_chat_times
 from interface_preferences import interface_preferences, save_preferences
 from delivery_retry import DeliveryRetry
-from release_updates import ReleaseUpdates, installed_release
+from release_updates import RECORDING, ReleaseUpdates, installed_release
 from summary_rewrite import SummaryRewrites
 from question_quality import register_question, useful_question
 from journal_links import URL_RE, LINK_CATEGORIES, call_link, collapse_links
@@ -57,7 +57,10 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 43121
 HOME = Path.home()
 WEB_DIR = Path(__file__).resolve().parent
-UPDATES = ReleaseUpdates(HOME / ".config/meeting-copilot/updates.json", installed_release(WEB_DIR))
+UPDATES = ReleaseUpdates(HOME / ".config/meeting-copilot/updates.json", installed_release(WEB_DIR),
+                         # Recording = the capture's own marker (a live owner pid), whatever recognition reports, or a busy live status.
+                         recording=lambda: TRANSCRIPT.status in RECORDING or RECORDING_LOCATIONS.active() is not None,
+                         data_dir=HOME / ".local/share/meeting-copilot")
 TRANSCRIPT_FILE = HOME / ".local/share/meeting-copilot/meeting-copilot-live.json"
 SESSION_FILE = HOME / ".config/meeting-copilot/SESSION.md"
 MANIFEST_FILE = HOME / ".config/meeting-copilot/repos.json"
@@ -3012,6 +3015,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "updates": UPDATES.snapshot()})
             elif path == "/api/updates/settings":
                 self._json({"ok": True, "updates": UPDATES.configure(payload)})
+            elif path == "/api/updates/install" and not self.headers.get("Origin"):
+                self.send_error(HTTPStatus.FORBIDDEN)  # only the app's own page starts an install
+            elif path == "/api/updates/install":
+                self._json({"ok": True, "updates": UPDATES.install(str(payload.get("version") or ""))})
             elif path == "/api/delivery/ack":
                 ARCHIVE.delivery_monitor.acknowledge(payload.get("through"))
                 self._json({"ok": True, "delivery": ARCHIVE.delivery_health()})

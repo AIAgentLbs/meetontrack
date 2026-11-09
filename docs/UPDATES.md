@@ -1,4 +1,4 @@
-# MeetOnTrack release notifications
+# MeetOnTrack release notifications and one-click update
 
 The local web service checks the public `AIAgentLbs/meetontrack` release list
 every 15 minutes, first checking about 30 seconds after service startup. State polling
@@ -31,22 +31,57 @@ manual check still works when background checks are disabled.
 
 ## User experience and safety
 
-A new version displays a header notification. Clicking it opens Settings with
-the version, release notes, and the official release page. Dismissal persists
-across service restarts; notes remain accessible in Settings. Notes are rendered
-as plain text, never as HTML. This is an in-app notice, not an OS notification.
+A new version displays a header notice, "Version X available", with one button,
+**Update**. Clicking the notice opens Settings with the version, release notes,
+and the official release page. Dismissal persists across service restarts; notes
+remain accessible in Settings. Notes are rendered as plain text, never as HTML.
+This is an in-app notice, not an OS notification.
 
-Settings also shows the official platform-specific installer command with a
-copy button (Terminal on Mac, PowerShell on Windows). It is available even when
-no newer release is detected. The website installer is version-pinned and can
-lag release metadata; the UI explicitly says to check the installed version.
-Publication must update the installer pin/checksum alongside the release.
+**Update** (`POST /api/updates/install`, same Host/Origin checks as every POST, and an
+`Origin` header is required, so only the app's own page starts an install):
 
-This feature never downloads executables, installs updates, quits the app, or
-restarts recording. The user opens the release instructions and installs after
-the call. Native Sparkle installation stays disabled until a signed appcast and
-signing/recovery acceptance are available. Existing users receive this checker
-only after installing a package that includes it.
+1. The server accepts only the version it currently offers (newer than the
+   installed one, matching platform and channel). The browser cannot name a URL.
+   Before installing, the release list is fetched again: a cached offer that GitHub no
+   longer lists is not installed.
+2. During a recording (live status `recording`, `paused`, `loading` or
+   `overloaded`, the states `install.ps1` also refuses, or while a capture marker
+   `.recording.json` has a live owner, whatever recognition reports) the update is scheduled
+   and the notice says it installs after the call. The 30-second release loop
+   starts it once the recording ends. It never interrupts a recording.
+3. The server downloads the official installer of exactly that release from the
+   release tag: `https://raw.githubusercontent.com/AIAgentLbs/meetontrack/vX.Y.Z/install.sh`
+   (Mac) or `.../windows-vX.Y.Z/scripts/windows/install.ps1` (Windows). Redirects
+   are refused. The script must pin that tag (`VERSION="vX.Y.Z"` /
+   `releases/download/windows-vX.Y.Z/`), so a tag cannot install an older
+   release (exactly one such line, naming that tag). The script is written to a new
+   owner-only folder. The installer pins and verifies the package SHA-256 itself. The
+   website copy is not used: it may lag the notice. The recording state is
+   checked again right before the installer starts.
+4. The installer runs detached from the service (own session/process group),
+   output appended to `~/.local/share/meeting-copilot/update.log`.
+   - Windows: `powershell -File install.ps1` stops the old service, asks the
+     old Capture to quit when idle and starts the new version.
+   - Mac: a small helper quits Capture like its Quit menu item (Apple Event
+     `quit`), so the app itself asks "Quit while recording?" if a recording
+     started meanwhile. If Capture keeps running (kept recording, or Automation
+     denied) nothing is installed and the notice offers Try again; no SIGTERM.
+     Then it runs `install.sh` (which opens the new app and waits for its
+     service, or restores the old version on failure) and `meeting-copilot` to
+     open the assistant window of whatever is installed now.
+5. The page reloads itself when the service version changes. If the installer
+   fails, the old version keeps working; the notice says so in plain words with
+   **Try again**, and details stay in the log. A service that restarts with an
+   `installing` record but an older version reports the failure the same way.
+
+Settings keeps the platform-specific installer command with a copy button as a
+fallback (Terminal on Mac, PowerShell on Windows). It installs the website copy,
+which can lag release metadata. Publication must update the installer
+pin/checksum in the tagged commit, as it already does.
+
+Native Sparkle/Velopack installation stays disabled; the one-click update reuses
+the same installers people run by hand. Existing users receive it only after
+installing a package that includes it.
 
 ## Automatic installation: deferred
 
@@ -60,9 +95,9 @@ Validate the actual package's launch, framework loading and recording permission
 across an update. References: https://sparkle-project.org/documentation/ and
 https://developer.apple.com/developer-id/ (checked 2026-10-19).
 
-Latest owner decision (2026-10-19) supersedes the earlier automatic-install
-requirement: ship release notifications, notes and a manual update command now.
-Automatic installation is deferred, not a current release blocker. The checklist
+Owner decision (2026-10-19): ship release notifications, notes and a manual update command.
+Owner request (2026-11-09): add the one-click Update above, which runs the tagged
+installer after explicit consent. Native background installation stays deferred. The checklist
 below applies when that separate feature is resumed; do not describe the current
 checker as an automatic installer.
 

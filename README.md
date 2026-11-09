@@ -19,7 +19,7 @@ unreleased features from `main`. It requires Apple Silicon, macOS 15+, no separa
 (or Microsoft Edge or Chromium) makes the PDF reports; without one, reports are sent as HTML. Quit Capture before reinstalling.
 
 v0.1.25 is one app: the Swift app (rebuilt for this release) with its Python and web payload inside, and a
-source/hash manifest. It is ad-hoc signed, not notarized; automatic installation is deferred; update notifications are included. See [release notes](docs/releases/v0.1.25.md) for scope and gates.
+source/hash manifest. It is ad-hoc signed, not notarized; update notifications are included. See [release notes](docs/releases/v0.1.25.md) for scope and gates.
 
 ```sh
 curl -fsSL https://meetontrack.com/install.sh | bash
@@ -34,8 +34,8 @@ Recording** and finish model setup. No second terminal command is needed.
 Reopen the assistant anytime with **Open MeetOnTrack assistant** at the top of
 the recorder window or in its menu-bar menu.
 See [INSTALL.md](INSTALL.md) for dependencies, first-run permissions, manual
-updates and troubleshooting. Automatic in-app updates are not enabled in this
-beta. Audio/transcription run locally; AI analysis can send relevant transcript
+updates and troubleshooting. From the version after 0.1.25 an **Update** button
+installs new releases in-app. Audio/transcription run locally; AI analysis can send relevant transcript
 and repository excerpts to the AI tool you chose for that task.
 
 ## What it does

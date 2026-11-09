@@ -8,7 +8,13 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 import unittest
 
-from release_updates import ReleaseUpdates, select_release, installed_release
+import os
+import re
+import subprocess
+import sys
+
+import release_updates
+from release_updates import ReleaseUpdates, select_release, installed_release, installer_url, pins_release
 
 
 def release(version, platform="macos", prerelease=True, **extra):
@@ -202,6 +208,231 @@ class ReleaseMonitorTests(unittest.TestCase):
                     self.assertFalse(json.load(response)["updates"]["enabled"])
                 with urlopen(base + "/updates.js") as response:
                     self.assertEqual(response.status, 200)
+            finally:
+                http.shutdown()
+                http.server_close()
+                thread.join()
+
+
+class FakeProcess:
+    def __init__(self, code):
+        self.code = code
+
+    def wait(self):
+        return self.code
+
+
+class OneClickUpdateTests(unittest.TestCase):
+    """Never runs a real installer: fetching and spawning are injected."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.recording = False
+        self.fetched, self.spawned = [], []
+        self.script = b'VERSION="v0.1.10"\n'
+        self.code = 0
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def monitor(self, version="0.1.9", platform="macos"):
+        tag = ("windows-" if platform == "windows" else "") + "v0.1.10"
+        def fetch_script(url):
+            self.fetched.append(url)
+            return self.script
+        def spawn(command, log):
+            self.spawned.append((command, Path(command[-1]).read_bytes(), log))
+            return FakeProcess(self.code)
+        return ReleaseUpdates(self.root / "updates.json", {"version": version, "channel": "technical-beta", "platform": platform},
+                              fetch=lambda: [release("0.1.10", platform)], clock=lambda: 1000000,
+                              recording=lambda: self.recording, data_dir=self.root / "data",
+                              fetch_script=fetch_script, spawn=spawn)
+
+    def run_install(self, monitor, version="0.1.10"):
+        monitor.install(version)
+        for thread in threading.enumerate():
+            if thread.name == "release-install":
+                thread.join(5)
+        return monitor.snapshot()
+
+    def test_only_tag_installers_of_this_repository_are_trusted(self):
+        self.assertEqual(installer_url("0.1.10", "macos"),
+                         "https://raw.githubusercontent.com/AIAgentLbs/meetontrack/v0.1.10/install.sh")
+        self.assertEqual(installer_url("0.1.10", "windows"),
+                         "https://raw.githubusercontent.com/AIAgentLbs/meetontrack/windows-v0.1.10/scripts/windows/install.ps1")
+        for version in ["0.1.10/../../evil", "latest", "0.1.10?x", "main"]:
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                installer_url(version, "macos")
+        with self.assertRaises(ValueError):
+            installer_url("0.1.10", "linux")
+
+    def test_installer_must_pin_the_offered_release(self):
+        self.assertTrue(pins_release(b'VERSION="v0.1.10"', "0.1.10", "macos"))
+        self.assertFalse(pins_release(b'VERSION="v0.1.9"', "0.1.10", "macos"))
+        self.assertTrue(pins_release(b"$url='https://github.com/AIAgentLbs/meetontrack/releases/download/windows-v0.1.10/x.zip'",
+                                     "0.1.10", "windows"))
+        self.assertFalse(pins_release(b"releases/download/windows-v0.1.9/", "0.1.10", "windows"))
+
+    def test_mac_update_runs_the_tag_installer_detached_and_clears_on_success(self):
+        monitor = self.monitor()
+        monitor.check()
+        snapshot = self.run_install(monitor)
+        self.assertEqual(self.fetched, ["https://raw.githubusercontent.com/AIAgentLbs/meetontrack/v0.1.10/install.sh"])
+        command, script, log = self.spawned[0]
+        self.assertEqual(command[:3], ["/bin/bash", "-c", release_updates.MAC_HELPER])
+        self.assertEqual(script, self.script)
+        self.assertEqual(log, self.root / "data/update.log")
+        self.assertIsNone(snapshot["install"])
+
+    def test_windows_update_runs_powershell_with_a_bom(self):
+        self.script = b"$url='https://github.com/AIAgentLbs/meetontrack/releases/download/windows-v0.1.10/a.zip'"
+        monitor = self.monitor("0.1.9-windows-beta.1", "windows")
+        monitor.check()
+        self.run_install(monitor)
+        command, script, _ = self.spawned[0]
+        self.assertEqual(command[1:6], ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", command[-1]])
+        self.assertTrue(command[0].endswith("powershell.exe"))
+        self.assertEqual(script, b"\xef\xbb\xbf" + self.script)
+
+    def test_recording_defers_the_update_until_it_ends(self):
+        monitor = self.monitor()
+        monitor.check()
+        self.recording = True
+        self.assertEqual(monitor.install("0.1.10")["install"], {"version": "0.1.10", "state": "scheduled"})
+        self.assertIsNone(monitor.resume())
+        self.assertEqual((self.fetched, self.spawned), ([], []))
+        self.recording = False
+        monitor.resume().join(5)
+        self.assertEqual(len(self.spawned), 1)
+
+    def test_recording_started_during_download_is_not_interrupted(self):
+        monitor = self.monitor()
+        monitor.check()
+        def fetch_script(url):
+            self.recording = True
+            return self.script
+        monitor.fetch_script = fetch_script
+        self.assertEqual(self.run_install(monitor)["install"]["state"], "scheduled")
+        self.assertEqual(self.spawned, [])
+
+    def test_failures_keep_the_old_version_and_offer_retry_with_details_in_the_log(self):
+        for case in ["pins_older", "exit_code", "offline"]:
+            with self.subTest(case=case):
+                self.spawned = []
+                monitor = self.monitor()
+                monitor.check()
+                self.script = b'VERSION="v0.1.8"' if case == "pins_older" else b'VERSION="v0.1.10"'
+                self.code = 1 if case == "exit_code" else 0
+                if case == "offline":
+                    monitor.fetch_script = lambda url: (_ for _ in ()).throw(OSError("offline"))
+                snapshot = self.run_install(monitor)
+                self.assertEqual(snapshot["install"], {"version": "0.1.10", "state": "failed"})
+                self.assertEqual(len(self.spawned), 1 if case == "exit_code" else 0)
+                self.assertIn("0.1.10", (self.root / "data/update.log").read_text())
+        self.script, self.code = b'VERSION="v0.1.10"', 0
+        monitor.fetch_script = lambda url: self.script
+        self.assertIsNone(self.run_install(monitor)["install"])  # Retry
+
+    def test_only_the_offered_newer_version_can_be_installed(self):
+        monitor = self.monitor()
+        with self.assertRaises(ValueError):
+            monitor.install("0.1.10")  # nothing offered yet
+        monitor.check()
+        for version in ["0.1.8", "0.1.11", ""]:
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                monitor.install(version)
+
+    def test_next_service_reports_how_an_interrupted_update_ended(self):
+        (self.root / "updates.json").write_text(json.dumps({"installing": "0.1.10"}))
+        self.assertEqual(self.monitor("0.1.9").snapshot()["install"], {"version": "0.1.10", "state": "failed"})
+        self.assertIsNone(self.monitor("0.1.10").snapshot()["install"])
+        self.assertIsNone(self.monitor("0.1.10-windows-beta.1", "windows").snapshot()["install"])
+
+    def run_helper(self, osascript_answer="", capture_quits_after=1):
+        """The Mac helper with stub tools: pgrep reports Capture running for `capture_quits_after` calls."""
+        bin_dir, home = self.root / "bin", self.root / "home"
+        (home / ".local/bin").mkdir(parents=True, exist_ok=True)
+        bin_dir.mkdir(exist_ok=True)
+        calls, count = self.root / "calls", self.root / "pgrep-count"
+        calls.write_text(""); count.write_text("0")
+        stubs = {"pkill": "", "open": "", "sleep": "", "osascript": f'echo "{osascript_answer}"',
+                 "pgrep": f'n=$(($(cat "{count}") + 1)); echo $n > "{count}"; [ $n -le {capture_quits_after} ]'}
+        for name, body in stubs.items():
+            (bin_dir / name).write_text(f'#!/bin/bash\necho "{name} $*" >> "{calls}"\n{body}\n')
+        (home / ".local/bin/meeting-copilot").write_text(f'#!/bin/sh\necho "meeting-copilot" >> "{calls}"\n')
+        folder = self.root / "update-x"
+        folder.mkdir(exist_ok=True)
+        installer = folder / "install.sh"
+        installer.write_text(f'echo "installer" >> "{calls}"; exit 3\n')
+        for path in [*bin_dir.iterdir(), home / ".local/bin/meeting-copilot"]:
+            path.chmod(0o755)
+        command = release_updates.installer_command("macos", installer)
+        # The helper's own command line cannot match its (and install.sh's) Capture pattern.
+        self.assertIsNone(re.search(r"/MeetingCopilotCapture(\s|$)", " ".join(command)))
+        result = subprocess.run(command, env={"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(home)},
+                                capture_output=True, text=True, timeout=90)
+        self.assertFalse(folder.exists())
+        return result.returncode, [line.split(" ")[0] for line in calls.read_text().splitlines()]
+
+    @unittest.skipIf(os.name == "nt", "the Mac helper is bash")
+    def test_mac_helper_quits_capture_normally_installs_and_opens_the_window(self):
+        self.assertEqual(self.run_helper(), (3, ["pgrep", "osascript", "pgrep", "pgrep", "installer", "meeting-copilot"]))
+
+    @unittest.skipIf(os.name == "nt", "the Mac helper is bash")
+    def test_mac_helper_never_installs_or_signals_while_capture_keeps_running(self):
+        for answer in ["execution error: User canceled. (-128)",
+                       "execution error: Not authorized to send Apple events (-1743)"]:
+            with self.subTest(answer=answer):
+                code, calls = self.run_helper(answer, capture_quits_after=10 ** 6)
+                self.assertEqual(code, 75)
+                self.assertNotIn("installer", calls)
+                self.assertNotIn("pkill", calls)
+
+    def test_withdrawn_release_is_not_installed_from_the_cached_offer(self):
+        monitor = self.monitor()
+        monitor.check()
+        monitor.fetch = lambda: []
+        self.assertEqual(self.run_install(monitor)["install"]["state"], "failed")
+        self.assertEqual((self.fetched, self.spawned), ([], []))
+
+    def test_service_counts_an_active_capture_as_recording_whatever_recognition_reports(self):
+        import server
+        with patch.object(server.TRANSCRIPT, "status", "error"), \
+                patch.object(server.RECORDING_LOCATIONS, "active", return_value=None):
+            self.assertFalse(server.UPDATES.recording())
+        with patch.object(server.TRANSCRIPT, "status", "unavailable"), \
+                patch.object(server.RECORDING_LOCATIONS, "active", return_value={"pid": 1}):
+            self.assertTrue(server.UPDATES.recording())
+        with patch.object(server.TRANSCRIPT, "status", "paused"), \
+                patch.object(server.RECORDING_LOCATIONS, "active", return_value=None):
+            self.assertTrue(server.UPDATES.recording())
+
+    def test_http_install_keeps_origin_guard(self):
+        import server
+        monitor = self.monitor()
+        monitor.check()
+        with patch.object(server, "UPDATES", monitor):
+            http = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=http.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = Request(f"http://127.0.0.1:{http.server_port}/api/updates/install", data=b'{"version":"0.1.10"}',
+                                  headers={"Content-Type": "application/json", "Origin": "https://evil.example"})
+                with self.assertRaises(HTTPError) as failure:
+                    urlopen(request)
+                self.assertEqual(failure.exception.code, 403)
+                failure.exception.close()
+                request.remove_header("Origin")
+                with self.assertRaises(HTTPError) as failure:
+                    urlopen(request)  # not from the app's page
+                self.assertEqual(failure.exception.code, 403)
+                failure.exception.close()
+                self.assertEqual(self.fetched, [])
+                self.recording = True
+                request.add_header("Origin", f"http://127.0.0.1:{http.server_port}")
+                with urlopen(request) as response:
+                    self.assertEqual(json.load(response)["updates"]["install"]["state"], "scheduled")
             finally:
                 http.shutdown()
                 http.server_close()

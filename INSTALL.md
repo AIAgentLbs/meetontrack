@@ -90,13 +90,13 @@ assistant. See [delivery setup](docs/DELIVERY.md) for detailed instructions.
 
 ## Update
 
-A newer published version produces an in-app indicator with release notes.
-Settings also contains the platform-specific update command and a copy button.
-Checks run at startup and every 15 minutes while online; they can be disabled.
-
-Finish the call, quit Capture and repeat the installation command. The installer
-preserves recordings, settings and model data. Automatic installation is deferred.
-An unexpected filesystem/permission failure during replacement may require the
+A newer published version shows "Version X available" with an **Update** button.
+It installs that release from GitHub and reopens MeetOnTrack; during a call it
+waits until the call ends. Checks run at startup and every 15 minutes while
+online; they can be disabled. The installer preserves recordings, settings and
+model data. If the button fails, Settings has the installation command as a
+fallback: finish the call, quit Capture and run it. An unexpected
+filesystem/permission failure during replacement may require the
 preserved backup. See [updates](docs/UPDATES.md).
 
 ## Local files and support

@@ -1,4 +1,10 @@
-"""Notification-only release checks. Never downloads, installs or restarts code."""
+"""Release checks and the one-click update.
+
+Checking sends no meeting data. Installing runs only when the person clicks Update: the
+official installer of exactly the offered release, taken from that release's tag on GitHub
+(it pins and verifies the package SHA-256), detached from this service because it replaces
+and restarts it. During a recording the update waits until the recording ends.
+"""
 from __future__ import annotations
 
 import json
@@ -6,6 +12,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import subprocess
 import sys
 import tempfile
 import threading
@@ -14,6 +21,35 @@ from urllib.request import Request, urlopen
 
 REPOSITORY = "AIAgentLbs/meetontrack"
 RELEASE_URL = f"https://github.com/{REPOSITORY}/releases/tag/"
+INSTALLERS = {"macos": "install.sh", "windows": "scripts/windows/install.ps1"}
+INSTALLER_URL = re.compile(r"https://raw\.githubusercontent\.com/AIAgentLbs/meetontrack/"
+                           r"(?:v\d+\.\d+\.\d+/install\.sh|windows-v\d+\.\d+\.\d+/scripts/windows/install\.ps1)")
+# Live states install.ps1 also refuses to update in. The server also treats an active capture
+# marker (`.recording.json` with a live pid) as recording, since recognition can report error/unavailable mid-call.
+RECORDING = {"recording", "paused", "loading", "overloaded"}
+# Mac: install.sh refuses while Capture runs. Quit it like the Quit menu item (an Apple Event):
+# the app decides on its own thread, so a recording that started meanwhile gets its
+# "Quit while recording?" question instead of being cut off, and a kept app is not updated.
+# Never SIGTERM: that path stops a recording without asking. If the quit is refused or
+# Automation is denied, nothing is installed and the person sees "Try again" (details in update.log).
+# Then install, and open the assistant window of whatever is installed now: install.sh opened
+# the new app, or restored the old one after a failure. The pgrep pattern is install.sh's;
+# this command line cannot match it (no space or end after the name).
+MAC_HELPER = r"""
+running() { pgrep -f '/MeetingCopilotCapture([[:space:]]|$)' >/dev/null; }
+if running; then
+  answer=$(osascript -e 'quit app id "com.aiagentlbs.meetingcopilot.capture"' 2>&1)
+  echo "MeetOnTrack update: quit Capture: ${answer:-ok}"
+  for _ in {1..240}; do running || break; sleep 0.25; done
+  if running; then echo "MeetOnTrack update: Capture did not quit (a recording, or Automation denied); nothing installed"; rm -rf "${1%/*}"; exit 75; fi
+fi
+/bin/bash "$1"
+status=$?
+echo "MeetOnTrack update: installer exited with $status"
+"$HOME/.local/bin/meeting-copilot" || open -b com.aiagentlbs.meetingcopilot.capture
+rm -rf "${1%/*}"
+exit $status
+"""
 # Beta fixes should be discovered promptly, without coupling network work to
 # transcript polling. Keep failures bounded too, instead of hiding fixes for a day.
 INTERVAL = 15 * 60
@@ -47,6 +83,54 @@ def select_release(releases, current, platform, channel):
         candidates.append((key, {"version": ".".join(map(str, key)), "url": RELEASE_URL + tag,
                                   "notes": str(item.get("body") or "")[:20000], "prerelease": bool(item.get("prerelease"))}))
     return max(candidates, key=lambda entry: entry[0])[1] if candidates else None
+
+
+def release_tag(version, platform):
+    return ("windows-" if platform == "windows" else "") + "v" + version
+
+
+def installer_url(version, platform):
+    url = f"https://raw.githubusercontent.com/{REPOSITORY}/{release_tag(version, platform)}/{INSTALLERS.get(platform, '')}"
+    if not INSTALLER_URL.fullmatch(url):
+        raise ValueError("Untrusted installer URL")
+    return url
+
+
+def pins_release(script: bytes, version, platform):
+    """The tag's installer must install that very release, not an older one (no downgrade)."""
+    # The one line that names the package (install.sh `VERSION=`, install.ps1 `$url=`) names this tag.
+    prefix, expected = ((b"$url=", f"$url='https://github.com/{REPOSITORY}/releases/download/{release_tag(version, platform)}/")
+                        if platform == "windows" else (b"VERSION=", f'VERSION="{release_tag(version, platform)}"'))
+    lines = [line.rstrip(b"\r") for line in script.split(b"\n") if line.startswith(prefix)]
+    return len(lines) == 1 and (lines[0] == expected.encode() if platform == "macos" else lines[0].startswith(expected.encode()))
+
+
+def fetch_installer(url):
+    with urlopen(Request(url, headers={"User-Agent": "MeetOnTrack-update"}), timeout=30) as response:
+        if response.geturl() != url:
+            raise ValueError("Installer download was redirected")
+        raw = response.read(1_000_001)
+    if len(raw) > 1_000_000:
+        raise ValueError("Installer too large")
+    return raw
+
+
+def installer_command(platform, script: Path):
+    if platform == "windows":
+        shell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        return [str(shell), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)]
+    return ["/bin/bash", "-c", MAC_HELPER, "meetontrack-update", str(script)]
+
+
+def spawn_installer(command, log: Path):
+    """Detached: the installer stops this service (Windows) or the app that owns it (Mac)."""
+    detached = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+                else {"start_new_session": True})
+    # The installer's own defaults, never a leftover override (MEETING_COPILOT_ASSET_URL...).
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEETING_COPILOT_")}
+    with open(log, "ab") as output:
+        return subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+                                env=env, **detached)
 
 
 def installed_release(web_dir: Path, platform=None):
@@ -88,8 +172,12 @@ def fetch_releases():
 
 
 class ReleaseUpdates:
-    def __init__(self, path, identity, fetch=fetch_releases, clock=time.time):
+    def __init__(self, path, identity, fetch=fetch_releases, clock=time.time, recording=lambda: False,
+                 data_dir=None, fetch_script=fetch_installer, spawn=spawn_installer):
         self.path, self.identity, self.fetch, self.clock = Path(path), identity, fetch, clock
+        self.recording, self.fetch_script, self.spawn = recording, fetch_script, spawn
+        self.data_dir = Path(data_dir) if data_dir else self.path.parent
+        self.job = None  # {"version", "state": scheduled | running | failed}
         self.lock = threading.RLock()
         self.busy = False
         self.error = False
@@ -114,6 +202,10 @@ class ReleaseUpdates:
                         self.data["latest"] = None
                     else:
                         self.data["latest"] = {"version": latest["version"], "url": latest["url"], "notes": str(latest.get("notes", ""))[:20000], "prerelease": bool(latest.get("prerelease"))}
+            # An update was running when the previous service stopped: this one tells how it ended.
+            installing = str(saved.get("installing", ""))
+            if version_key(installing) and not (version_key(identity.get("version")) and version_key(identity["version"]) >= version_key(installing)):
+                self.job = {"version": installing, "state": "failed"}
         except (OSError, ValueError, TypeError, AttributeError):
             self.data["latest"] = None
         # A restart checks promptly even if yesterday's cache recorded a failure.
@@ -133,7 +225,7 @@ class ReleaseUpdates:
     def snapshot(self):
         with self.lock:
             latest = self.data["latest"]
-            return {**self.identity, **self.data, "checking": self.busy, "error": self.error,
+            return {**self.identity, **self.data, "checking": self.busy, "error": self.error, "install": self.job,
                     "notify": bool(self.data["enabled"] and latest and latest["version"] != self.data["dismissed"])}
 
     def configure(self, payload):
@@ -146,6 +238,82 @@ class ReleaseUpdates:
                 self.data["dismissed"] = str(payload["dismiss"])[:60]
             self._save()
         return self.snapshot()
+
+    def install(self, version):
+        """The person clicked Update (or Retry) for the release on offer."""
+        with self.lock:
+            latest = self.data["latest"]
+            if self.identity.get("platform") not in INSTALLERS or not latest or latest["version"] != version:
+                raise ValueError("This version is not offered for update")
+            if not self.job or self.job["state"] == "failed":
+                self.job = {"version": version, "state": "scheduled"}
+        self.resume()
+        return self.snapshot()
+
+    def resume(self):
+        """Start a scheduled update unless a recording is in progress (then the loop retries)."""
+        with self.lock:
+            job = self.job
+            if not job or job["state"] != "scheduled" or self.recording():
+                return None
+            job["state"] = "running"
+        worker = threading.Thread(target=self._install, args=(job["version"],), daemon=True, name="release-install")
+        worker.start()
+        return worker
+
+    def _log(self, line):
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            with open(self.data_dir / "update.log", "a", encoding="utf-8") as log:
+                log.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}\n")
+        except OSError:
+            pass
+
+    def _install(self, version):
+        platform = self.identity["platform"]
+        try:
+            # The cached offer is only a notice: the release must still be the one GitHub offers now.
+            fresh = select_release(self.fetch(), self.identity["version"], platform, self.identity["channel"])
+            if fresh:
+                with self.lock:
+                    self.data["latest"] = fresh
+            if not fresh or fresh["version"] != version:
+                raise ValueError(f"{version} is no longer the offered release")
+            url = installer_url(version, platform)
+            script = self.fetch_script(url)
+            if not pins_release(script, version, platform):
+                raise ValueError(f"{url} does not install {release_tag(version, platform)}")
+            if self.recording():  # a call started meanwhile: wait for it again
+                with self.lock:
+                    self.job = {"version": version, "state": "scheduled"}
+                return
+            if platform == "windows" and not script.startswith(b"\xef\xbb\xbf"):
+                script = b"\xef\xbb\xbf" + script  # Windows PowerShell reads a file without BOM as ANSI
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            # A fresh owner-only folder and a new file: nothing pre-existing is followed or reused.
+            target = Path(tempfile.mkdtemp(prefix="update-", dir=self.data_dir)) / (
+                "install.ps1" if platform == "windows" else "install.sh")
+            with open(target, "xb") as handle:
+                handle.write(script)
+            with self.lock:
+                self.data["installing"] = version
+                self._save()
+            self._log(f"installing {release_tag(version, platform)} from {url}")
+            code = self.spawn(installer_command(platform, target), self.data_dir / "update.log").wait()
+            # Success replaces this service before the wait returns; still here means it failed.
+            failed = code != 0
+            if failed:
+                self._log(f"installer exited with {code}; the current version keeps running")
+        except Exception as error:
+            failed = True
+            self._log(f"update to {version} failed: {error}")
+        with self.lock:
+            self.data.pop("installing", None)
+            self.job = {"version": version, "state": "failed"} if failed else None
+            try:
+                self._save()
+            except OSError:
+                pass
 
     def check(self, force=False):
         with self.lock:
@@ -193,5 +361,6 @@ class ReleaseUpdates:
             return
         while not stop.is_set():
             self.check()
+            self.resume()
             if stop.wait(30):
                 return

@@ -1,4 +1,4 @@
-/* Release metadata only. Never executes an installer or interrupts capture. */
+/* Release notice and the one-click update. The server runs the installer; a recording is never interrupted. */
 (() => {
   const find = id => document.getElementById(id);
   const copy = {
@@ -10,9 +10,11 @@
       current: "Installed: {version} · {channel}", fresh: "No newer version found for this platform.", unchecked: "Not checked yet.",
       available: "Version {version} available", notes: "No release notes were provided.",
       link: "Open release and installation instructions", dismiss: "Dismiss notification",
-      safe: "Opening the release does not install it. Finish your call before installing; recording will not be restarted automatically.",
+      safe: "Update installs this release and restarts MeetOnTrack. During a call it waits until the call ends; a recording is never interrupted.",
+      install: "Update", retry: "Try again", scheduled: "Version {version} will be installed after the call",
+      running: "Updating to version {version}…", failed: "Could not update. The current version keeps working.",
       stable: "Stable channel", beta: "Beta channel", saveError: "Could not save the setting. Please try again."
-      , commandHelp: "Manual update: finish your call, quit Capture, then run this in {shell}. This runs the official installer; it installs the version currently published on the website, which may lag the release notice. Check the installed version afterwards. It is not run automatically.",
+      , commandHelp: "If the Update button does not work: finish your call, quit Capture, then run this in {shell}. It installs the version currently published on the website, which may lag the release notice. Check the installed version afterwards.",
       copyCommand: "Copy update command", copied: "Command copied. Run it after your call.", copyFailed: "Could not copy. Select and copy the command above."
     },
     ru: {
@@ -23,13 +25,15 @@
       current: "Установлена: {version} · {channel}", fresh: "Более новой версии для этой платформы нет.", unchecked: "Проверка еще не выполнялась.",
       available: "Доступна версия {version}", notes: "Описание изменений не опубликовано.",
       link: "Открыть релиз и инструкцию по установке", dismiss: "Скрыть уведомление",
-      safe: "Открытие релиза ничего не устанавливает. Устанавливайте после звонка: автоматического перезапуска записи не будет.",
+      safe: "Обновление устанавливает этот релиз и перезапускает MeetOnTrack. Во время звонка оно дождется его окончания: запись не прерывается.",
+      install: "Обновить", retry: "Повторить", scheduled: "Версия {version} установится после звонка",
+      running: "Обновляю до версии {version}…", failed: "Не удалось обновить. Текущая версия продолжает работать.",
       stable: "Стабильные версии", beta: "Бета-версии", saveError: "Не удалось сохранить настройку. Попробуйте еще раз."
-      , commandHelp: "Обновление вручную: завершите звонок, закройте Capture и выполните команду в {shell}. Она запускает официальный установщик версии, опубликованной на сайте; та может отставать от уведомления о релизе. После установки проверьте версию. Автоматически команда не запускается.",
+      , commandHelp: "Если кнопка «Обновить» не сработала: завершите звонок, закройте Capture и выполните команду в {shell}. Она устанавливает версию, опубликованную на сайте; та может отставать от уведомления о релизе. После установки проверьте версию.",
       copyCommand: "Скопировать команду обновления", copied: "Команда скопирована. Выполните ее после звонка.", copyFailed: "Не удалось скопировать. Выделите и скопируйте команду выше."
     }
   };
-  let state = {}, actionError = false;
+  let state = {}, actionError = false, installError = false;
   function render(data = state) {
     state = data;
     const text = copy[document.documentElement.lang === "ru" ? "ru" : "en"];
@@ -51,10 +55,15 @@
     const url = latest?.url || "";
     const trusted = /^https:\/\/github\.com\/AIAgentLbs\/meetontrack\/releases\/tag\/(?:windows-)?v\d+\.\d+\.\d+$/.test(url);
     find("updates-release").hidden = !latest || !trusted;
-    find("updates-notice").hidden = !data.notify || !trusted;
+    // A scheduled or running update stays on screen; a failure (no technical detail, see update.log) can be dismissed.
+    const job = data.install || (installError && latest ? {version: latest.version, state: "failed"} : null);
+    find("updates-notice").hidden = !((job && job.state !== "failed") || (data.notify && trusted));
+    find("updates-notice").textContent = !job ? (latest ? text.available.replace("{version}", latest.version) : "")
+      : text[job.state].replace("{version}", job.version);
+    find("updates-install").hidden = find("updates-notice").hidden || !supported || !trusted || (job && job.state !== "failed");
+    find("updates-install").textContent = text[job?.state === "failed" ? "retry" : "install"];
     if (latest && trusted) {
       const label = text.available.replace("{version}", latest.version);
-      find("updates-notice").textContent = label;
       find("updates-version").textContent = label;
       // Release notes are untrusted text, never HTML.
       find("updates-notes").textContent = latest.notes || text.notes;
@@ -78,6 +87,12 @@
     find("settings-open").click();
     find("updates-settings").focus();
     find("updates-settings").scrollIntoView({block: "nearest"});
+  });
+  find("updates-install").addEventListener("click", async () => {
+    installError = false;
+    await action("/api/updates/install", {version: state.latest?.version});
+    installError = actionError;
+    render();
   });
   find("updates-check").addEventListener("click", () => void action("/api/updates/check", {}));
   find("updates-enabled").addEventListener("change", event => void action("/api/updates/settings", {enabled: event.target.checked}));

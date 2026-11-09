@@ -307,6 +307,20 @@ hashes, Pages removed, and the Windows installer relocated to
 - [ ] MEETONTRACK-141: turning on email/Drive delivery showed `retry_overdue` for meetings from before the channel was
   enabled (Windows 2026-11-09); `delivery_health.py` now applies the same `<channel>_enabled_at` boundary as
   `Archive.deliver`. Fixed on main 2026-11-09 (0c56cce, f7041cf); closes on the next release.
+- [ ] MEETONTRACK-142: one-click in-app update. The header notice "Version X available" has an Update button that runs the
+  official installer of exactly that release from its GitHub tag (detached, log `update.log`); during a recording it is
+  scheduled and starts after the call; Mac quits Capture with SIGTERM, installs and reopens the window. Settings keeps the
+  manual command as a fallback (`release_updates.py`, `updates.js`, [updates](UPDATES.md)). Fixed on main 2026-11-09;
+  closes on the release. First real check: an update between two releases that both contain it, on Mac and Windows.
+  Deferred review findings (P2, 2026-11-09): (a) `install.sh` opens the new app before its readiness check and a failed
+  check rolls back with SIGTERM/SIGKILL without asking about a recording that the new app may have started; fix with a
+  Capture-side "quit when idle" (as `record quit-when-idle` on Windows) used by both rollback and the updater. (b) No
+  cross-process install lock: if the old service restarts mid-install (Windows), a second install can overlap and the
+  slower, older one can win `current.json`; hold a lock and recheck the installed version before committing.
+  (c) Any local process can forge `Origin` and trigger the offered official release; a per-launch token from the app
+  would close it. (d) A persisted live status `recording` left by a Capture crash keeps an update scheduled until the
+  next recording ends; gate on the live marker plus status freshness. (e) A scheduled (after-call) update lives only in
+  memory and is lost if the service restarts during the call; persist it in `updates.json` and revalidate.
 - [ ] MEETONTRACK-138: Mac treats a call app's open output stream as a possible capture failure (`RecordingSession.swift`
   `callCaptureSuspect`), so a browser holding a silent output stream after the call blocks the no-call-audio stop and the
   recording runs to the duration ceiling. Now only a stalled call-track file suppresses the stop indefinitely; open

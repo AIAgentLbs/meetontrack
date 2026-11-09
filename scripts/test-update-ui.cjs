@@ -12,6 +12,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     checked_at: 1000, checking: false, notify: true, latest: {version: '0.1.10',
       url: 'https://github.com/AIAgentLbs/meetontrack/releases/tag/v0.1.10',
       notes: 'Better recording.\n<script>window.UNSAFE = true</script>'}};
+  let installs = [];
   try {
     const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
     page.on('pageerror', error => errors.push(String(error)));
@@ -22,6 +23,11 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
           const data = route.request().postDataJSON();
           if ('enabled' in data) updates.enabled = data.enabled;
           if (data.dismiss || !updates.enabled) updates.notify = false;
+          return route.fulfill({json: {ok: true, updates}});
+        }
+        if (url.pathname === '/api/updates/install') {
+          installs.push(route.request().postDataJSON());
+          updates.install = {version: '0.1.10', state: installs.length === 1 ? 'scheduled' : 'running'};
           return route.fulfill({json: {ok: true, updates}});
         }
         if (url.pathname === '/api/updates/check') return route.fulfill({json: {ok: true, updates}});
@@ -37,6 +43,24 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     });
     await page.goto('http://update-ui.test/');
     await page.locator('#updates-notice').waitFor({state: 'visible'});
+    assert.equal(await page.locator('#updates-notice').textContent(), 'Version 0.1.10 available');
+    assert.equal(await page.locator('#updates-install').textContent(), 'Update');
+    assert.equal(await page.locator('#updates-command').isVisible(), false, 'manual command stays in Settings');
+    await page.locator('#updates-install').click();
+    await page.locator('#updates-notice').getByText('Version 0.1.10 will be installed after the call').waitFor();
+    assert.deepEqual(installs, [{version: '0.1.10'}]);
+    assert.equal(await page.locator('#updates-install').isVisible(), false);
+    updates.install = {version: '0.1.10', state: 'failed'};
+    await page.evaluate(u => window.renderReleaseUpdates(u), updates);
+    assert.equal(await page.locator('#updates-notice').textContent(), 'Could not update. The current version keeps working.');
+    await page.evaluate(u => window.renderReleaseUpdates({...u, notify: false}), updates);
+    assert.equal(await page.locator('#updates-notice').isVisible(), false, 'a dismissed failure hides');
+    await page.evaluate(u => window.renderReleaseUpdates(u), updates);
+    await page.locator('#updates-install').getByText('Try again', {exact: true}).click();
+    await page.locator('#updates-notice').getByText('Updating to version 0.1.10…').waitFor();
+    assert.equal(installs.length, 2);
+    updates.install = null;
+    await page.evaluate(u => window.renderReleaseUpdates(u), updates);
     assert.equal(await page.title(), 'MeetOnTrack by aiagentlbs.com');
     assert.equal(await page.locator('.brand').textContent(), 'MeetOnTrack');
     assert.equal(await page.locator('.brand-company').getAttribute('href'), 'https://aiagentlbs.com/');
@@ -51,11 +75,12 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.equal(await page.evaluate(() => window.UNSAFE), undefined);
     await page.locator('#interface-language').selectOption('en');
     await page.locator('#updates-check').getByText('Check for updates', {exact: true}).waitFor();
-    assert((await page.locator('#updates-safe-install').textContent()).includes('Finish your call'));
+    assert((await page.locator('#updates-safe-install').textContent()).includes('a recording is never interrupted'));
     await page.screenshot({path: '/tmp/meetontrack-updates-desktop.png', fullPage: true});
     await page.locator('#updates-check').click();
     await page.locator('#updates-dismiss').click();
     await page.locator('#updates-notice').waitFor({state: 'hidden'});
+    assert.equal(await page.locator('#updates-install').isVisible(), false);
     assert.equal(await page.locator('#updates-release').isVisible(), true);
     await page.locator('#updates-enabled').uncheck();
     await page.waitForFunction(() => !document.getElementById('updates-enabled').checked);
@@ -63,6 +88,6 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.screenshot({path: '/tmp/meetontrack-updates-mobile.png', fullPage: true});
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     assert.deepEqual(errors, []);
-    console.log('PASS: brand, platform notice, settings, notes XSS safety, language switch, dismiss, opt-out, responsive layout');
+    console.log('PASS: brand, platform notice, one-click update (scheduled, failed, retry), settings, notes XSS safety, language switch, dismiss, opt-out, responsive layout');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
