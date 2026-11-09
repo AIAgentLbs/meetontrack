@@ -1,6 +1,6 @@
 param(
     [string]$PackagePath,
-    [string]$ExpectedSha256 = '8ae7ce7cbf63dd6cf1e67090b4e39e276d615ba50faaf47791cdb65376192ff9',
+    [string]$ExpectedSha256 = 'aeb3fbd506635866fe3c1a7dec2eed88bf35097754f5c85f745398f1c183f143',
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'MeetingCopilot'),
     [string]$UserRoot = $env:USERPROFILE,
     [switch]$SkipModels,
@@ -10,8 +10,8 @@ param(
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
-$version='0.1.24-windows-beta.1'
-$url='https://github.com/AIAgentLbs/meetontrack/releases/download/windows-v0.1.24/meeting-copilot-windows-v0.1.24-x64.zip'
+$version='0.1.25-windows-beta.1'
+$url='https://github.com/AIAgentLbs/meetontrack/releases/download/windows-v0.1.25/meeting-copilot-windows-v0.1.25-x64.zip'
 $utf8=[Text.UTF8Encoding]::new($false)
 $script:copilotDownloadPython=$null
 function Test-OwnRunValue([string]$Value,[string]$VersionsRoot){
