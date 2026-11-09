@@ -289,6 +289,8 @@ hashes, Pages removed, and the Windows installer relocated to
 - [x] MEETONTRACK-123 (shipped in v0.1.21 / windows-v0.1.21, closed 2026-11-04): the report PDF used only the first browser found; Chrome that cannot print
   sent the HTML fallback although Edge or Chromium could print (`archive.py` `_print_pdf`). Now every
   installed browser is tried in order before the HTML fallback. Fixed on main 2026-11-04; closes on release.
+- [ ] MEETONTRACK-135: Telegram delivery has no in-app setup and cannot work on Windows (no telethon in the
+  bundled Python; it relies on a Telethon env file from a developer checkout). Proposed: in-app "Connect Telegram" via a bot.
 - [ ] MEETONTRACK-136: Windows calls never got their final transcript or report: the recorder writes `transcript.json`
   with a UTF-8 byte order mark (.NET `Encoding.UTF8`, `TranscriptDocument.cs`) and `canonical_transcript.py` failed on it
   silently. The web service now reads `utf-8-sig`; the recorder writes no BOM; existing meetings import on the first
