@@ -95,9 +95,9 @@ hashes, Pages removed, and the Windows installer relocated to
   (`scripts/deploy-*.py`) assume 43121. Resolve it like the Mac (`LocalServer.swift`, MEETONTRACK-130): stop a stale
   own service, leave a foreign program alone and use a free port recorded in `server-port`. Split out of 130 at the
   0.1.22 release.
-- [ ] MEETONTRACK-133 (fixed on main 4d98451, closes on release): Windows opened a new browser tab without an icon on each
+- [x] MEETONTRACK-133 (shipped in windows-v0.1.23, closed 2026-11-09; fixed on main 4d98451): Windows opened a new browser tab without an icon on each
   launch. The launcher and tray now reuse one assistant window (Edge app window), the page has the website icon.
-- [ ] MEETONTRACK-134 (fixed on main 88f10ec, closes on release): a terminal flashed on Windows every few minutes because
+- [x] MEETONTRACK-134 (shipped in windows-v0.1.23, closed 2026-11-09; fixed on main 88f10ec): a terminal flashed on Windows every few minutes because
   console helpers (codex.cmd app-server) started from pythonw got their own window. `hidden_consoles.py` hides them in Popen.
 - [ ] MEETONTRACK-132: when the Mac app quits, its server ends with "Fatal Python error: _enter_buffered_busy: could
   not acquire lock for <stdin> at interpreter shutdown" in `server.log` (seen on 0.1.21 quits on the owner's Mac,
