@@ -299,6 +299,11 @@ hashes, Pages removed, and the Windows installer relocated to
   noise defeated the both-tracks silence stop. Now an automatic recording stops after `silence_stop_minutes` with no call
   audio (`stop_reason` "no-call-audio"; `AutoRecordPolicy.cs`, `AutoRecordController.swift`), and backstop stops stand down
   until the call app lets go of the mic on Mac too. Fixed on main 2026-11-09; closes on the Mac and Windows release.
+- [ ] MEETONTRACK-138: Mac treats a call app's open output stream as a possible capture failure (`RecordingSession.swift`
+  `callCaptureSuspect`), so a browser holding a silent output stream after the call blocks the no-call-audio stop and the
+  recording runs to the duration ceiling. Bound the suppression or require a stalled file; check with a Meet tab left open.
+- [ ] MEETONTRACK-139: Windows final transcription of 2026.11.08-1734 found `mic.wav` locked by another process
+  (`transcribe.log`); find the holder after recording ends and make the transcriber wait or retry.
 - [ ] MEETONTRACK-118: a final transcript that never arrives stops being flagged after the 3-day delivery window
   (`archive.py` `_final_wait`, `delivery_health`), and a late final makes the report on request only.
 - [ ] MEETONTRACK-89: Mac call-audio capture fades to silence during Chrome calls (39 of 53 min lost on 2026-10-21);
