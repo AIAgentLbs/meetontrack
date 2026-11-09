@@ -304,6 +304,9 @@ hashes, Pages removed, and the Windows installer relocated to
   noise defeated the both-tracks silence stop. Now an automatic recording stops after `silence_stop_minutes` with no call
   audio (`stop_reason` "no-call-audio"; `AutoRecordPolicy.cs`, `AutoRecordController.swift`), and backstop stops stand down
   until the call app lets go of the mic on Mac too. Fixed on main 2026-11-09; closes on the Mac and Windows release.
+- [ ] MEETONTRACK-141: turning on email/Drive delivery showed `retry_overdue` for meetings from before the channel was
+  enabled (Windows 2026-11-09); `delivery_health.py` now applies the same `<channel>_enabled_at` boundary as
+  `Archive.deliver`. Fixed on main 2026-11-09 (0c56cce, f7041cf); closes on the next release.
 - [ ] MEETONTRACK-138: Mac treats a call app's open output stream as a possible capture failure (`RecordingSession.swift`
   `callCaptureSuspect`), so a browser holding a silent output stream after the call blocks the no-call-audio stop and the
   recording runs to the duration ceiling. Now only a stalled call-track file suppresses the stop indefinitely; open
