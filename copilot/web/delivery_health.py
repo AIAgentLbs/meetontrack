@@ -106,7 +106,7 @@ class DeliveryHealth:
                 # Archive.deliver never sends a meeting that started before the
                 # channel was turned on; such a report is not a failed delivery.
                 boundary = _date(settings.get(("email" if channel == "gmail" else channel) + "_enabled_at"))
-                if boundary and raw in {None, "not_configured"}:
+                if boundary and raw in {None, "not_configured"} and not report.get("report_missing"):
                     meeting_start = _date(_read(self.archive_root / path.parent.name / "meeting.json").get("started_at"))
                     if (meeting_start or started or generated or boundary) < boundary:
                         continue

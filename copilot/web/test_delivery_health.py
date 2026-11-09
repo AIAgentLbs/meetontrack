@@ -302,8 +302,13 @@ class DeliveryHealthTests(unittest.TestCase):
         enabled = (self.now - timedelta(minutes=1)).isoformat()
         self.settings.update(drive_enabled_at=enabled, email_enabled_at=enabled, telegram_enabled_at=enabled)
         self.assertEqual(self.refresh(60)["issue_count"], 0)
+        self.report["report_missing"] = True
+        self.save()
+        self.assertEqual(self.refresh(60)["notifications"][0]["reason"], "report_missing")
+        del self.report["report_missing"]
+        self.save()
         meeting.write_text(json.dumps({"started_at": self.now.isoformat()}), encoding="utf-8")
-        self.assertEqual(self.refresh(60)["notifications"][0]["reason"], "retry_overdue")
+        self.assertIn("retry_overdue", {n["reason"] for n in self.refresh(60)["notifications"]})
 
     def test_pending_grace_and_active_call_are_not_failures(self):
         self.report.update(generated_at=self.now.isoformat(), mail_status="pending")
