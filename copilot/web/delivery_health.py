@@ -51,8 +51,9 @@ class DeliveryHealth:
     mail_auth_reasons = {"authorization_expired", "authorization_required", "authorization_missing",
                          "permission_missing", "smtp_auth_failed"}
 
-    def __init__(self, reports_root: Path, state_file: Path, retry_days: int = 3):
+    def __init__(self, reports_root: Path, state_file: Path, retry_days: int = 3, archive_root: Path | None = None):
         self.reports_root = reports_root
+        self.archive_root = archive_root or reports_root.parent / "archive"
         self.state_file = state_file
         self.retry_days = retry_days
         self.lock = threading.RLock()
@@ -102,6 +103,13 @@ class DeliveryHealth:
                 if not configured[channel]:
                     continue
                 raw = report.get(field)
+                # Archive.deliver never sends a meeting that started before the
+                # channel was turned on; such a report is not a failed delivery.
+                boundary = _date(settings.get(("email" if channel == "gmail" else channel) + "_enabled_at"))
+                if boundary and raw in {None, "not_configured"}:
+                    meeting_start = _date(_read(self.archive_root / path.parent.name / "meeting.json").get("started_at"))
+                    if (meeting_start or started or generated or boundary) < boundary:
+                        continue
                 if expired and raw in {None, "not_configured"} and not report.get("report_missing"):
                     continue
                 if report.get("delivery_on_request") and raw in {None, "not_configured", "pending"}:

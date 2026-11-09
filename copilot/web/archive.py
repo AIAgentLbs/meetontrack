@@ -183,7 +183,7 @@ class MeetingArchive:
         self._index_state = threading.local()
         self.speaker_edits = SpeakerEdits(archive_root)
         self.delivery_monitor = DeliveryHealth(
-            reports_root, config_root / "delivery-health.json", self.delivery_retry_days
+            reports_root, config_root / "delivery-health.json", self.delivery_retry_days, archive_root
         )
         # ponytail: names cached for the process lifetime; a rename shows after restart.
         self._delivery_labels: dict[str, dict] = {}

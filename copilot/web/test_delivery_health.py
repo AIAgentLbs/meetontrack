@@ -291,6 +291,20 @@ class DeliveryHealthTests(unittest.TestCase):
         self.assertEqual(self.refresh()["notifications"], [])
         self.assertEqual(self.refresh()["issue_count"], 0)
 
+    def test_meeting_before_channel_was_enabled_is_not_overdue(self):
+        # Archive.deliver skips meetings started before <channel>_enabled_at.
+        self.report.update(generated_at=self.now.isoformat(), drive_status="not_configured",
+                           mail_status="not_configured", telegram_status="not_configured")
+        self.save()
+        meeting = self.root / "archive" / "test" / "meeting.json"
+        meeting.parent.mkdir(parents=True)
+        meeting.write_text(json.dumps({"started_at": (self.now - timedelta(days=2)).isoformat()}), encoding="utf-8")
+        enabled = (self.now - timedelta(minutes=1)).isoformat()
+        self.settings.update(drive_enabled_at=enabled, email_enabled_at=enabled, telegram_enabled_at=enabled)
+        self.assertEqual(self.refresh(60)["issue_count"], 0)
+        meeting.write_text(json.dumps({"started_at": self.now.isoformat()}), encoding="utf-8")
+        self.assertEqual(self.refresh(60)["notifications"][0]["reason"], "retry_overdue")
+
     def test_pending_grace_and_active_call_are_not_failures(self):
         self.report.update(generated_at=self.now.isoformat(), mail_status="pending")
         self.save()
