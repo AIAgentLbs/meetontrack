@@ -275,12 +275,12 @@ final class RecordingSession {
     /// look identical, and only one of them should end a meeting.
     var levelsMeasurable: Bool { mic.levelMeasurable && system.levelMeasurable }
 
-    /// True when the far-end track's quiet may be our capture failing rather
-    /// than the call being over: its file has stopped growing, or the call app
-    /// is still playing output that the tap is not hearing (a dead tap writes
-    /// zeros, and its recovery can run out of attempts).
-    var callCaptureSuspect: Bool { trackStalled.contains("system") || callAppHasOutput }
-    private var callAppHasOutput = false
+    /// Evidence that the far-end track's quiet may be our capture failing
+    /// rather than the call being over. A stalled file is confirmed failure.
+    /// Running output is weaker: it means open output I/O, not audible
+    /// samples, and a browser keeps a silent stream open after a call.
+    var callTrackStalled: Bool { trackStalled.contains("system") }
+    private(set) var callAppHasOutput = false
 
     // MARK: - discarding
 

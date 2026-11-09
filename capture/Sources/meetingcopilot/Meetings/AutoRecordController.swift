@@ -233,7 +233,8 @@ final class AutoRecordController {
 
         if let reason = Self.backstopStop(
             trigger: session.trigger, levelsMeasurable: session.levelsMeasurable,
-            callCaptureSuspect: session.callCaptureSuspect, paused: session.isPaused,
+            callTrackStalled: session.callTrackStalled,
+            callAppHasOutput: session.callAppHasOutput, paused: session.isPaused,
             micQuietFor: micQuietFor, farEndQuietFor: farEndQuietFor, settings: settings) {
             let minutes = Int(settings.silenceStop / 60)
             lastDecision = reason == "silence"
@@ -287,7 +288,8 @@ final class AutoRecordController {
     nonisolated static func backstopStop(
         trigger: RecordingSession.Trigger,
         levelsMeasurable: Bool,
-        callCaptureSuspect: Bool = false,
+        callTrackStalled: Bool = false,
+        callAppHasOutput: Bool = false,
         paused: Bool = false,
         micQuietFor: TimeInterval,
         farEndQuietFor: TimeInterval,
@@ -297,10 +299,15 @@ final class AutoRecordController {
         guard trigger != .manual, levelsMeasurable else { return nil }
         guard farEndQuietFor > settings.silenceStop else { return nil }
         if micQuietFor > settings.silenceStop { return "silence" }
-        // A capture that may be failing (stalled file, or the call app playing
-        // output the tap does not hear) is our outage, not the call ending.
+        // A stalled call-track file is our outage, not the call ending.
         // A paused recording is the user's choice; stopping it would make it unresumable.
-        return callCaptureSuspect || paused ? nil : "no-call-audio"
+        if callTrackStalled || paused { return nil }
+        // Open output I/O is not audible samples: a browser keeps a silent
+        // stream open after a call. It buys one more window, long after tap
+        // recovery (3 attempts, 20 s apart) has had its chance, then the rule
+        // fires anyway (MEETONTRACK-138).
+        if callAppHasOutput, farEndQuietFor <= 2 * settings.silenceStop { return nil }
+        return "no-call-audio"
     }
 
     // MARK: - discard

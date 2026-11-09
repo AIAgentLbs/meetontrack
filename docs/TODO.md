@@ -306,7 +306,9 @@ hashes, Pages removed, and the Windows installer relocated to
   until the call app lets go of the mic on Mac too. Fixed on main 2026-11-09; closes on the Mac and Windows release.
 - [ ] MEETONTRACK-138: Mac treats a call app's open output stream as a possible capture failure (`RecordingSession.swift`
   `callCaptureSuspect`), so a browser holding a silent output stream after the call blocks the no-call-audio stop and the
-  recording runs to the duration ceiling. Bound the suppression or require a stalled file; check with a Meet tab left open.
+  recording runs to the duration ceiling. Now only a stalled call-track file suppresses the stop indefinitely; open
+  output alone defers it by one more `silence_stop_minutes` window (20 min at the default), after which "no-call-audio"
+  fires. Fixed on main 2026-11-09; closes on the next Mac release. Confirm with a Meet tab left open after a call.
 - [ ] MEETONTRACK-139: Windows final transcription of 2026.11.08-1734 found `mic.wav` locked by another process
   (`transcribe.log`); find the holder after recording ends and make the transcriber wait or retry.
 - [ ] MEETONTRACK-118: a final transcript that never arrives stops being flagged after the 3-day delivery window

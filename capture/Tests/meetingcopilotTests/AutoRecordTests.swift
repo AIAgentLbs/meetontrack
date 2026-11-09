@@ -166,8 +166,32 @@ struct NoCallAudioStopTests {
     @Test("A stalled call-audio capture is an outage, not the end of the call")
     func stalledCaptureDoesNotStop() {
         #expect(AutoRecordController.backstopStop(
-            trigger: .micActivity, levelsMeasurable: true, callCaptureSuspect: true,
+            trigger: .micActivity, levelsMeasurable: true, callTrackStalled: true,
+            micQuietFor: 1, farEndQuietFor: 5 * 3600, settings: settings) == nil)
+    }
+
+    /// MEETONTRACK-138: a browser holds a silent output stream open after the
+    /// call. Running output buys a recovery window, not the duration ceiling.
+    @Test("Call-app output without sound defers the stop by one window, not forever")
+    func lingeringOutputIsBounded() {
+        // A short glitch within the bound: the tap may be recovering.
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
             micQuietFor: 1, farEndQuietFor: window + 1, settings: settings) == nil)
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
+            micQuietFor: 1, farEndQuietFor: 2 * window, settings: settings) == nil)
+        // Past the bound the open stream no longer counts as evidence.
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
+            micQuietFor: 1, farEndQuietFor: 2 * window + 1, settings: settings) == "no-call-audio")
+        // Manual and paused recordings stay untouched past the bound.
+        #expect(AutoRecordController.backstopStop(
+            trigger: .manual, levelsMeasurable: true, callAppHasOutput: true,
+            micQuietFor: 1, farEndQuietFor: 5 * 3600, settings: settings) == nil)
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true, paused: true,
+            micQuietFor: 1, farEndQuietFor: 5 * 3600, settings: settings) == nil)
     }
 
     @Test("Both tracks silent is still reported as silence, and unmeasurable levels stop nothing")
