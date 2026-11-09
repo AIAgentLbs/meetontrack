@@ -24,6 +24,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urldefrag, urlparse, urlsplit, urlunsplit, parse_qs
 
+import hidden_consoles
+hidden_consoles.install()  # before any helper starts: no console windows on Windows
 from archive import MeetingArchive
 from analysis_rebuild import WINDOW as ANALYSIS_WINDOW, AnalysisRebuilds, chunk_key, transcript_chunks, transcript_signature
 from canonical_transcript import canonical_segments
