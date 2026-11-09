@@ -454,6 +454,10 @@ public sealed class AmanuRuntime : IAsyncDisposable
                     await coordinator.EnforceCeilingAsync(now, cancellationToken);
                     if (!coordinator.Policy.Enabled && !State.IsRecording && coordinator.Policy.Phase == AutoRecordPhase.Watching) continue;
                     var observation = activityMonitor.Observe(now);
+                    // While recording, "call audio" is what the call track actually
+                    // captured, not the first mic owner's render session (MEETONTRACK-137).
+                    if (State.IsRecording)
+                        observation = observation with { CallAudioHasSound = capture.SystemHeardWithin(TimeSpan.FromSeconds(3)) };
                     await coordinator.ObserveAsync(observation, cancellationToken);
                     monitorFailing = false;
                 }

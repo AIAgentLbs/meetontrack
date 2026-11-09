@@ -64,12 +64,13 @@ public sealed class AutoRecordPolicy(AutoRecordOptions initial)
 {
     public static readonly TimeSpan FirstRetry = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan LongestRetry = TimeSpan.FromMinutes(10);
-    private static readonly HashSet<string> BackstopReasons = ["max-duration", "silence"];
+    private static readonly HashSet<string> BackstopReasons = ["max-duration", "silence", "no-call-audio"];
 
     private AutoRecordOptions options = initial;
     private DateTimeOffset? microphoneHeldSince;
     private DateTimeOffset? microphoneReleasedSince;
     private DateTimeOffset? bothTracksSilentSince;
+    private DateTimeOffset? callAudioSilentSince;
     private DateTimeOffset? recordingStartedAt;
     private DateTimeOffset? backingOffUntil;
     private bool manualRecording;
@@ -100,6 +101,7 @@ public sealed class AutoRecordPolicy(AutoRecordOptions initial)
         manualRecording = manual;
         microphoneReleasedSince = null;
         bothTracksSilentSince = null;
+        callAudioSilentSince = null;
         backingOffUntil = null;
         if (!manual) startFailures = 0;
     }
@@ -113,6 +115,7 @@ public sealed class AutoRecordPolicy(AutoRecordOptions initial)
         microphoneHeldSince = null;
         microphoneReleasedSince = null;
         bothTracksSilentSince = null;
+        callAudioSilentSince = null;
         if (manual || BackstopReasons.Contains(reason))
         {
             Phase = AutoRecordPhase.StandingDown;
@@ -203,11 +206,19 @@ public sealed class AutoRecordPolicy(AutoRecordOptions initial)
 
         if (observation.MicrophoneHasSound || observation.CallAudioHasSound) bothTracksSilentSince = null;
         else bothTracksSilentSince ??= observation.At;
+        if (observation.CallAudioHasSound) callAudioSilentSince = null;
+        else callAudioSilentSince ??= observation.At;
 
         if (microphoneReleasedSince is { } released && observation.At - released >= options.StopDelay)
             return AutoRecordDecision.Stop("call-ended");
         if (bothTracksSilentSince is { } silent && observation.At - silent >= options.SilenceStop)
             return AutoRecordDecision.Stop("silence");
+        // A call app that keeps the mic after the call (a browser tab) defeats
+        // "call-ended", and room noise on the mic defeats "silence": 2026.11.08
+        // recorded 4.8 h of an empty room (MEETONTRACK-137). No call audio for the same window
+        // the silence stop uses is not a call, however loud the room is.
+        if (callAudioSilentSince is { } noCall && observation.At - noCall >= options.SilenceStop)
+            return AutoRecordDecision.Stop("no-call-audio");
         return AutoRecordDecision.None;
     }
 

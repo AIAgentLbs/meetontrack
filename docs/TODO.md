@@ -295,6 +295,10 @@ hashes, Pages removed, and the Windows installer relocated to
   with a UTF-8 byte order mark (.NET `Encoding.UTF8`, `TranscriptDocument.cs`) and `canonical_transcript.py` failed on it
   silently. The web service now reads `utf-8-sig`; the recorder writes no BOM; existing meetings import on the first
   pass after start. Fixed on main 2026-11-09; closes on the Windows release.
+- [ ] MEETONTRACK-137: an automatic recording ran 4.8 h on Windows (2026-11-08): Chrome kept the mic after the call and room
+  noise defeated the both-tracks silence stop. Now an automatic recording stops after `silence_stop_minutes` with no call
+  audio (`stop_reason` "no-call-audio"; `AutoRecordPolicy.cs`, `AutoRecordController.swift`), and backstop stops stand down
+  until the call app lets go of the mic on Mac too. Fixed on main 2026-11-09; closes on the Mac and Windows release.
 - [ ] MEETONTRACK-118: a final transcript that never arrives stops being flagged after the 3-day delivery window
   (`archive.py` `_final_wait`, `delivery_health`), and a late final makes the report on request only.
 - [ ] MEETONTRACK-89: Mac call-audio capture fades to silence during Chrome calls (39 of 53 min lost on 2026-10-21);

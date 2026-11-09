@@ -103,7 +103,7 @@ struct AutoRecordTests {
     /// started while meetingcopilot was being reinstalled.
     @Test("A recording we ended ourselves is never discarded")
     func reasonsWeChoseAreKept() {
-        for reason in ["app-quit", "max-duration", "manual"] {
+        for reason in ["app-quit", "max-duration", "manual", "no-call-audio"] {
             #expect(!AutoRecordController.shouldDiscard(
                 trigger: .micActivity, reason: reason, duration: 5, settings: settings))
         }
@@ -120,6 +120,94 @@ struct AutoRecordTests {
             trigger: .micActivity, reason: "call-ended", duration: 310, settings: patient))
         #expect(AutoRecordController.trailingQuiet(for: "call-ended", settings: patient) == 300)
         #expect(AutoRecordController.trailingQuiet(for: "app-quit", settings: patient) == nil)
+    }
+}
+
+/// 2026.11.08: a browser kept the mic after a call, room noise kept the mic
+/// track "speaking", and an empty room was recorded for 4.8 hours. No call
+/// audio for the silence window ends an automatic recording on its own.
+struct NoCallAudioStopTests {
+    private let settings = Config.AutoRecordSettings()
+    private var window: TimeInterval { settings.silenceStop }
+
+    @Test("Mic noise with silent call audio stops an automatic recording")
+    func roomNoiseStops() {
+        for trigger in [RecordingSession.Trigger.micActivity, .calendar] {
+            #expect(AutoRecordController.backstopStop(
+                trigger: trigger, levelsMeasurable: true,
+                micQuietFor: 1, farEndQuietFor: window + 1, settings: settings) == "no-call-audio")
+            #expect(AutoRecordController.backstopStop(
+                trigger: trigger, levelsMeasurable: true,
+                micQuietFor: 1, farEndQuietFor: window - 1, settings: settings) == nil)
+        }
+    }
+
+    @Test("A manual recording is never stopped for missing call audio")
+    func manualNeverStops() {
+        #expect(AutoRecordController.backstopStop(
+            trigger: .manual, levelsMeasurable: true,
+            micQuietFor: 1, farEndQuietFor: 5 * 3600, settings: settings) == nil)
+    }
+
+    @Test("Call audio keeps an automatic recording running")
+    func callAudioKeepsRunning() {
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true,
+            micQuietFor: 5 * 3600, farEndQuietFor: 1, settings: settings) == nil)
+    }
+
+    @Test("A stalled call-audio capture is an outage, not the end of the call")
+    func stalledCaptureDoesNotStop() {
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callCaptureSuspect: true,
+            micQuietFor: 1, farEndQuietFor: window + 1, settings: settings) == nil)
+    }
+
+    @Test("Both tracks silent is still reported as silence, and unmeasurable levels stop nothing")
+    func silenceAndUnmeasurable() {
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true,
+            micQuietFor: window + 1, farEndQuietFor: window + 1, settings: settings) == "silence")
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: false,
+            micQuietFor: window + 1, farEndQuietFor: window + 1, settings: settings) == nil)
+    }
+
+    /// The app that defeated "call-ended" still holds the mic after a backstop
+    /// stop; the controller must not start the same recording again.
+    @Test("A backstop stop does not restart while the app still holds the mic")
+    @MainActor
+    func backstopDoesNotRearm() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var session: RecordingSession? = try RecordingSession(root: root, trigger: .micActivity)
+        var clock = Date()
+        var stops: [String] = []
+        var starts = 0
+        var settings = Config.AutoRecordSettings()
+        settings.startDelay = 0
+        let controller = AutoRecordController(
+            settings: settings, calendar: nil, loadSettings: { settings },
+            checkMic: { _ in
+                MicActivityMonitor.Result(
+                    active: true, names: ["Google Chrome"], families: ["com.google.Chrome"],
+                    allHolders: ["Google Chrome"])
+            },
+            now: { clock })
+        controller.currentSession = { session }
+        controller.stopRecording = { stops.append($0); session = nil }
+        controller.startRecording = { _, _ in starts += 1 }
+
+        controller.tick()
+        clock.addTimeInterval(settings.silenceStop + 5)
+        controller.tick()
+        #expect(stops.count == 1)
+        for _ in 0..<12 {
+            clock.addTimeInterval(5)
+            controller.tick()
+        }
+        #expect(starts == 0)
     }
 }
 

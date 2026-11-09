@@ -135,8 +135,8 @@ enum SettingsSchema {
             Entry(["auto_record", "silence_stop_minutes"],
                   localised("Stop after silence on both tracks", "Останавливать после тишины на обеих дорожках"),
                   localised(
-                      "The backstop against an app that never releases the microphone.",
-                      "Страховка от приложения, которое так и не отпускает микрофон."),
+                      "The backstop against an app that never releases the microphone. No call audio for this long also stops an automatic recording, however noisy the room.",
+                      "Страховка от приложения, которое так и не отпускает микрофон. Если столько же нет звука звонка, автоматическая запись тоже останавливается, даже при шуме в комнате."),
                   .number(unit: localised("minutes", "мин")), default: 10),
             Entry(["auto_record", "max_duration_minutes"],
                   localised("Hard duration ceiling", "Жёсткий предел длительности"),

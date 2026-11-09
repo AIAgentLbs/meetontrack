@@ -87,6 +87,57 @@ public sealed class AutoRecordPolicyTests
     }
 
     [Fact]
+    public void Mic_noise_without_call_audio_stops_an_automatic_recording()
+    {
+        var policy = Policy();
+        policy.RecordingStarted(Noon, manual: false);
+
+        Assert.Equal(AutoRecordDecision.None,
+            policy.Observe(RoomNoiseObservation(Noon.AddMinutes(1), "chrome.exe")));
+        Assert.Equal(AutoRecordDecision.None,
+            policy.Observe(RoomNoiseObservation(Noon.AddMinutes(10).AddSeconds(59), "chrome.exe")));
+        Assert.Equal(AutoRecordDecision.Stop("no-call-audio"),
+            policy.Observe(RoomNoiseObservation(Noon.AddMinutes(11), "chrome.exe")));
+
+        policy.RecordingStopped("no-call-audio");
+        Assert.Equal(AutoRecordDecision.None,
+            policy.Observe(RoomNoiseObservation(Noon.AddMinutes(12), "chrome.exe")));
+        Assert.Equal(AutoRecordPhase.StandingDown, policy.Phase);
+    }
+
+    [Fact]
+    public void Mic_noise_without_call_audio_never_stops_a_manual_recording()
+    {
+        var policy = Policy();
+        policy.RecordingStarted(Noon, manual: true);
+
+        policy.Observe(RoomNoiseObservation(Noon.AddMinutes(1), "chrome.exe"));
+        Assert.Equal(AutoRecordDecision.None,
+            policy.Observe(RoomNoiseObservation(Noon.AddHours(2), "chrome.exe")));
+    }
+
+    [Fact]
+    public void Call_audio_keeps_an_automatic_recording_running()
+    {
+        var policy = Policy();
+        policy.RecordingStarted(Noon, manual: false);
+
+        for (var minute = 1; minute <= 60; minute++)
+            Assert.Equal(AutoRecordDecision.None,
+                policy.Observe(Observation(Noon.AddMinutes(minute), micOwner: "chrome.exe")));
+    }
+
+    [Theory]
+    [InlineData(true, 32, new byte[] { 0, 0, 0, 0, 0x6F, 0x12, 0x03, 0x3B }, false)] // 0.002, under the threshold
+    [InlineData(true, 32, new byte[] { 0, 0, 0, 0, 0xCD, 0xCC, 0x4C, 0x3D }, true)]  // 0.05
+    [InlineData(false, 16, new byte[] { 0x10, 0x00, 0xF0, 0xFF }, false)]            // +16 / -16 of 32767
+    [InlineData(false, 16, new byte[] { 0x00, 0x00, 0x00, 0xC0 }, true)]             // -16384
+    [InlineData(false, 24, new byte[] { 0, 0, 0 }, true)]                            // unmeasurable counts as sound
+    public void Captured_call_audio_is_measured_against_the_sound_threshold(
+        bool isFloat, int bits, byte[] data, bool sound) =>
+        Assert.Equal(sound, AudioPeak.Exceeds(data, isFloat, bits, 0.0025f));
+
+    [Fact]
     public void Automatic_stop_rearms_policy_for_the_next_call()
     {
         var policy = Policy();
@@ -195,6 +246,13 @@ public sealed class AutoRecordPolicyTests
             MicrophoneOwner: micOwner,
             MicrophoneHasSound: micOwner is not null,
             CallAudioHasSound: micOwner is not null);
+
+    private static AudioObservation RoomNoiseObservation(DateTimeOffset at, string micOwner) => new(
+        At: at,
+        ConfiguredCallProcessOwnsMicrophone: true,
+        MicrophoneOwner: micOwner,
+        MicrophoneHasSound: true,
+        CallAudioHasSound: false);
 
     private static AudioObservation SilentObservation(DateTimeOffset at, string micOwner) => new(
         At: at,

@@ -31,12 +31,30 @@ public sealed class WindowsAudioCapture : IAudioCapture, ILiveAudioSource
     private long startedAt100ns;
     private volatile bool paused;
     private volatile bool running;
+    private long lastSystemSound100ns;
+    private volatile bool systemLost;
+    private bool systemIsFloat;
+    /// <summary>The level the call-activity monitor already treats as sound.</summary>
+    private const float SoundThreshold = 0.0025f;
+    private static readonly Guid KsDataFormatIeeeFloat = new("00000003-0000-0010-8000-00aa00389b71");
 
     public bool IsRunning => running;
     public long ElapsedMs => (TrackWriter.Now100ns() - startedAt100ns) / 10_000;
     public event LiveAudioHandler? LiveAudioAvailable;
     public event EventHandler? CaptureStarted;
     public Func<Task>? LiveStopping { get; set; }
+
+    /// <summary>
+    /// Whether the captured call track — the call's own process tree, or everything
+    /// Windows plays — carried sound within <paramref name="window"/>. Measured on
+    /// the recorded buffers, so a child process or a lingering second app cannot
+    /// mislead the no-call-audio stop. A pause counts as sound (you chose it), and
+    /// so does a lost call track: a capture failure is not the call ending, and the
+    /// microphone recording must carry on.
+    /// </summary>
+    public bool SystemHeardWithin(TimeSpan window) =>
+        paused || systemLost
+        || TrackWriter.Now100ns() - Interlocked.Read(ref lastSystemSound100ns) <= window.Ticks;
 
     /// <summary>A track stopped delivering audio because its device went away; the recording carries on with the other.</summary>
     public event EventHandler<string>? TrackLost;
@@ -54,6 +72,8 @@ public sealed class WindowsAudioCapture : IAudioCapture, ILiveAudioSource
         if (microphone is not null || system is not null) throw new InvalidOperationException("Capture is already running.");
         cancellationToken.ThrowIfCancellationRequested();
         startedAt100ns = TrackWriter.Now100ns();
+        Interlocked.Exchange(ref lastSystemSound100ns, startedAt100ns);
+        systemLost = false;
         try
         {
             microphone = await new WasapiRecorderBuilder().WithDefaultDeviceStreamRouting().BuildAsync();
@@ -72,10 +92,18 @@ public sealed class WindowsAudioCapture : IAudioCapture, ILiveAudioSource
 
             microphoneTrack = new TrackWriter(session.MicrophoneTrack, microphone.WaveFormat, startedAt100ns);
             systemTrack = new TrackWriter(session.SystemTrack, system.WaveFormat, startedAt100ns);
+            systemIsFloat = system.WaveFormat.Encoding == WaveFormatEncoding.IeeeFloat
+                || (system.WaveFormat is WaveFormatExtensible extensible
+                    && extensible.SubFormat == KsDataFormatIeeeFloat);
             microphone.DataAvailable += OnMicrophoneData;
             system.DataAvailable += OnSystemData;
             microphone.RecordingStopped += (_, args) => { if (args.Exception is not null) TrackLost?.Invoke(this, "mic"); };
-            system.RecordingStopped += (_, args) => { if (args.Exception is not null) TrackLost?.Invoke(this, "system"); };
+            system.RecordingStopped += (_, args) =>
+            {
+                if (args.Exception is null) return;
+                systemLost = true;
+                TrackLost?.Invoke(this, "system");
+            };
             microphone.StartRecording();
             system.StartRecording();
             running = true;
@@ -137,6 +165,9 @@ public sealed class WindowsAudioCapture : IAudioCapture, ILiveAudioSource
         var silent = paused || flags.HasFlag(AudioClientBufferFlags.Silent);
         var invalidTime = flags.HasFlag(AudioClientBufferFlags.TimestampError);
         systemTrack?.Write(buffer, silent, qpcPosition, invalidTime);
+        if (!silent && system is not null
+            && AudioPeak.Exceeds(buffer, systemIsFloat, system.WaveFormat.BitsPerSample, SoundThreshold))
+            Interlocked.Exchange(ref lastSystemSound100ns, TrackWriter.Now100ns());
         if (system is not null) LiveAudioAvailable?.Invoke(false, buffer, system.WaveFormat, silent,
             ((qpcPosition > 0 && !invalidTime ? qpcPosition : TrackWriter.Now100ns()) - startedAt100ns) / 10_000);
     }

@@ -48,7 +48,7 @@ final class AutoRecordController {
     private var micActiveSince: Date?
     private var micIdleSince: Date?
     private var handledEventIDs = Set<String>()
-    private var suppressingAfterManualStop = false
+    private var standingDownUntilCallEnds = false
     private var lastCalendarCheck = Date.distantPast
     private var currentEventEnd: Date?
 
@@ -97,14 +97,14 @@ final class AutoRecordController {
     /// The user started a recording by hand — don't treat it as ours.
     func noteManualStart() {
         currentEventEnd = nil
-        suppressingAfterManualStop = false
+        standingDownUntilCallEnds = false
     }
 
     /// The user stopped a recording by hand. Whatever is holding the mic, they
     /// don't want it recorded; stay out of the way until that call actually
     /// ends, and consider the current calendar event dealt with.
     func noteManualStop() {
-        suppressingAfterManualStop = true
+        standingDownUntilCallEnds = true
         micActiveSince = nil
         currentEventEnd = nil
         if let event = calendar?.bestMatch(for: now()) {
@@ -146,15 +146,15 @@ final class AutoRecordController {
         now: Date,
         mic: MicActivityMonitor.Result
     ) {
-        if suppressingAfterManualStop {
+        if standingDownUntilCallEnds {
             let idleFor = micIdleSince.map { now.timeIntervalSince($0) } ?? 0
             if mic.active || idleFor <= settings.stopDelay {
                 lastDecision = localised(
-                    "paused after a manual stop until the call ends",
-                    "пауза после ручной остановки до конца звонка")
+                    "paused until the call app lets go of the mic",
+                    "пауза, пока приложение звонка не освободит микрофон")
                 return
             }
-            suppressingAfterManualStop = false
+            standingDownUntilCallEnds = false
         }
 
         if settings.calendar, let calendar,
@@ -218,6 +218,8 @@ final class AutoRecordController {
         if elapsed > settings.maxDuration {
             lastDecision = localised(
                 "stopped at the duration ceiling", "остановила на пределе длительности")
+            standingDownUntilCallEnds = true
+            micActiveSince = nil
             stopRecording?("max-duration")
             return
         }
@@ -229,14 +231,22 @@ final class AutoRecordController {
         let micQuietFor = now.timeIntervalSince(session.lastMicSoundAt ?? session.startedAt)
         let farEndQuietFor = now.timeIntervalSince(session.lastSystemSoundAt ?? session.startedAt)
 
-        // Backstop: nobody has said anything on either track for a long while.
-        // Independent of who holds the microphone, which is the point — this is
-        // what catches an app that never lets the device go.
-        if session.levelsMeasurable, min(micQuietFor, farEndQuietFor) > settings.silenceStop {
-            lastDecision = localised(
-                "stopped after \(Int(settings.silenceStop / 60)) min of silence",
-                "остановила после \(Int(settings.silenceStop / 60)) мин тишины")
-            stopRecording?("silence")
+        if let reason = Self.backstopStop(
+            trigger: session.trigger, levelsMeasurable: session.levelsMeasurable,
+            callCaptureSuspect: session.callCaptureSuspect,
+            micQuietFor: micQuietFor, farEndQuietFor: farEndQuietFor, settings: settings) {
+            let minutes = Int(settings.silenceStop / 60)
+            lastDecision = reason == "silence"
+                ? localised("stopped after \(minutes) min of silence",
+                            "остановила после \(minutes) мин тишины")
+                : localised("stopped after \(minutes) min with no call audio",
+                            "остановила после \(minutes) мин без звука звонка")
+            // The app that defeated the primary rule still holds the mic: stay
+            // out until it lets go, or the next tick starts the same recording
+            // again.
+            standingDownUntilCallEnds = true
+            micActiveSince = nil
+            stopRecording?(reason)
             return
         }
 
@@ -263,6 +273,32 @@ final class AutoRecordController {
             : localised(
                 "quiet for \(Int(min(micIdleFor, farEndQuietFor)))s",
                 "тихо уже \(Int(min(micIdleFor, farEndQuietFor))) с")
+    }
+
+    /// The two backstops that end an automatic recording whoever holds the
+    /// microphone: silence on both tracks, and no call audio on the far-end
+    /// track. Both wait `silenceStop`, measured per track.
+    ///
+    /// The second exists because room noise keeps the mic track "speaking":
+    /// on 2026.11.08 a browser kept the mic after a call and an empty room
+    /// was recorded for 4.8 hours (MEETONTRACK-137). Reusing `silenceStop` keeps a call whose
+    /// far end is merely quiet for a few minutes (a long monologue of yours)
+    /// recording, and needs no new setting.
+    nonisolated static func backstopStop(
+        trigger: RecordingSession.Trigger,
+        levelsMeasurable: Bool,
+        callCaptureSuspect: Bool = false,
+        micQuietFor: TimeInterval,
+        farEndQuietFor: TimeInterval,
+        settings: Config.AutoRecordSettings
+    ) -> String? {
+        // "Can't measure" and "silent" look identical; only one may end a meeting.
+        guard trigger != .manual, levelsMeasurable else { return nil }
+        guard farEndQuietFor > settings.silenceStop else { return nil }
+        if micQuietFor > settings.silenceStop { return "silence" }
+        // A capture that may be failing (stalled file, or the call app playing
+        // output the tap does not hear) is our outage, not the call ending.
+        return callCaptureSuspect ? nil : "no-call-audio"
     }
 
     // MARK: - discard

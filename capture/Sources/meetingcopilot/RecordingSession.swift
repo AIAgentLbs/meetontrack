@@ -275,6 +275,13 @@ final class RecordingSession {
     /// look identical, and only one of them should end a meeting.
     var levelsMeasurable: Bool { mic.levelMeasurable && system.levelMeasurable }
 
+    /// True when the far-end track's quiet may be our capture failing rather
+    /// than the call being over: its file has stopped growing, or the call app
+    /// is still playing output that the tap is not hearing (a dead tap writes
+    /// zeros, and its recovery can run out of attempts).
+    var callCaptureSuspect: Bool { trackStalled.contains("system") || callAppHasOutput }
+    private var callAppHasOutput = false
+
     // MARK: - discarding
 
     /// Delete the whole session folder. Used for automatic recordings that
@@ -540,6 +547,7 @@ final class RecordingSession {
     /// notice if that leaves us recording silence.
     private func followCallApp(now: Date) {
         let callHasOutput = AudioProcesses.matching(families: tapFamilies).contains { $0.runningOutput }
+        callAppHasOutput = callHasOutput
         system.checkHealth(now: now, callHasOutput: callHasOutput)
         if case .apps = system.scope {
             let settings = Config.autoRecord()
