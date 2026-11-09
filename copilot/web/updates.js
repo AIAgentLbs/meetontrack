@@ -11,7 +11,7 @@
       available: "Version {version} available", notes: "No release notes were provided.",
       link: "Open release and installation instructions", dismiss: "Dismiss notification",
       safe: "Update installs this release and restarts MeetOnTrack. During a call it waits until the call ends; a recording is never interrupted.",
-      install: "Update", retry: "Try again", scheduled: "Version {version} will be installed after the call",
+      install: "Install", retry: "Try again", scheduled: "Version {version} will be installed after the call",
       running: "Updating to version {version}…", failed: "Could not update. The current version keeps working.",
       stable: "Stable channel", beta: "Beta channel", saveError: "Could not save the setting. Please try again."
       , commandHelp: "If the Update button does not work: finish your call, quit Capture, then run this in {shell}. It installs the version currently published on the website, which may lag the release notice. Check the installed version afterwards.",
@@ -26,10 +26,10 @@
       available: "Доступна версия {version}", notes: "Описание изменений не опубликовано.",
       link: "Открыть релиз и инструкцию по установке", dismiss: "Скрыть уведомление",
       safe: "Обновление устанавливает этот релиз и перезапускает MeetOnTrack. Во время звонка оно дождется его окончания: запись не прерывается.",
-      install: "Обновить", retry: "Повторить", scheduled: "Версия {version} установится после звонка",
+      install: "Установить", retry: "Повторить", scheduled: "Версия {version} установится после звонка",
       running: "Обновляю до версии {version}…", failed: "Не удалось обновить. Текущая версия продолжает работать.",
       stable: "Стабильные версии", beta: "Бета-версии", saveError: "Не удалось сохранить настройку. Попробуйте еще раз."
-      , commandHelp: "Если кнопка «Обновить» не сработала: завершите звонок, закройте Capture и выполните команду в {shell}. Она устанавливает версию, опубликованную на сайте; та может отставать от уведомления о релизе. После установки проверьте версию.",
+      , commandHelp: "Если кнопка «Установить» не сработала: завершите звонок, закройте Capture и выполните команду в {shell}. Она устанавливает версию, опубликованную на сайте; та может отставать от уведомления о релизе. После установки проверьте версию.",
       copyCommand: "Скопировать команду обновления", copied: "Команда скопирована. Выполните ее после звонка.", copyFailed: "Не удалось скопировать. Выделите и скопируйте команду выше."
     }
   };
