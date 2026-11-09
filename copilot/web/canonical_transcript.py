@@ -54,14 +54,15 @@ def canonical_segments(payload):
         return None
     try:
         root = Path(payload["recording_dir"])
-        meta = json.loads((root / "meta.json").read_text(encoding="utf-8"))
+        # The Windows recorder (.NET Encoding.UTF8) starts its files with a byte order mark.
+        meta = json.loads((root / "meta.json").read_text(encoding="utf-8-sig"))
         started = _date(meta["started"])
         if started != _date(payload["started_at"]):
             return None  # Never attach a different physical recording.
         path = root / "transcript.json"
         if path.stat().st_size > 32 * 1024 * 1024:
             return None
-        final = json.loads(path.read_text(encoding="utf-8"))
+        final = json.loads(path.read_text(encoding="utf-8-sig"))
         if not final.get("engine") or not final.get("segments"):
             return None
         segments = []

@@ -447,6 +447,18 @@ class FinalOnlyDeliveryTests(unittest.TestCase):
         self.assertIsNone(self.archive.detail("FIRST-CALL")["final_wait"])
         self.assertNotIn("FIRST-CALL", [i["meeting_id"] for i in self.archive.delivery_health()["undelivered"]])
 
+    def test_a_windows_final_transcript_with_a_byte_order_mark_is_imported(self):
+        # The Windows recorder writes transcript.json with .NET's Encoding.UTF8, which starts
+        # the file with a UTF-8 byte order mark; it was never read (MEETONTRACK-136).
+        self.finalize()
+        self.write_final(self.final)
+        path = self.first / "transcript.json"
+        path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
+        self.finalize()
+        self.assertTrue(self.stored().get("final_transcript"))
+        self.assertIsNone(self.archive.detail("FIRST-CALL")["final_wait"])
+        self.assertEqual(self.sent, ["FIRST-CALL"])
+
     def test_a_call_that_just_ended_is_only_waiting(self):
         meeting = self.stored()
         ended = datetime.now(timezone.utc) - timedelta(minutes=5)

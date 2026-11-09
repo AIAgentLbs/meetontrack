@@ -36,8 +36,8 @@ from meeting_boundaries import interval_contains
 
 
 def _json(path: Path, fallback: Any) -> Any:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
+    try:  # utf-8-sig: recorder files written on Windows may start with a byte order mark.
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError, TypeError):
         return fallback
 

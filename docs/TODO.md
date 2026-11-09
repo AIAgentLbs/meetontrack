@@ -289,6 +289,10 @@ hashes, Pages removed, and the Windows installer relocated to
 - [x] MEETONTRACK-123 (shipped in v0.1.21 / windows-v0.1.21, closed 2026-11-04): the report PDF used only the first browser found; Chrome that cannot print
   sent the HTML fallback although Edge or Chromium could print (`archive.py` `_print_pdf`). Now every
   installed browser is tried in order before the HTML fallback. Fixed on main 2026-11-04; closes on release.
+- [ ] MEETONTRACK-136: Windows calls never got their final transcript or report: the recorder writes `transcript.json`
+  with a UTF-8 byte order mark (.NET `Encoding.UTF8`, `TranscriptDocument.cs`) and `canonical_transcript.py` failed on it
+  silently. The web service now reads `utf-8-sig`; the recorder writes no BOM; existing meetings import on the first
+  pass after start. Fixed on main 2026-11-09; closes on the Windows release.
 - [ ] MEETONTRACK-118: a final transcript that never arrives stops being flagged after the 3-day delivery window
   (`archive.py` `_final_wait`, `delivery_health`), and a late final makes the report on request only.
 - [ ] MEETONTRACK-89: Mac call-audio capture fades to silence during Chrome calls (39 of 53 min lost on 2026-10-21);

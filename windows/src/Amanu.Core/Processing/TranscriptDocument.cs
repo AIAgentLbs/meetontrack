@@ -76,7 +76,8 @@ public static class TranscriptWriter
         var temporary = path + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            await File.WriteAllTextAsync(temporary, contents, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+            // No byte order mark: JSON readers (the web service) must not see one (MEETONTRACK-136).
+            await File.WriteAllTextAsync(temporary, contents, new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
             File.Move(temporary, path, overwrite: true);
         }
         finally
