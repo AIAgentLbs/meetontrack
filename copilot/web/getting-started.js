@@ -137,17 +137,17 @@
       : status.choice ? word("Choice is not complete: ", "Выбор не закончен: ") + status.reason
       : word("Not chosen yet. AI does not run until you choose.", "Еще не выбрано. ИИ не работает, пока вы не выберете.");
     const line = node("p", state); line.setAttribute("role", "status"); box.append(line);
-    // Each task with this choice: ready, unavailable with the reason, or the Check AI result.
+    // Only tasks that cannot work or work with a limit, with the reason; the rest say nothing.
     const tasks = node("ul");
     for (const [purpose, names] of Object.entries(purposes)) {
       const task = aiState.purposes[purpose] || {}, checked = (aiState.check?.purposes || {})[purpose];
       const text = task.state && task.state !== "ready" ? (task.state === "unavailable" ? word("unavailable: ", "недоступно: ") + task.reason : task.reason)
-        : !checked || checked.state === "unchecked" ? word("not checked yet", "еще не проверено")
-        : checked.state === "ready" ? word("ok", "работает") + (checked.message && !checked.message.startsWith("AI answered successfully") ? ". " + checked.message : "")
-        : plainError(checked.message);
-      tasks.append(node("li", `${word(...names)}: ${text}`));
+        : !checked || checked.state === "unchecked" ? ""
+        : checked.state !== "ready" ? plainError(checked.message)
+        : checked.message && !checked.message.startsWith("AI answered successfully") ? checked.message : "";  // a limit it found
+      if (text) tasks.append(node("li", `${word(...names)}: ${text}`));
     }
-    box.append(tasks);
+    if (tasks.childElementCount) box.append(tasks);
     return box;
   }
   function renderAI() {$("ai-card").replaceChildren(aiCard());}
