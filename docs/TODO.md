@@ -99,7 +99,7 @@ hashes, Pages removed, and the Windows installer relocated to
   launch. The launcher and tray now reuse one assistant window (Edge app window), the page has the website icon.
 - [x] MEETONTRACK-134 (shipped in windows-v0.1.23, closed 2026-11-09; fixed on main 88f10ec): a terminal flashed on Windows every few minutes because
   console helpers (codex.cmd app-server) started from pythonw got their own window. `hidden_consoles.py` hides them in Popen.
-- [ ] MEETONTRACK-140 (fixed on main 2026-11-09; closes on the Windows release): since windows-v0.1.23 the assistant opened
+- [x] MEETONTRACK-140 (shipped in v0.1.25 / windows-v0.1.25, closed 2026-11-09; fixed on main 36c1d53): since windows-v0.1.23 the assistant opened
   as an Edge app window, so Google sign-in and other links opened in Edge, not the default browser where the user is
   signed in. `AmanuRuntime.OpenAssistant` and `scripts/windows/meeting-copilot.ps1` now open an app window of the default
   https browser when it is Chromium (`AppWindowBrowser.FromOpenCommand`), a plain tab of any other default browser, and
