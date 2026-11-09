@@ -14,7 +14,7 @@
       install: "Install", retry: "Try again", scheduled: "Version {version} will be installed after the call",
       running: "Updating to version {version}…", failed: "Could not update. The current version keeps working.",
       stable: "Stable channel", beta: "Beta channel", saveError: "Could not save the setting. Please try again."
-      , commandHelp: "If the Update button does not work: finish your call, quit Capture, then run this in {shell}. It installs the version currently published on the website, which may lag the release notice. Check the installed version afterwards.",
+      , commandHelp: "If the Install button does not work: finish your call, quit Capture, then run this in {shell}. It installs the version currently published on the website, which may lag the release notice. Check the installed version afterwards.",
       copyCommand: "Copy update command", copied: "Command copied. Run it after your call.", copyFailed: "Could not copy. Select and copy the command above."
     },
     ru: {

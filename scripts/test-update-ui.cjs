@@ -44,7 +44,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.goto('http://update-ui.test/');
     await page.locator('#updates-notice').waitFor({state: 'visible'});
     assert.equal(await page.locator('#updates-notice').textContent(), 'Version 0.1.10 available');
-    assert.equal(await page.locator('#updates-install').textContent(), 'Update');
+    assert.equal(await page.locator('#updates-install').textContent(), 'Install');
     assert.equal(await page.locator('#updates-command').isVisible(), false, 'manual command stays in Settings');
     await page.locator('#updates-install').click();
     await page.locator('#updates-notice').getByText('Version 0.1.10 will be installed after the call').waitFor();
