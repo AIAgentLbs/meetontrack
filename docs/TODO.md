@@ -104,7 +104,7 @@ hashes, Pages removed, and the Windows installer relocated to
   signed in. `AmanuRuntime.OpenAssistant` and `scripts/windows/meeting-copilot.ps1` now open an app window of the default
   https browser when it is Chromium (`AppWindowBrowser.FromOpenCommand`), a plain tab of any other default browser, and
   Edge only when the default can't be read.
-- [ ] MEETONTRACK-132 (fixed on main 2026-11-09, closes with the next release): when the Mac app quits, its server
+- [x] MEETONTRACK-132 (shipped in v0.1.26, closed 2026-11-10; fixed on main f851e0e): when the Mac app quits, its server
   ended with "Fatal Python error: _enter_buffered_busy: could not acquire lock for <stdin> at interpreter shutdown" in
   `server.log` (0.1.21 quits on the owner's Mac, 2026-11-08). Cause: `watch_parent()` parked a daemon thread in
   `sys.stdin.buffer.read()`, which holds the buffered object's lock; a server stopped by a signal while the app still
@@ -304,14 +304,14 @@ hashes, Pages removed, and the Windows installer relocated to
   noise defeated the both-tracks silence stop. Now an automatic recording stops after `silence_stop_minutes` with no call
   audio (`stop_reason` "no-call-audio"; `AutoRecordPolicy.cs`, `AutoRecordController.swift`), and backstop stops stand down
   until the call app lets go of the mic on Mac too. Fixed on main 2026-11-09; closes on the Mac and Windows release.
-- [ ] MEETONTRACK-141: turning on email/Drive delivery showed `retry_overdue` for meetings from before the channel was
+- [x] MEETONTRACK-141 (shipped in v0.1.26 / windows-v0.1.26, closed 2026-11-10): turning on email/Drive delivery showed `retry_overdue` for meetings from before the channel was
   enabled (Windows 2026-11-09); `delivery_health.py` now applies the same `<channel>_enabled_at` boundary as
   `Archive.deliver`. Fixed on main 2026-11-09 (0c56cce, f7041cf); closes on the next release.
-- [ ] MEETONTRACK-142: one-click in-app update. The header notice "Version X available" has an Update button that runs the
+- [ ] MEETONTRACK-142: one-click in-app update. The header notice "Version X available" has an Install button that runs the
   official installer of exactly that release from its GitHub tag (detached, log `update.log`); during a recording it is
-  scheduled and starts after the call; Mac quits Capture with SIGTERM, installs and reopens the window. Settings keeps the
-  manual command as a fallback (`release_updates.py`, `updates.js`, [updates](UPDATES.md)). Fixed on main 2026-11-09;
-  closes on the release. First real check: an update between two releases that both contain it, on Mac and Windows.
+  scheduled and starts after the call; Mac quits Capture with a normal quit Apple Event (a recording keeps it running and nothing is installed), installs and reopens the window. Settings keeps the
+  manual command as a fallback (`release_updates.py`, `updates.js`, [updates](UPDATES.md)). Shipped in v0.1.26 / windows-v0.1.26 (2026-11-10);
+  stays open until the first real check: an update between two releases that both contain it, on Mac and Windows.
   Deferred review findings (P2, 2026-11-09): (a) `install.sh` opens the new app before its readiness check and a failed
   check rolls back with SIGTERM/SIGKILL without asking about a recording that the new app may have started; fix with a
   Capture-side "quit when idle" (as `record quit-when-idle` on Windows) used by both rollback and the updater. (b) No
@@ -321,12 +321,12 @@ hashes, Pages removed, and the Windows installer relocated to
   would close it. (d) A persisted live status `recording` left by a Capture crash keeps an update scheduled until the
   next recording ends; gate on the live marker plus status freshness. (e) A scheduled (after-call) update lives only in
   memory and is lost if the service restarts during the call; persist it in `updates.json` and revalidate.
-- [ ] MEETONTRACK-138: Mac treats a call app's open output stream as a possible capture failure (`RecordingSession.swift`
+- [x] MEETONTRACK-138 (shipped in v0.1.26, closed 2026-11-10): Mac treats a call app's open output stream as a possible capture failure (`RecordingSession.swift`
   `callCaptureSuspect`), so a browser holding a silent output stream after the call blocks the no-call-audio stop and the
   recording runs to the duration ceiling. Now only a stalled call-track file suppresses the stop indefinitely; open
   output alone defers it by one more `silence_stop_minutes` window (20 min at the default), after which "no-call-audio"
   fires. Fixed on main 2026-11-09; closes on the next Mac release. Confirm with a Meet tab left open after a call.
-- [ ] MEETONTRACK-139 (fixed on main 2026-11-09, closes with the next release): Windows final transcription of
+- [x] MEETONTRACK-139 (shipped in windows-v0.1.26, closed 2026-11-10; fixed on main 9d54091): Windows final transcription of
   2026.11.08-1734 found `mic.wav` locked by another process (`transcribe.log`). Holder: the recorder's own
   `TrackWriter`. NAudio throws `ArgumentException` when a WAV would pass 4 GB; the drain caught only I/O errors and
   died, `Dispose` rethrew from `drain.Wait` before closing the file, and the stop went on to queue the session with
