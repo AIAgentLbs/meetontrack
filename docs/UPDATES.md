@@ -32,12 +32,12 @@ manual check still works when background checks are disabled.
 ## User experience and safety
 
 A new version displays a header notice, "Version X available", with one button,
-**Update**. Clicking the notice opens Settings with the version, release notes,
+**Install**. Clicking the notice opens Settings with the version, release notes,
 and the official release page. Dismissal persists across service restarts; notes
 remain accessible in Settings. Notes are rendered as plain text, never as HTML.
 This is an in-app notice, not an OS notification.
 
-**Update** (`POST /api/updates/install`, same Host/Origin checks as every POST, and an
+**Install** (`POST /api/updates/install`, same Host/Origin checks as every POST, and an
 `Origin` header is required, so only the app's own page starts an install):
 
 1. The server accepts only the version it currently offers (newer than the
