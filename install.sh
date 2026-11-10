@@ -24,10 +24,18 @@ done
 # Recording and local transcription do not require a paid AI subscription.
 # The assistant's optional connection is checked explicitly in first-run UI.
 
+# macOS pgrep hides the caller's own ancestors unless given -a.
+capture_running() { pgrep -af '/MeetingCopilotCapture([[:space:]]|$)' >/dev/null 2>&1; }
 require_capture_closed() {
-  if pgrep -f '/MeetingCopilotCapture([[:space:]]|$)' >/dev/null 2>&1; then
-    fail "Quit Meeting Copilot Capture after your call before installing. The running capture was not stopped."
+  capture_running || return 0
+  # Seen only with -a, Capture is our ancestor: an in-app update whose helper (0.1.26-0.1.27)
+  # missed it. Quit it as the helper should have: an Apple Event, never SIGTERM, so a
+  # recording gets its own "Quit while recording?" question. Run from Terminal: refuse as before.
+  if ! pgrep -f '/MeetingCopilotCapture([[:space:]]|$)' >/dev/null 2>&1; then
+    osascript -e 'quit app id "com.aiagentlbs.meetingcopilot.capture"' >/dev/null 2>&1 || true
+    for _ in {1..240}; do capture_running || return 0; sleep 0.25; done
   fi
+  fail "Quit Meeting Copilot Capture after your call before installing. The running capture was not stopped."
 }
 require_capture_closed
 

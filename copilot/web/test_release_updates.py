@@ -378,6 +378,9 @@ class OneClickUpdateTests(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "the Mac helper is bash")
     def test_mac_helper_quits_capture_normally_installs_and_opens_the_window(self):
         self.assertEqual(self.run_helper(), (3, ["pgrep", "osascript", "pgrep", "pgrep", "installer", "meeting-copilot"]))
+        # macOS pgrep hides ancestors without -a, and Capture is this helper's (MEETONTRACK-142).
+        self.assertTrue(all(line.startswith("pgrep -af ") for line in (self.root / "calls").read_text().splitlines()
+                            if line.startswith("pgrep")))
 
     @unittest.skipIf(os.name == "nt", "the Mac helper is bash")
     def test_mac_helper_never_installs_or_signals_while_capture_keeps_running(self):

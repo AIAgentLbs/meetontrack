@@ -34,9 +34,10 @@ RECORDING = {"recording", "paused", "loading", "overloaded"}
 # Automation is denied, nothing is installed and the person sees "Try again" (details in update.log).
 # Then install, and open the assistant window of whatever is installed now: install.sh opened
 # the new app, or restored the old one after a failure. The pgrep pattern is install.sh's;
-# this command line cannot match it (no space or end after the name).
+# this command line cannot match it (no space or end after the name). -a: this helper descends
+# from Capture (via the server), and macOS pgrep otherwise hides ancestors (MEETONTRACK-142).
 MAC_HELPER = r"""
-running() { pgrep -f '/MeetingCopilotCapture([[:space:]]|$)' >/dev/null; }
+running() { pgrep -af '/MeetingCopilotCapture([[:space:]]|$)' >/dev/null; }
 if running; then
   answer=$(osascript -e 'quit app id "com.aiagentlbs.meetingcopilot.capture"' 2>&1)
   echo "MeetOnTrack update: quit Capture: ${answer:-ok}"

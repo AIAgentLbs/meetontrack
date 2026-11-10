@@ -61,7 +61,10 @@ class InstallerTests(unittest.TestCase):
         self.script("uname", 'if [ "$1" = -s ]; then echo "${MOCK_OS:-Darwin}"; else echo "${MOCK_ARCH:-arm64}"; fi')
         self.script("sw_vers", 'echo "${MOCK_VERSION:-15.0}"')
         self.script("codex", 'exit "${MOCK_CODEX_EXIT:-0}"')
-        self.script("pgrep", 'if [ "${MOCK_CAPTURE:-0}" = 1 ]; then echo 999; exit 0; fi\nif [ "${MOCK_CAPTURE_AFTER_STAGE:-0}" = 1 ] && [ -f "$FIXTURE_ROOT/downloaded" ]; then echo 999; exit 0; fi\nexit 1')
+        # MOCK_CAPTURE_ANCESTOR: Capture is install.sh's ancestor, so only `pgrep -a` sees it, until quit.
+        self.script("osascript", 'touch "$FIXTURE_ROOT/osascript"\n[ "${MOCK_CAPTURE_QUITS:-0}" != 1 ] || touch "$FIXTURE_ROOT/quit"')
+        self.script("pgrep", 'if [ "${MOCK_CAPTURE_ANCESTOR:-0}" = 1 ] && [ "$1" = -af ] && [ ! -f "$FIXTURE_ROOT/quit" ]; then echo 999; exit 0; fi\n'
+                    'if [ "${MOCK_CAPTURE:-0}" = 1 ]; then echo 999; exit 0; fi\nif [ "${MOCK_CAPTURE_AFTER_STAGE:-0}" = 1 ] && [ -f "$FIXTURE_ROOT/downloaded" ]; then echo 999; exit 0; fi\nexit 1')
         self.script("curl", 'touch "$FIXTURE_ROOT/downloaded"\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then cp "$FIXTURE_PACKAGE" "$2"; exit 0; fi; shift; done\nexit 2')
         self.script("swiftc", 'touch "$FIXTURE_ROOT/compiled"\nexit 99')
         for name in ("open", "launchctl"):
@@ -405,6 +408,28 @@ exit 2
         self.assertIn("Quit Meeting Copilot Capture", result.stderr)
         self.assertTrue((app / "previous").is_file())
         self.assertFalse((self.root / "downloaded").exists())
+
+    def test_capture_that_launched_the_update_is_quit_then_installed(self):
+        # MEETONTRACK-142: 0.1.26-0.1.27 helpers run install.sh without quitting their ancestor Capture.
+        app, _, _ = self.seed_existing()
+        result = self.run_install(MOCK_CAPTURE_ANCESTOR="1", MOCK_CAPTURE_QUITS="1")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertTrue((self.root / "osascript").exists())
+        self.assertFalse((app / "previous").exists())
+
+    def test_ancestor_capture_that_refuses_to_quit_blocks_before_download(self):
+        self.script("sleep", "")
+        app, _, _ = self.seed_existing()
+        result = self.run_install(MOCK_CAPTURE_ANCESTOR="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Quit Meeting Copilot Capture", result.stderr)
+        self.assertTrue((self.root / "osascript").exists())
+        self.assertTrue((app / "previous").is_file())
+        self.assertFalse((self.root / "downloaded").exists())
+
+    def test_capture_run_alongside_terminal_install_is_not_quit(self):
+        self.run_install(MOCK_CAPTURE="1")
+        self.assertFalse((self.root / "osascript").exists())
 
     def test_capture_started_during_staging_is_also_protected(self):
         app, _, _ = self.seed_existing()
