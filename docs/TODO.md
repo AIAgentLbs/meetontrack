@@ -307,12 +307,13 @@ hashes, Pages removed, and the Windows installer relocated to
 - [x] MEETONTRACK-141 (shipped in v0.1.26 / windows-v0.1.26, closed 2026-11-10): turning on email/Drive delivery showed `retry_overdue` for meetings from before the channel was
   enabled (Windows 2026-11-09); `delivery_health.py` now applies the same `<channel>_enabled_at` boundary as
   `Archive.deliver`. Fixed on main 2026-11-09 (0c56cce, f7041cf); closes on the next release.
-- [ ] MEETONTRACK-142: one-click in-app update. The header notice "Version X available" has an Install button that runs the
+- [x] MEETONTRACK-142 (closed 2026-11-10, verified with v0.1.28): one-click in-app update. The header notice "Version X available" has an Install button that runs the
   official installer of exactly that release from its GitHub tag (detached, log `update.log`); during a recording it is
   scheduled and starts after the call; Mac quits Capture with a normal quit Apple Event (a recording keeps it running and nothing is installed), installs and reopens the window. Settings keeps the
   manual command as a fallback (`release_updates.py`, `updates.js`, [updates](UPDATES.md)). Shipped in v0.1.26 / windows-v0.1.26 (2026-11-10);
-  stays open until the first real check: an update between two releases that both contain it, on Mac and Windows.
-  Deferred review findings (P2, 2026-11-09): (a) `install.sh` opens the new app before its readiness check and a failed
+  Verified 2026-11-10: Mac 0.1.26->0.1.28 (waited for a Meet call, then ~21 s) and Windows 0.1.27->0.1.28 (~25 s).
+  0.1.26/0.1.27 failed on Mac because BSD pgrep skips ancestors; fixed in 03d0bf5 (`pgrep -af`, install.sh self-heal).
+- [ ] MEETONTRACK-143: in-app update hardening, deferred P2 review findings from 142 (2026-11-09): (a) `install.sh` opens the new app before its readiness check and a failed
   check rolls back with SIGTERM/SIGKILL without asking about a recording that the new app may have started; fix with a
   Capture-side "quit when idle" (as `record quit-when-idle` on Windows) used by both rollback and the updater. (b) No
   cross-process install lock: if the old service restarts mid-install (Windows), a second install can overlap and the
