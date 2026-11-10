@@ -74,9 +74,12 @@ if($check){
     exit 0
 }
 Stop-OtherVersions $root
-if(-not(Get-Process MeetingCopilotCapture -ErrorAction SilentlyContinue)){Start-Process -FilePath $capture}
+# Once set up, the recorder starts in the tray: an update or sign-in shows the assistant, not the recorder
+# window too. Before setup it opens its setup window.
+if(-not(Get-Process MeetingCopilotCapture -ErrorAction SilentlyContinue)){
+    if(Test-Path "$data\capture-data\setup.json" -PathType Leaf){Start-Process -FilePath $capture -ArgumentList '--background'}else{Start-Process -FilePath $capture}
+}
 $ready=Test-Ready
-$restarted=-not $ready
 if(-not $ready){
     Start-Process -FilePath $pythonw -ArgumentList @('-X','utf8',"`"$server`"",'--no-open') -WorkingDirectory $root
     for($i=0;$i -lt 40 -and -not $ready;$i++){Start-Sleep -Milliseconds 250; $ready=Test-Ready}
@@ -94,11 +97,28 @@ function Get-AppBrowser{
     if(@('chrome.exe','msedge.exe','brave.exe','vivaldi.exe','chromium.exe') -contains ($exe -split '[\\/]')[-1]){$exe}else{$null}
 }
 if($args -notcontains '--no-open'){
-    # A service started now (first run, upgrade) gets a fresh window: an open page may be an older release.
-    if(-not $restarted -and (New-Object -ComObject WScript.Shell).AppActivate('MeetOnTrack by aiagentlbs.com')){
-        # Activation leaves a minimized window minimized. The page reloads itself after an upgrade.
-        Add-Type -Namespace MeetOnTrack -Name Win -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr w); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr w, int c);'
-        $window=[MeetOnTrack.Win]::GetForegroundWindow(); if([MeetOnTrack.Win]::IsIconic($window)){[void][MeetOnTrack.Win]::ShowWindow($window,9)}
+    # An open window is reused, also after an update: the page reloads itself into the new version
+    # (app.js, since 0.1.23), so a new window would only be a second copy. Found by title, not by
+    # AppActivate's answer: the updater's hidden launcher may not be allowed to bring it forward.
+    Add-Type -Namespace MeetOnTrack -Name Win -UsingNamespace System.Text -MemberDefinition @'
+delegate bool Each(IntPtr w, IntPtr l);
+[DllImport("user32.dll")] static extern bool EnumWindows(Each e, IntPtr l);
+[DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr w);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr w, StringBuilder s, int n);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr w);
+[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr w, int c);
+public static IntPtr Find(string title) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((w, l) => { var s = new StringBuilder(256); GetWindowText(w, s, 256);
+        if (IsWindowVisible(w) && s.ToString().StartsWith(title, StringComparison.Ordinal)) { found = w; return false; } return true; }, IntPtr.Zero);
+    return found;
+}
+'@
+    $title='MeetOnTrack by aiagentlbs.com'
+    $window=[MeetOnTrack.Win]::Find($title)
+    if($window -ne [IntPtr]::Zero){
+        if([MeetOnTrack.Win]::IsIconic($window)){[void][MeetOnTrack.Win]::ShowWindow($window,9)}  # activation leaves a minimized window minimized
+        [void](New-Object -ComObject WScript.Shell).AppActivate($title)
     }else{try{$browser=Get-AppBrowser; if(-not $browser){throw 'no app-window browser'}; Start-Process $browser -ArgumentList '--app=http://127.0.0.1:43121/' -ErrorAction Stop}catch{Start-Process 'http://127.0.0.1:43121/'}}
 }
 Write-Host 'MeetOnTrack: http://127.0.0.1:43121'

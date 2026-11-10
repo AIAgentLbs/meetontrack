@@ -51,10 +51,14 @@ try {
     . ([scriptblock]::Create($ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-OwnRunValue'},$true).Extent.Text))
     if(-not(Test-OwnRunValue '"C:\U\MeetingCopilot\versions\0.1.4\capture\MeetingCopilotCapture.exe" --background' 'C:\U\MeetingCopilot\versions')){throw 'Stale login entry kept'}
     if(Test-OwnRunValue '"C:\Other\MeetingCopilotCapture.exe" --background' 'C:\U\MeetingCopilot\versions'){throw 'Foreign login entry removed'}
+    # The launcher reuses an open assistant window, found by title; its window lookup compiles and finds no stray match.
+    $launcher=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'windows\meeting-copilot.ps1'),[ref]$null,[ref]$null)
+    . ([scriptblock]::Create($launcher.Find({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Type' -and $n.Extent.Text -match 'EnumWindows'},$true).Extent.Text))
+    if([MeetOnTrack.Win]::Find("No such window $([guid]::NewGuid())") -ne [IntPtr]::Zero){throw 'Assistant window lookup matched a missing window'}
     $rejected=$false
     try { & $Installer -PackagePath "$temp\package.zip" -ExpectedSha256 ('0'*64) -InstallRoot "$temp\bad" -UserRoot "$temp\user" -SkipModels -NoLaunch -NoShortcuts } catch {$rejected=$true}
     if(-not $rejected -or (Test-Path "$temp\bad\current.json")){throw 'Bad checksum was accepted'}
-    Write-Output 'Windows installer tests: 11 passed (install, preserve settings, remove retired setting/state, stop previous server only, keep other jobs and capture, same stop rule in launcher, remove stale login entry, reject checksum)'
+    Write-Output 'Windows installer tests: 12 passed (install, preserve settings, remove retired setting/state, stop previous server only, keep other jobs and capture, same stop rule in launcher, remove stale login entry, assistant window lookup, reject checksum)'
 } finally {
     foreach($process in $stand.Values){if(-not $process.HasExited){Stop-Process -Id $process.Id -Force; $process.WaitForExit(5000) | Out-Null}}
     Remove-Item -LiteralPath $temp -Recurse -Force

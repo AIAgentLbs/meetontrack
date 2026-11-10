@@ -87,7 +87,12 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.setViewportSize({width: 390, height: 844});
     await page.screenshot({path: '/tmp/meetontrack-updates-mobile.png', fullPage: true});
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    // After an update the open page reloads into the new version, even after settings were changed
+    // (they are saved at once): the launcher reuses this window instead of opening another.
+    await page.evaluate(() => { window.BEFORE_UPDATE = true; });
+    updates = {...updates, version: '0.1.10', latest: null, notify: false};
+    await page.waitForFunction(() => window.BEFORE_UPDATE === undefined && document.readyState === 'complete', null, {timeout: 10000});
     assert.deepEqual(errors, []);
-    console.log('PASS: brand, platform notice, one-click update (scheduled, failed, retry), settings, notes XSS safety, language switch, dismiss, opt-out, responsive layout');
+    console.log('PASS: brand, platform notice, one-click update (scheduled, failed, retry), settings, notes XSS safety, language switch, dismiss, opt-out, responsive layout, reload into the new version');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

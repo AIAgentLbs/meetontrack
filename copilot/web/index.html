@@ -58,7 +58,7 @@
       <div id="settings-content">
         <section id="language-settings" aria-labelledby="language-settings-heading">
           <h3 id="language-settings-heading"><label for="interface-language" data-i18n="language.label">Язык интерфейса</label></h3>
-          <select id="interface-language">
+          <select id="interface-language" data-saves-at-once>
             <option value="ru">Русский</option>
             <option value="en">English</option>
           </select>
@@ -150,7 +150,7 @@
         <section id="updates-settings" tabindex="-1" aria-labelledby="updates-heading">
           <h3 id="updates-heading"></h3>
           <p id="updates-help"></p>
-          <label><input type="checkbox" id="updates-enabled" /><span id="updates-enabled-label"></span></label>
+          <label><input type="checkbox" id="updates-enabled" data-saves-at-once /><span id="updates-enabled-label"></span></label>
           <p id="updates-status" role="status"></p>
           <button class="quiet-button" type="button" id="updates-check"></button>
           <div id="updates-manual" hidden>

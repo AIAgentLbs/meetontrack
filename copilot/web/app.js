@@ -628,11 +628,13 @@ let frameSignature = "";
 let stateRequestInFlight = false;
 // Release this page was loaded from; a reused window reloads once the service is upgraded.
 let pageVersion = "";
-// ponytail: any edit since load blocks the automatic reload (no draft is ever lost); such a page
-// stays on the old release until it is reloaded by hand. Per-form dirty tracking if that matters.
+// ponytail: an edit since load blocks the automatic reload after an update (no draft is ever lost), except
+// in a control saved the moment it changes (data-saves-at-once); an edited page stays on the old release
+// until reloaded by hand. Per-form dirty tracking if that matters.
 let pageEdited = false;
-document.addEventListener("input", () => { pageEdited = true; }, true);
-document.addEventListener("change", () => { pageEdited = true; }, true);
+const markEdited = ({ target }) => { if (!target.closest?.("[data-saves-at-once]")) pageEdited = true; };
+document.addEventListener("input", markEdited, true);
+document.addEventListener("change", markEdited, true);
 let stateConnectionFailed = false;
 let stateFailures = 0;
 let activeTranscript = null;
