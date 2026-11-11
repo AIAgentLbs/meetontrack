@@ -210,6 +210,51 @@ class TwentyClientTests(unittest.TestCase):
         twenty_crm.apply_stage(client, "o-1", "PROPOSAL")
         self.assertEqual(fake.methods("PATCH")[0][3], {"stage": "PROPOSAL"})
 
+    def test_open_api_fallback_when_metadata_is_refused(self):
+        properties = {name: {"type": "string"} for name in (
+            "amount", "closeDate", "companyId", "createdAt", "createdBy", "deletedAt", "id", "name", "ownerId",
+            "pointOfContactId", "position", "salesRepoUrl", "searchVector", "updatedAt", "updatedBy")}
+        properties.update({
+            "stage": {"type": "string", "enum": ["NEW", "SCOPING", "PILOT", "ACTIVE", "WON", "REACTIVATED",
+                                                  "STALLED", "NO_RESPONSE", "OTHER", "CLOSED"]},
+            "nextStep": {"type": "string", "description": "Next step"},
+            "closeDate": {"type": "string", "format": "date-time"},
+            "position": {"type": "number"}})
+        fake = FakeCRM()
+        def answer(method, path, query=None, body=None):
+            if path == "/open-api/core":
+                fake.calls.append((method, path, query, body))
+                return {"openapi": "3.0.3", "components": {"schemas": {"Opportunity": {"properties": properties}}}}
+            return fake(method, path, query, body)
+        client = self.client(answer)
+        fields = client.opportunity_fields()
+        self.assertEqual([c[1] for c in fake.calls], ["/metadata/objects", "/open-api/core"])
+        self.assertEqual(fields["nextStep"]["type"], "TEXT")
+        self.assertNotEqual(fields["closeDate"]["type"], "TEXT")
+        self.assertNotEqual(fields["position"]["type"], "TEXT")
+        self.assertNotIn("salesRepoUrl", fields)
+        self.assertEqual(fields["stage"]["options"][4], {"value": "WON", "label": "WON"})
+        self.assertEqual(twenty_crm.propose_stage(client, "SCOPING", "t", lambda p: '{"stage":"PILOT"}'),
+                         {"state": "proposed", "value": "PILOT", "label": "PILOT"})
+        twenty_crm.apply_stage(client, "o-1", "PILOT")
+        self.assertEqual(fake.methods("PATCH")[0][3], {"stage": "PILOT"})
+        # Metadata stays the first choice; a refused OpenAPI too means no stage suggestions.
+        self.assertEqual(self.client(FakeCRM(fields=[{"name": "stage", "type": "SELECT", "options": [{"value": "A"}]}]))
+                         .opportunity_fields()["stage"]["options"], [{"value": "A", "label": "A"}])
+        self.assertIsNone(self.client(FakeCRM(fail={("GET", "/open-api"): "forbidden"})).opportunity_fields())
+        # The note flow uses the fallback for nextStep, and never sends salesRepoUrl.
+        crm = FakeCRM([person("p-1", "ann@example.com")], [{"id": "o-1", "name": "Pilot", "companyId": "c-1"}])
+        def flow(method, path, query=None, body=None):
+            if path == "/open-api/core":
+                return {"components": {"schemas": {"Opportunity": {"properties": properties}}}}
+            return crm(method, path, query, body)
+        result = twenty_crm.deliver(self.client(flow), meeting_id="m-1", title="Sync", started=datetime(2026, 11, 11),
+                                    attendees=["ann@example.com"], sections={"commitments": ["Ann sends the deck"]},
+                                    choice=None, money_filter=True, before_write=lambda: None)
+        self.assertEqual(result["twenty_next_step"], "updated")
+        self.assertEqual(crm.methods("PATCH")[0][3], {"nextStep": "Ann sends the deck"})
+        self.assertFalse(any("salesRepoUrl" in json.dumps(c) for c in crm.calls))
+
     def test_read_context_is_bounded_cached_and_off_when_disabled(self):
         fake = FakeCRM([person("p-1", "ann@example.com")],
                        [{"id": "o-1", "name": "Pilot", "companyId": "c-1", "stage": "MEETING", "amount": {"amountMicros": 9}}])

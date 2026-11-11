@@ -30,6 +30,8 @@ PERSON_FIRST = "name.firstName"
 PERSON_LAST = "name.lastName"
 NOTE_BODY = "bodyV2"
 TARGET_FIELD = {"opportunity": "targetOpportunityId", "company": "targetCompanyId", "person": "targetPersonId"}
+# Never read or written, whatever the workspace exposes.
+IGNORED_FIELDS = {"salesRepoUrl"}
 PLURAL = {"opportunity": "opportunities", "company": "companies", "person": "people"}
 
 # Stage values differ per workspace and are never hardcoded; this only decides
@@ -192,7 +194,7 @@ class TwentyClient:
             payload = self._request("GET", "/metadata/objects")
         except TwentyError as error:
             if str(error) in {"forbidden", "not_found"}:
-                return None
+                return self._open_api_fields()
             raise
         data = payload.get("data") if isinstance(payload, dict) else None
         objects = data.get("objects") if isinstance(data, dict) else data
@@ -208,6 +210,33 @@ class TwentyClient:
                             for o in f.get("options") or [] if isinstance(o, dict) and o.get("value")]}
                         for f in fields or [] if isinstance(f, dict) and f.get("name")}
         return None
+
+
+    def _open_api_fields(self) -> dict | None:
+        """Fallback for a key without data-model permission: the workspace's OpenAPI schema.
+
+        Stage options come from the enum (values only, no labels); a plain string is a text field.
+        """
+        try:
+            payload = self._request("GET", "/open-api/core")
+        except TwentyError as error:
+            if str(error) in {"forbidden", "not_found"}:
+                return None
+            raise
+        schemas = ((payload or {}).get("components") or {}).get("schemas") if isinstance(payload, dict) else None
+        schema = schemas.get("Opportunity") if isinstance(schemas, dict) else None
+        properties = schema.get("properties") if isinstance(schema, dict) else None
+        if not isinstance(properties, dict):
+            return None
+        fields = {}
+        for name, spec in properties.items():
+            if not isinstance(spec, dict) or name in IGNORED_FIELDS:
+                continue
+            enum = [str(v) for v in spec.get("enum") or [] if v not in (None, "")]
+            kind = ("SELECT" if enum else "TEXT" if spec.get("type") == "string" and spec.get("format") in (None, "text")
+                    else str(spec.get("type") or "").upper())
+            fields[str(name)] = {"type": kind, "options": [{"value": v, "label": v} for v in enum]}
+        return fields
 
 
 def _people(client: TwentyClient, attendees: list[str]) -> list[dict]:

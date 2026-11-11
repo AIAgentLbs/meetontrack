@@ -114,6 +114,9 @@ the app.
   record" with a search; nothing is written until a record is picked.
 - **Stage** is only proposed ("Move to X"), from the workspace's own stages, and
   changes only on that click.
+  Stages and the `nextStep` field come from the data model when the key may read
+  it, otherwise from the workspace's OpenAPI schema (`/rest/open-api/core`), so a
+  key without settings access still gets stage suggestions.
 - **Money and contract terms** stay out by default: lines with amounts, prices,
   budgets, payment, contract, NDA or licence terms are dropped and the note says
   how many were withheld.
