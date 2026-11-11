@@ -313,12 +313,15 @@ hashes, Pages removed, and the Windows installer relocated to
   manual command as a fallback (`release_updates.py`, `updates.js`, [updates](UPDATES.md)). Shipped in v0.1.26 / windows-v0.1.26 (2026-11-10);
   Verified 2026-11-10: Mac 0.1.26->0.1.28 (waited for a Meet call, then ~21 s) and Windows 0.1.27->0.1.28 (~25 s).
   0.1.26/0.1.27 failed on Mac because BSD pgrep skips ancestors; fixed in 03d0bf5 (`pgrep -af`, install.sh self-heal).
-- [ ] MEETONTRACK-145: an auto-recorded Meet call in Chrome (Mac 0.1.26, 2026-11-10) was named after Chrome's audio
+- [x] MEETONTRACK-145 (closed 2026-11-11, shipped in v0.1.29): an auto-recorded Meet call in Chrome (Mac 0.1.26, 2026-11-10) was named after Chrome's audio
   helper, cut mid-word: "Google Chrome Helper (Ap" in the folder, library and archive. `AudioProcesses.displayName` now
   names a helper after its outermost `.app` ("Google Chrome") or drops " Helper (…)"; folder names cut at a word
   boundary; the web treats any "<X> Helper" title as generic and prefers the window title. Existing recordings keep
   their names. Fixed on main 2026-11-11; closes on the next Mac release.
-- [ ] MEETONTRACK-143: in-app update hardening, deferred P2 review findings from 142 (2026-11-09): (a) `install.sh` opens the new app before its readiness check and a failed
+- [x] MEETONTRACK-144 (closed 2026-11-11, shipped in windows-v0.1.29, fix 8d547a8): each Windows update or install opened
+  another assistant window and showed the recorder window. The launcher reuses the open assistant window by title, the
+  recorder starts with `--background` (tray only), and instantly saved switches no longer block the page reload.
+- [x] MEETONTRACK-143 (closed 2026-11-11, shipped in v0.1.29): in-app update hardening, deferred P2 review findings from 142 (2026-11-09): (a) `install.sh` opens the new app before its readiness check and a failed
   check rolls back with SIGTERM/SIGKILL without asking about a recording that the new app may have started; fix with a
   Capture-side "quit when idle" (as `record quit-when-idle` on Windows) used by both rollback and the updater. (b) No
   cross-process install lock: if the old service restarts mid-install (Windows), a second install can overlap and the
