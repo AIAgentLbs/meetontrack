@@ -404,7 +404,13 @@ def match(client: TwentyClient, attendees: list[str], *, texts: list[str] = (), 
     """
     remembered = memory.lookup(memory_keys(attendees, title)) if memory is not None else []
     if len(remembered) > 1:  # different earlier picks for these people: ask, never take the first
-        return {"status": "needs_choice", "candidates": [], "people": [], "companies": [],
+        candidates = []
+        for pick in remembered[:5]:
+            try:
+                candidates.append({**pick, "name": _name(client.get(pick["object"], pick["id"]))})
+            except TwentyError:
+                continue  # a deleted pick is simply not offered
+        return {"status": "needs_choice", "candidates": candidates, "people": [], "companies": [],
                 "reason": "remembered_conflict"}
     if remembered:
         kind, identity = remembered[0]["object"], remembered[0]["id"]
@@ -427,15 +433,20 @@ def match(client: TwentyClient, attendees: list[str], *, texts: list[str] = (), 
     people = _people(client, attendees)
     companies = list(dict.fromkeys(str(p["companyId"]) for p in people if p.get("companyId")))
     by_domain: dict[str, dict] = {}
+    truncated = False
     if not people:
         for domain in domains(attendees):
-            found = client._list("companies", f"domainName.primaryLinkUrl[ilike]:{_quote('%' + domain + '%')}", 5)
+            found = client._list("companies", f"domainName.primaryLinkUrl[ilike]:{_quote('%' + domain + '%')}", 60)
+            truncated |= len(found) >= 60  # an exact match may be on a page we did not read: never unique
             # ilike %domain% also finds notacme.com: keep only the company whose site is that domain.
             by_domain.update({c["id"]: c for c in found if isinstance(c.get("id"), str)
                               and (host := _host((c.get("domainName") or {}).get("primaryLinkUrl")
                                                  if isinstance(c.get("domainName"), dict) else ""))
                               and host == domain})
         companies = list(by_domain)
+        if truncated:
+            return {"status": "needs_choice", "people": [], "companies": companies,
+                    "candidates": [{"object": "company", "id": c["id"], "name": _name(c)} for c in by_domain.values()]}
     opportunities: dict[str, dict] = {}
     named: list[tuple[str, dict]] = []
     if not people and not companies:

@@ -245,6 +245,10 @@ class TwentyClientTests(unittest.TestCase):
         # ilike also returns notacme.example.com for acme.example.com: not the same company.
         fake.companies.append({"id": "c-4", "name": "Not Acme", "domain": "notacme.example.com"})
         self.assertEqual(match(self.client(fake), ["ann@acme.example.com"])["target"]["id"], "o-1")
+        # A full page of substring hits may hide a second exact match: ask.
+        many = FakeCRM(companies=[{"id": f"c-{i}", "name": f"X{i}", "domain": f"x{i}.acme.example.com"} for i in range(59)]
+                       + [{"id": "c-1", "name": "Acme", "domain": "acme.example.com"}])
+        self.assertEqual(match(self.client(many), ["ann@acme.example.com"])["status"], "needs_choice")
         fake.calls.clear()
         self.assertEqual(twenty_crm.domains(["x@gmail.com", "y@Mail.ru", "z@acme.example.com"]), ["acme.example.com"])
         self.assertEqual(match(self.client(fake), ["x@gmail.com"])["status"], "needs_choice")
@@ -299,6 +303,7 @@ class TwentyClientTests(unittest.TestCase):
             for order in (["ann@acme.example.com", "bob@other.example.com"], ["bob@other.example.com", "ann@acme.example.com"]):
                 found = match(self.client(fake), order, memory=memory)
                 self.assertEqual((found["status"], found["reason"]), ("needs_choice", "remembered_conflict"))
+                self.assertEqual({c["id"] for c in found["candidates"]}, {"o-1", "o-2"})
             other.forget("o-1")
             # The record was deleted: say so and ask again; the stale mapping is gone.
             fake.fail = {("GET", "/opportunities/o-2"): "not_found"}
