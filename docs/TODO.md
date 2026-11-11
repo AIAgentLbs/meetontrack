@@ -27,7 +27,10 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
 - [ ] [MEETONTRACK-146](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-146/): optional Twenty CRM
   integration (read context before calls, one note per meeting after, record choice, one-click stage
   proposal, money/terms filter; `copilot/web/twenty_crm.py`, docs/DELIVERY.md). Code and unit tests are
-  on main; the live check on the dogfood CRM is pending owner approval (API key + test write).
+  on main (through cad03af). Live check passed 2026-11-11 on the dogfood CRM: test note created, linked,
+  read back and soft-deleted; a full write-back matched the deal by title, withheld the money line,
+  updated and then restored nextStep; read context returned company and deal without the amount. Closes
+  after the release that ships it (0.1.30).
   Deferred Codex P2 (2026-11-11): (a) when every `/noteTargets` link fails the note stays `sent`
   with `twenty_error: link_partial`; make it actionable and retry only the missing links, never a
   new note (`twenty_crm.deliver`); (b) read context for a person without `companyId` lists only the
