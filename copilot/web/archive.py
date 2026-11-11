@@ -2208,6 +2208,7 @@ class MeetingArchive:
         return twenty_crm.deliver(
             client, meeting_id=detail["meeting_id"], title=str(detail.get("title") or ""),
             texts=[str(detail.get("source_title") or ""), *names],
+            memory_title=str(detail.get("source_title") or detail.get("title") or ""),
             memory=twenty_crm.Memory(self.config_root / "twenty-records.json"),
             started=_date(detail.get("started_at")) or datetime.now().astimezone(), attendees=attendees,
             sections=sections, choice=choice, money_filter=settings.get("twenty_money_filter") is not False,

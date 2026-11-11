@@ -41,8 +41,8 @@ class FakeCRM:
             return {"data": {path[1:]: page}, "pageInfo": {"hasNextPage": start + len(page) < len(items),
                                                            "endCursor": str(start + len(page))}}
         if path == "/companies":
-            return {"data": {"companies": [c for c in self.companies
-                                           if c.get("domain") and f"%{c['domain']}%" in flt]}}
+            return {"data": {"companies": [{**c, "domainName": {"primaryLinkUrl": "https://www." + c["domain"]}}
+                                           for c in self.companies if c.get("domain") and flt.split("%")[1] in c["domain"]]}}
         if path.startswith("/companies/") and self.companies:
             found = [c for c in self.companies if c["id"] == path.rsplit("/", 1)[-1]]
             if not found:
@@ -242,6 +242,9 @@ class TwentyClientTests(unittest.TestCase):
         self.assertIn("domainName.primaryLinkUrl[ilike]", fake.calls[1][2]["filter"])
         found = match(self.client(fake), ["bob@beta.example.com"])
         self.assertEqual((found["status"], {c["id"] for c in found["candidates"]}), ("needs_choice", {"c-2", "c-3"}))
+        # ilike also returns notacme.example.com for acme.example.com: not the same company.
+        fake.companies.append({"id": "c-4", "name": "Not Acme", "domain": "notacme.example.com"})
+        self.assertEqual(match(self.client(fake), ["ann@acme.example.com"])["target"]["id"], "o-1")
         fake.calls.clear()
         self.assertEqual(twenty_crm.domains(["x@gmail.com", "y@Mail.ru", "z@acme.example.com"]), ["acme.example.com"])
         self.assertEqual(match(self.client(fake), ["x@gmail.com"])["status"], "needs_choice")
@@ -287,14 +290,29 @@ class TwentyClientTests(unittest.TestCase):
             # Another meeting with the same recurring title (different date) uses the earlier pick.
             found = match(self.client(fake), ["bob@other.example.com"], memory=memory, title="Weekly sync 18.11")
             self.assertEqual((found["target"]["id"], found["company"]), ("o-2", "c-9"))
+            # A remembered pick still links and describes the attendees found by email.
+            found = match(self.client(fake), ["ann@acme.example.com"], memory=memory, title="")
+            self.assertEqual((found["target"]["id"], found["people"]), ("o-2", ["p-1"]))
+            # Two attendees remembered with different picks: ask, whatever their order.
+            other = twenty_crm.Memory(Path(folder) / "twenty-records.json")  # a second instance, same file
+            other.remember(["email:bob@other.example.com"], {"object": "opportunity", "id": "o-1"})
+            for order in (["ann@acme.example.com", "bob@other.example.com"], ["bob@other.example.com", "ann@acme.example.com"]):
+                found = match(self.client(fake), order, memory=memory)
+                self.assertEqual((found["status"], found["reason"]), ("needs_choice", "remembered_conflict"))
+            other.forget("o-1")
             # The record was deleted: say so and ask again; the stale mapping is gone.
             fake.fail = {("GET", "/opportunities/o-2"): "not_found"}
             found = match(self.client(fake), ["ann@acme.example.com"], memory=memory, title="")
             self.assertEqual((found["status"], found["reason"]), ("needs_choice", "remembered_not_found"))
-            self.assertIsNone(memory.lookup(keys))
+            self.assertEqual(memory.lookup(keys), [])
             result = twenty_crm.deliver(self.client(FakeCRM()), meeting_id="m", title="t", started=datetime(2026, 1, 1),
                                         attendees=[], sections={}, choice=None, money_filter=True, before_write=lambda: None)
             self.assertEqual(result["twenty_status"], "needs_choice")
+
+    def test_made_up_titles_are_not_remembered_as_recurring(self):
+        for title in ("Встреча 10.11.2026 10:00", "Встреча: Ann, Bob", "Запись без названия", "Zoom", "ab"):
+            self.assertEqual(twenty_crm.memory_keys([], title), [], title)
+        self.assertEqual(twenty_crm.memory_keys([], "Acme weekly 10.11"), ["title:acme weekly"])
 
     def test_open_api_fallback_when_metadata_is_refused(self):
         properties = {name: {"type": "string"} for name in (
