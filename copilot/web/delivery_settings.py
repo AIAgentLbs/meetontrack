@@ -376,9 +376,7 @@ class DeliverySettings:
                     raise ValueError("smtp_settings_required")
                 if not password and not raw.get("smtp_password_saved"):
                     raise ValueError("smtp_password_required")
-            if password:
-                self.passwords.set(password)
-                raw["smtp_password_saved"] = True
+            # The CRM key first: if it cannot be stored, the SMTP password stays as it was.
             if twenty_key:
                 self.twenty_keys.set(twenty_key)
             elif stale_twenty_key:
@@ -386,6 +384,9 @@ class DeliverySettings:
                     self.twenty_keys.delete()
                 except ValueError:
                     pass
+            if password:
+                self.passwords.set(password)
+                raw["smtp_password_saved"] = True
             write_json(self.path, raw)
             if twenty_before != (raw.get("twenty_url"), enabled(raw, "twenty")) or twenty_key:
                 self.twenty_changed()
