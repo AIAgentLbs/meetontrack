@@ -24,17 +24,16 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
   state poll failed silently without `updates.js`), keeps the main screen up
   with recording audio, and drops the removed `#analysis-help` checks. Passes;
   close after release.
-- [ ] [MEETONTRACK-146](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-146/): optional Twenty CRM
-  integration (read context before calls, one note per meeting after, record choice, one-click stage
-  proposal, money/terms filter; `copilot/web/twenty_crm.py`, docs/DELIVERY.md). Code and unit tests are
-  on main (through cad03af). Live check passed 2026-11-11 on the dogfood CRM: test note created, linked,
-  read back and soft-deleted; a full write-back matched the deal by title, withheld the money line,
-  updated and then restored nextStep; read context returned company and deal without the amount. Closes
-  after the release that ships it (0.1.30).
-  Deferred Codex P2 (2026-11-11): (a) when every `/noteTargets` link fails the note stays `sent`
-  with `twenty_error: link_partial`; make it actionable and retry only the missing links, never a
+- [ ] [MEETONTRACK-149](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-149/): Twenty CRM follow-ups
+  after 0.1.30 (deferred Codex P2 from 146): (a) when every `/noteTargets` link fails the note stays
+  `sent` with `twenty_error: link_partial`; make it actionable and retry only the missing links, never a
   new note (`twenty_crm.deliver`); (b) read context for a person without `companyId` lists only the
-  person; add person-linked deals (`pointOfContactId`) and person notes (`TwentyContext._collect`).
+  person; add person-linked deals (`pointOfContactId`) and person notes (`TwentyContext._collect`);
+  (c) paging past 60 records is verified only on fakes; confirm on the first real call (62 companies).
+- [ ] [MEETONTRACK-148](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-148/): installer test
+  `test_one_install_at_a_time` times out at 30 s on Homebrew Python 3.15 or under load: with `sleep`
+  mocked it starts Python up to ~600 times, so it measures interpreter start-up. Seen in the 0.1.30
+  release (app repo and website). Patch the lock probe in the test so it does not spawn Python per loop.
 - [ ] MEETONTRACK-85: `copilot/web/test_meeting_boundary_ui.cjs` times out
   (`locator.waitFor` 3 s, line 45) at 0.1.12 and identically at 0.1.11 (`effb7a2`).
   Not in the release script set. Find whether the fixture or the UI changed,
@@ -324,6 +323,10 @@ hashes, Pages removed, and the Windows installer relocated to
   manual command as a fallback (`release_updates.py`, `updates.js`, [updates](UPDATES.md)). Shipped in v0.1.26 / windows-v0.1.26 (2026-11-10);
   Verified 2026-11-10: Mac 0.1.26->0.1.28 (waited for a Meet call, then ~21 s) and Windows 0.1.27->0.1.28 (~25 s).
   0.1.26/0.1.27 failed on Mac because BSD pgrep skips ancestors; fixed in 03d0bf5 (`pgrep -af`, install.sh self-heal).
+- [x] MEETONTRACK-146 (closed 2026-11-11, shipped in v0.1.30): optional Twenty CRM integration (read context
+  before calls, one note per meeting after, record choice, one-click stage proposal, money/terms filter;
+  `copilot/web/twenty_crm.py`, docs/DELIVERY.md). Live check on the dogfood CRM passed; connected on Mike's
+  Mac and Windows after the update. Follow-ups in MEETONTRACK-149.
 - [x] MEETONTRACK-145 (closed 2026-11-11, shipped in v0.1.29): an auto-recorded Meet call in Chrome (Mac 0.1.26, 2026-11-10) was named after Chrome's audio
   helper, cut mid-word: "Google Chrome Helper (Ap" in the folder, library and archive. `AudioProcesses.displayName` now
   names a helper after its outermost `.app` ("Google Chrome") or drops " Helper (…)"; folder names cut at a word
