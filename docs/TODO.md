@@ -327,6 +327,13 @@ hashes, Pages removed, and the Windows installer relocated to
   would close it. (d) A persisted live status `recording` left by a Capture crash keeps an update scheduled until the
   next recording ends; gate on the live marker plus status freshness. (e) A scheduled (after-call) update lives only in
   memory and is lost if the service restarts during the call; persist it in `updates.json` and revalidate.
+  Fixed on main 2026-11-11 (closes on the next release): (a) rollback quits the new app by Apple Event and keeps it
+  (and its files) when it stays running; (b) `install.sh` pid-symlink lock and `install.ps1` file lock, both refuse to
+  replace a newer installed version; (d) the live status counts only while the file is fresh (5 min), on the server and in
+  `install.ps1`; (e) `updates.json` `scheduled`, restored only while the same release is on offer. (c) declined: every
+  token the page can fetch over HTTP a local process can fetch too, and Windows opens the page in the user's browser, so
+  no out-of-band channel exists there; the forged request can only start the offered, tag-pinned, SHA-verified release,
+  never during a recording. Revisit if the page moves into an app-owned web view on both platforms.
 - [x] MEETONTRACK-138 (shipped in v0.1.26, closed 2026-11-10): Mac treats a call app's open output stream as a possible capture failure (`RecordingSession.swift`
   `callCaptureSuspect`), so a browser holding a silent output stream after the call blocks the no-call-audio stop and the
   recording runs to the duration ceiling. Now only a stalled call-track file suppresses the stop indefinitely; open

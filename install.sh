@@ -47,20 +47,35 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/meeting-copilot.XXXXXX")"
 rollback="$tmp/rollback"
 replaced=()
 committed=false
+locked=false
+mkdir -p "$SHARE"
 launched=false
 agent_stopped=false
 finish() {
   local status=$? index target
   if [[ $status -ne 0 && "$committed" != true && ${#replaced[@]} -gt 0 ]]; then
-    # A new app that failed its readiness check is quit before its files go.
+    # A new app that failed its readiness check is quit before its files go, like the Quit menu
+    # item (an Apple Event), never SIGTERM: a recording it started meanwhile gets the app's own
+    # "Quit while recording?" question. An app that stays is never swapped out from under itself:
+    # the new version is kept and the failure is reported (MEETONTRACK-143).
     if [[ "$launched" == true ]]; then
-      # Quit it (and its service) for good before its files are swapped back.
-      pkill -TERM -f "$app/Contents/MacOS/MeetingCopilotCapture" >/dev/null 2>&1 || true
-      for wait in {1..40}; do
-        pgrep -f "$app/Contents/(MacOS/MeetingCopilotCapture|Resources/payload/)" >/dev/null 2>&1 || break
+      osascript -e 'quit app id "com.aiagentlbs.meetingcopilot.capture"' >/dev/null 2>&1 || true
+      for wait in {1..240}; do
+        pgrep -f "$app/Contents/MacOS/MeetingCopilotCapture" >/dev/null 2>&1 || break
         sleep 0.25
       done
-      pkill -KILL -f "$app/Contents/(MacOS/MeetingCopilotCapture|Resources/payload/)" >/dev/null 2>&1 || true
+      if pgrep -f "$app/Contents/MacOS/MeetingCopilotCapture" >/dev/null 2>&1; then
+        printf 'MeetOnTrack · the new version is still running (a recording?) and stays installed. Log: %s\n' "$SHARE/server.log" >&2
+        replaced=()
+      else
+        # Only its web service can be left behind; that one is not a recording.
+        pkill -TERM -f "$app/Contents/Resources/payload/" >/dev/null 2>&1 || true
+        for wait in {1..40}; do
+          pgrep -f "$app/Contents/Resources/payload/" >/dev/null 2>&1 || break
+          sleep 0.25
+        done
+        pkill -KILL -f "$app/Contents/Resources/payload/" >/dev/null 2>&1 || true
+      fi
     fi
     for ((index=${#replaced[@]}-1; index>=0; index--)); do
       target="${replaced[$index]}"
@@ -68,10 +83,10 @@ finish() {
       [[ ! -e "$rollback/$index" ]] || mv "$rollback/$index" "$target"
     done
     # The old version's service was only stopped, never deleted: start it again.
-    if [[ "$agent_stopped" == true ]]; then
+    if [[ "$agent_stopped" == true && ${#replaced[@]} -gt 0 ]]; then
       launchctl bootstrap "gui/$(id -u)" "$AGENTS/$LABEL.plist" >/dev/null 2>&1 || true
     fi
-    printf 'MeetOnTrack · the previous version was restored\n' >&2
+    [[ ${#replaced[@]} -eq 0 ]] || printf 'MeetOnTrack · the previous version was restored\n' >&2
   fi
   rm -rf "$tmp"
 }
@@ -117,6 +132,16 @@ for helper in zoom-window-finder zoom-frame-inspector detect-speech-language; do
 done
 release_version="$("$python" -I -B -c 'import json, sys; print(json.load(open(sys.argv[1]))["version"])' "$tmp/release/release.json")" \
   || fail "Release file is invalid: release.json"
+# One install at a time (MEETONTRACK-143): an in-app update and a rerun must not interleave
+# their swaps and rollbacks. A kernel lock (flock) on fd 9: it belongs to this script's open
+# file, outlives the helper that took it, and goes away with this script, also after a crash.
+mkdir -p "$SHARE"
+exec 9>>"$SHARE/.install.lock"
+for wait in {1..600}; do
+  "$python" -I -B -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)' 2>/dev/null && { locked=true; break; }
+  sleep 0.5
+done
+[[ "$locked" == true ]] || fail "Another MeetOnTrack installation is running; nothing was changed. Try again when it finishes."
 require_capture_closed
 
 # Installers up to 0.1.16 left a backup of every previous version behind. Move
@@ -144,6 +169,22 @@ if [[ ! -w "$app_root" ]]; then
   mkdir -p "$app_root"
 fi
 app="$app_root/Meeting Copilot Capture.app"
+# Under the lock, never replace a newer version that another install finished meanwhile.
+if [[ -f "$app/Contents/Info.plist" ]] && ! "$python" -I -B - "$app/Contents/Info.plist" "$release_version" <<'PY'
+import plistlib, re, sys
+def key(value):
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", str(value))
+    return tuple(map(int, match.groups())) if match else None
+try:
+    installed = key(plistlib.load(open(sys.argv[1], "rb")).get("CFBundleShortVersionString"))
+except Exception:
+    installed = None
+new = key(sys.argv[2])
+sys.exit(1 if installed and new and installed > new else 0)
+PY
+then
+  fail "A newer MeetOnTrack is already installed; nothing was changed"
+fi
 replace "$release_app" "$app"
 payload="$app/$payload_in"
 python="$payload/python/bin/python3"

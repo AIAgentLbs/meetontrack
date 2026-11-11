@@ -57,9 +57,24 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 43121
 HOME = Path.home()
 WEB_DIR = Path(__file__).resolve().parent
+# A live status still being written (Windows rewrites it every 5 s while recording): a capture that
+# crashed leaves "recording" behind, which must not hold an update forever (MEETONTRACK-143).
+LIVE_STATUS_FRESH_SECONDS = 300
+
+
+def capture_recording() -> bool:
+    """The capture's own marker (a live owner pid), whatever recognition reports, or a fresh busy live status."""
+    if RECORDING_LOCATIONS.active() is not None:
+        return True
+    try:
+        fresh = time.time() - TRANSCRIPT_FILE.stat().st_mtime < LIVE_STATUS_FRESH_SECONDS
+    except OSError:
+        return False
+    return fresh and TRANSCRIPT.status in RECORDING
+
+
 UPDATES = ReleaseUpdates(HOME / ".config/meeting-copilot/updates.json", installed_release(WEB_DIR),
-                         # Recording = the capture's own marker (a live owner pid), whatever recognition reports, or a busy live status.
-                         recording=lambda: TRANSCRIPT.status in RECORDING or RECORDING_LOCATIONS.active() is not None,
+                         recording=capture_recording,
                          data_dir=HOME / ".local/share/meeting-copilot")
 TRANSCRIPT_FILE = HOME / ".local/share/meeting-copilot/meeting-copilot-live.json"
 SESSION_FILE = HOME / ".config/meeting-copilot/SESSION.md"

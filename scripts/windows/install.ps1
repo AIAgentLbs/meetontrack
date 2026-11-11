@@ -67,13 +67,23 @@ if([int](Get-CimInstance Win32_OperatingSystem).BuildNumber -lt 26100){throw 'Wi
 $configRoot=Join-Path $UserRoot '.config\meeting-copilot'
 $dataRoot=Join-Path $UserRoot '.local\share\meeting-copilot'
 $live=Join-Path $dataRoot 'meeting-copilot-live.json'
-if(Test-Path $live){
+# Only a status the recorder still writes (every 5 s while recording): one a crashed recorder left
+# behind would refuse every update (MEETONTRACK-143).
+if((Test-Path $live) -and ((Get-Date)-(Get-Item -LiteralPath $live).LastWriteTime).TotalSeconds -lt 300){
     $state=Get-Content $live -Raw -Encoding UTF8 | ConvertFrom-Json
     if($state.status -in @('recording','paused','loading','overloaded')){throw 'Finish the active meeting and close Capture before updating'}
 }
 $temporary=Join-Path ([IO.Path]::GetTempPath()) ('meeting-copilot-install-'+[guid]::NewGuid())
 New-Item -ItemType Directory -Force $temporary | Out-Null
+$lock=$null
 try {
+    # One install at a time (MEETONTRACK-143): an update and a second one started meanwhile (the old
+    # service restarted, a rerun) must not race for current.json. Windows drops the lock with its owner.
+    New-Item -ItemType Directory -Force $InstallRoot | Out-Null
+    for($i=0;$i -lt 600 -and -not $lock;$i++){
+        try{$lock=[IO.File]::Open((Join-Path $InstallRoot 'install.lock'),'OpenOrCreate','ReadWrite','None')}catch [IO.IOException]{Start-Sleep -Milliseconds 500}
+    }
+    if(-not $lock){throw 'Another MeetOnTrack installation is running; nothing was changed. Try again when it finishes.'}
     if(-not $PackagePath){
         $PackagePath=Join-Path $temporary 'package.zip'
         Write-Host 'Downloading the ready-to-run Windows package (no compiler required)...'
@@ -95,6 +105,11 @@ try {
     $manifest=Get-Content "$temporary\payload\release.json" -Raw -Encoding UTF8 | ConvertFrom-Json
     $version=[string]$manifest.version
     if($version -notmatch '^[a-zA-Z0-9.-]+$'){throw 'Invalid package version'}
+    # Under the lock, never replace a newer version that another install finished meanwhile.
+    $installed=try{[string](Get-Content -LiteralPath (Join-Path $InstallRoot 'current.json') -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json).version}catch{''}
+    if($installed -match '^v?(\d+\.\d+\.\d+)' -and ($have=[version]$Matches[1]) -and $version -match '^v?(\d+\.\d+\.\d+)' -and $have -gt [version]$Matches[1]){
+        throw "A newer MeetOnTrack ($installed) is already installed; nothing was changed"
+    }
     $destination=Join-Path $InstallRoot "versions\$version"
     New-Item -ItemType Directory -Force $destination,$configRoot,$dataRoot | Out-Null
     Copy-Item "$temporary\payload\*" $destination -Recurse -Force
@@ -168,4 +183,4 @@ try {
     }
     Write-Host "Installed MeetOnTrack $version. Recordings/settings are outside the installation directory."
     if(-not $NoLaunch){& "$destination\meeting-copilot.ps1"}
-} finally {Remove-Item -LiteralPath $temporary -Recurse -Force}
+} finally {Remove-Item -LiteralPath $temporary -Recurse -Force; if($lock){$lock.Dispose()}}

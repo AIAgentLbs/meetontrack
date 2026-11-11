@@ -63,7 +63,10 @@ class InstallerTests(unittest.TestCase):
         self.script("codex", 'exit "${MOCK_CODEX_EXIT:-0}"')
         # MOCK_CAPTURE_ANCESTOR: Capture is install.sh's ancestor, so only `pgrep -a` sees it, until quit.
         self.script("osascript", 'touch "$FIXTURE_ROOT/osascript"\n[ "${MOCK_CAPTURE_QUITS:-0}" != 1 ] || touch "$FIXTURE_ROOT/quit"')
-        self.script("pgrep", 'if [ "${MOCK_CAPTURE_ANCESTOR:-0}" = 1 ] && [ "$1" = -af ] && [ ! -f "$FIXTURE_ROOT/quit" ]; then echo 999; exit 0; fi\n'
+        # MOCK_NEW_APP_STAYS: the freshly opened app does not quit when asked (a recording).
+        self.script("pkill", 'printf "%s\\n" "$*" >> "$FIXTURE_ROOT/pkills"')
+        self.script("pgrep", 'if [ "${MOCK_NEW_APP_STAYS:-0}" = 1 ] && [ -f "$FIXTURE_ROOT/opened" ]; then case "$*" in *Contents/MacOS*) echo 999; exit 0;; esac; fi\n'
+                    'if [ "${MOCK_CAPTURE_ANCESTOR:-0}" = 1 ] && [ "$1" = -af ] && [ ! -f "$FIXTURE_ROOT/quit" ]; then echo 999; exit 0; fi\n'
                     'if [ "${MOCK_CAPTURE:-0}" = 1 ]; then echo 999; exit 0; fi\nif [ "${MOCK_CAPTURE_AFTER_STAGE:-0}" = 1 ] && [ -f "$FIXTURE_ROOT/downloaded" ]; then echo 999; exit 0; fi\nexit 1')
         self.script("curl", 'touch "$FIXTURE_ROOT/downloaded"\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then cp "$FIXTURE_PACKAGE" "$2"; exit 0; fi; shift; done\nexit 2')
         self.script("swiftc", 'touch "$FIXTURE_ROOT/compiled"\nexit 99')
@@ -258,6 +261,54 @@ exit 2
         self.assertEqual((config / "analytics.json").read_text(), "synthetic-retired-state")
         self.assertFalse((config / "analytics-pending.json").exists())
         self.assert_0_1_18_intact(app, share)
+
+    def test_unready_new_app_is_asked_to_quit_never_signalled(self):
+        """MEETONTRACK-143: rollback quits the new app like its Quit menu item, so a recording is asked about."""
+        app, share, _ = self.seed_existing()
+        self.prepare_launch()
+        result = self.run_install(MEETING_COPILOT_SKIP_LAUNCH="0", MOCK_HEALTH_VERSION="0.1.18")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((self.root / "osascript").exists())
+        pkills = (self.root / "pkills").read_text() if (self.root / "pkills").exists() else ""
+        self.assertNotIn("Contents/MacOS", pkills)
+        self.assert_0_1_18_intact(app, share)
+
+    def test_new_app_that_keeps_running_is_not_swapped_out(self):
+        app, share, _ = self.seed_existing()
+        self.prepare_launch()
+        (self.root / "loaded").touch()
+        result = self.run_install(MEETING_COPILOT_SKIP_LAUNCH="0", MOCK_HEALTH_VERSION="0.1.18", MOCK_NEW_APP_STAYS="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("stays installed", result.stderr)
+        self.assertNotIn("previous version was restored", result.stderr)
+        self.assertFalse((app / "previous").exists())
+        self.assertTrue((app / "Contents/MacOS/MeetingCopilotCapture").is_file())
+        self.assertFalse(any(line.startswith("bootstrap") for line in (self.root / "launches").read_text().splitlines()))
+
+    def test_one_install_at_a_time(self):
+        """MEETONTRACK-143: a second install waits for the running one; its kernel lock dies with it."""
+        import fcntl
+        share = Path(self.env["MEETING_COPILOT_SHARE_ROOT"])
+        share.mkdir()
+        self.script("sleep", "exit 0")
+        with open(share / ".install.lock", "a") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)  # a running installer
+            result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Another MeetOnTrack installation is running", result.stderr)
+        self.assertFalse((Path(self.env["MEETING_COPILOT_APP_ROOT"]) / "Meeting Copilot Capture.app").exists())
+        result = self.run_install()  # released when its holder ended
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    def test_newer_installed_version_is_never_replaced(self):
+        app, share, _ = self.seed_existing()
+        (app / "Contents").mkdir()
+        with open(app / "Contents/Info.plist", "wb") as handle:
+            plistlib.dump({"CFBundleShortVersionString": "0.2.0"}, handle)
+        result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("newer MeetOnTrack is already installed", result.stderr)
+        self.assertTrue((app / "previous").is_file())
 
     def test_old_service_that_will_not_stop_changes_nothing(self):
         app, share, _ = self.seed_existing()

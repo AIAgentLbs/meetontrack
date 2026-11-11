@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import threading
+import time
 from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 from urllib.request import Request, urlopen
@@ -306,6 +307,25 @@ class OneClickUpdateTests(unittest.TestCase):
         monitor.resume().join(5)
         self.assertEqual(len(self.spawned), 1)
 
+    def test_after_call_update_survives_a_restart_while_still_offered(self):
+        """MEETONTRACK-143: a service restart during the call keeps the scheduled update."""
+        monitor = self.monitor()
+        monitor.check()
+        self.recording = True
+        monitor.install("0.1.10")
+        restarted = self.monitor()
+        self.assertEqual(restarted.snapshot()["install"], {"version": "0.1.10", "state": "scheduled"})
+        self.recording = False
+        restarted.resume().join(5)
+        self.assertEqual(len(self.spawned), 1)
+        self.assertNotIn("scheduled", json.loads((self.root / "updates.json").read_text()))
+        # No longer on offer (installed meanwhile, or withdrawn from the cache): nothing is restored.
+        self.recording = True
+        monitor = self.monitor()
+        monitor.check()
+        monitor.install("0.1.10")
+        self.assertIsNone(self.monitor("0.1.10").snapshot()["install"])
+
     def test_recording_started_during_download_is_not_interrupted(self):
         monitor = self.monitor()
         monitor.check()
@@ -407,9 +427,14 @@ class OneClickUpdateTests(unittest.TestCase):
         with patch.object(server.TRANSCRIPT, "status", "unavailable"), \
                 patch.object(server.RECORDING_LOCATIONS, "active", return_value={"pid": 1}):
             self.assertTrue(server.UPDATES.recording())
-        with patch.object(server.TRANSCRIPT, "status", "paused"), \
+        live = self.root / "live.json"
+        live.write_text("{}")
+        with patch.object(server.TRANSCRIPT, "status", "paused"), patch.object(server, "TRANSCRIPT_FILE", live), \
                 patch.object(server.RECORDING_LOCATIONS, "active", return_value=None):
             self.assertTrue(server.UPDATES.recording())
+            # A status a crashed capture left behind holds nothing (MEETONTRACK-143).
+            os.utime(live, (0, time.time() - server.LIVE_STATUS_FRESH_SECONDS - 1))
+            self.assertFalse(server.UPDATES.recording())
 
     def test_http_install_keeps_origin_guard(self):
         import server

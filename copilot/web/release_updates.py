@@ -207,6 +207,12 @@ class ReleaseUpdates:
             installing = str(saved.get("installing", ""))
             if version_key(installing) and not (version_key(identity.get("version")) and version_key(identity["version"]) >= version_key(installing)):
                 self.job = {"version": installing, "state": "failed"}
+            # An after-call update survives a restart while the same release is still on offer;
+            # installing it rechecks GitHub and the installer's pin first (MEETONTRACK-143).
+            scheduled = str(saved.get("scheduled", ""))
+            if not self.job and self.data["latest"] and self.data["latest"]["version"] == scheduled:
+                self.job = {"version": scheduled, "state": "scheduled"}
+                self.data["scheduled"] = scheduled
         except (OSError, ValueError, TypeError, AttributeError):
             self.data["latest"] = None
         # A restart checks promptly even if yesterday's cache recorded a failure.
@@ -248,6 +254,11 @@ class ReleaseUpdates:
                 raise ValueError("This version is not offered for update")
             if not self.job or self.job["state"] == "failed":
                 self.job = {"version": version, "state": "scheduled"}
+                self.data["scheduled"] = version
+                try:
+                    self._save()
+                except OSError:
+                    pass  # still scheduled for this run of the service
         self.resume()
         return self.snapshot()
 
@@ -298,6 +309,7 @@ class ReleaseUpdates:
                 handle.write(script)
             with self.lock:
                 self.data["installing"] = version
+                self.data.pop("scheduled", None)
                 self._save()
             self._log(f"installing {release_tag(version, platform)} from {url}")
             code = self.spawn(installer_command(platform, target), self.data_dir / "update.log").wait()
@@ -310,6 +322,7 @@ class ReleaseUpdates:
             self._log(f"update to {version} failed: {error}")
         with self.lock:
             self.data.pop("installing", None)
+            self.data.pop("scheduled", None)
             self.job = {"version": version, "state": "failed"} if failed else None
             try:
                 self._save()
