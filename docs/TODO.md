@@ -24,6 +24,10 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
   state poll failed silently without `updates.js`), keeps the main screen up
   with recording audio, and drops the removed `#analysis-help` checks. Passes;
   close after release.
+- [ ] [MEETONTRACK-150](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-150/): Call QA. Score
+  every call against a per-team script-stage checklist (passed/missed/weak with quote and
+  timestamp), daily per-manager summary, structured promise tracking (owner, due, status; today
+  COMMITMENT items are free text), anonymised buyer profiles per period, later AI role-play.
 - [ ] [MEETONTRACK-149](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-149/): Twenty CRM follow-ups
   after 0.1.30 (deferred Codex P2 from 146): (a) when every `/noteTargets` link fails the note stays
   `sent` with `twenty_error: link_partial`; make it actionable and retry only the missing links, never a
