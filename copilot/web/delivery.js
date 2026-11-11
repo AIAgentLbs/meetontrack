@@ -54,6 +54,18 @@
     telegramReady:["Uses the existing Telegram connection.","Используется существующее подключение Telegram."],
     telegramMissing:["Telegram is not connected on this computer. Email and local reports work independently.","Telegram не подключен на этом компьютере. Почта и локальные отчеты работают независимо."],
     googleMissing:["Google is not set up on this computer. See the setup details below, or use SMTP without Google Cloud.","Google на этом компьютере не настроен. Раскройте инструкцию ниже или используйте SMTP без Google Cloud."],
+    twentyHelp:["Optional. After each meeting a short note (decisions, agreements, open questions) is added to the matching CRM record. Before a call, the AI sees the record of the people you meet. The full transcript stays on this computer.","Необязательно. После встречи в подходящую запись CRM добавляется короткая заметка: решения, договоренности, открытые вопросы. Перед звонком ИИ видит карточку собеседников. Полная стенограмма остается на компьютере."],
+    twentyUrl:["CRM address","Адрес CRM"], twentyKey:["API key","API-ключ"], twentyCheck:["Check","Проверить"],
+    twentyKeySaved:["Key saved in the OS credential store. Leave blank to keep it.","Ключ сохранен в защищенном хранилище ОС. Оставьте поле пустым, чтобы сохранить его."],
+    twentyKeyHelp:["Create a key in Twenty: Settings → APIs & Webhooks. It is kept in macOS Keychain / Windows DPAPI.","Создайте ключ в Twenty: Settings → APIs & Webhooks. Он хранится в macOS Keychain / Windows DPAPI."],
+    twentyEnable:["Add a meeting note to the CRM","Добавлять заметку о встрече в CRM"],
+    twentyMoney:["Keep money and contract terms out of the CRM","Не передавать в CRM суммы и условия договора"],
+    twenty:["Twenty CRM","Twenty CRM"], twentySent:["Note added to","Заметка добавлена в"],
+    twentyWithheld:["lines with money or contract terms were not sent","строк с суммами или условиями договора не отправлено"],
+    twentyChoose:["Choose a CRM record for this meeting","Выберите запись CRM для этой встречи"],
+    twentySearch:["Find a company or deal","Найти компанию или сделку"], twentyNothing:["Nothing found","Ничего не найдено"],
+    twentyMove:["Move to","Перевести в этап"], twentyMoved:["Stage changed","Этап изменен"],
+    twentyRetry:["Add the note to the CRM again","Повторить отправку заметки в CRM"],
     error:["Could not complete the operation. Check the connection and try again.","Не удалось выполнить действие. Проверьте подключение и повторите."],
   };
   const errors = {
@@ -94,6 +106,15 @@
     resend_confirmation_required:words.confirm,
     timeout_outcome_unknown:words.unknown, invalid_response:words.unknown,
     missing_send_acknowledgement:words.unknown, smtp_outcome_unknown:words.unknown,
+    connected_twenty:["CRM connected.","CRM подключена."],
+    twenty_settings_required:["Enter the CRM address and API key.","Укажите адрес CRM и API-ключ."],
+    invalid_twenty_url:["Enter the CRM address starting with https://","Введите адрес CRM, начиная с https://"],
+    invalid_twenty_key:["The API key looks incomplete. Copy it again.","API-ключ выглядит неполным. Скопируйте его еще раз."],
+    twenty_auth_expired:["The CRM key expired or was revoked. Paste a new one.","Ключ CRM истек или отозван. Вставьте новый."],
+    twenty_forbidden:["The CRM key has no access to this data. Check its role in Twenty.","У ключа CRM нет доступа к этим данным. Проверьте его роль в Twenty."],
+    twenty_rate_limited:["The CRM is busy. Try again in a minute.","CRM перегружена. Повторите через минуту."],
+    twenty_timeout:["The CRM did not answer in time.","CRM не ответила вовремя."], twenty_unreachable:["The CRM is unreachable. Check the address.","CRM недоступна. Проверьте адрес."],
+    twenty_already_sent:["The note is already in the CRM.","Заметка уже есть в CRM."],
     attachment_too_large:["PDF exceeds the email limit. Use the Google Drive copy.","PDF превышает лимит письма. Используйте копию на Google Drive."],
   };
   const text = key => (words[key] || errors[key] || words.error)[ru() ? 1 : 0];
@@ -108,6 +129,7 @@
     document.querySelectorAll("[data-delivery-text]").forEach(node => node.textContent = text(node.dataset.deliveryText));
     $("delivery-password-help").textContent = text(state.smtp_password_saved ? "passwordSaved" : "passwordHelp");
     $("delivery-telegram-help").textContent = text(state.telegram_configured ? "telegramReady" : "telegramMissing");
+    $("delivery-twenty-key-help").textContent = text(state.twenty_key_saved ? "twentyKeySaved" : "twentyKeyHelp");
     const emptyAccount = $("delivery-profile").querySelector('option[value=""]');
     if(emptyAccount) emptyAccount.textContent = text("noAccount");
     const ownAccount = $("delivery-profile").querySelector('option[value="custom"]');
@@ -129,6 +151,12 @@
     $("delivery-local-path").textContent = data.local_reports || "";
     for(const channel of ["email","drive","telegram"]) $(`delivery-${channel}-enabled`).checked = Boolean(data[`${channel}_enabled`]);
     $("delivery-telegram-enabled").disabled = !data.telegram_configured;
+    $("delivery-twenty-url").value = data.twenty_url || "";
+    $("delivery-twenty-key").value = "";
+    $("delivery-twenty-enabled").checked = Boolean(data.twenty_enabled);
+    $("delivery-twenty-money").checked = data.twenty_money_filter !== false;
+    // MEETONTRACK-146: the CRM options appear only once a URL and key are saved.
+    $("delivery-twenty-options").hidden = !(data.twenty_url && data.twenty_key_saved);
     $("delivery-provider").value = data.email_provider || "smtp";
     $("delivery-recipient").value = data.email_to || "";
     $("delivery-drive-folder").value = data.drive_folder_id || "";
@@ -141,7 +169,9 @@
   }
   function payload() {
     return {email_enabled:$("delivery-email-enabled").checked, drive_enabled:$("delivery-drive-enabled").checked,
-      telegram_enabled:$("delivery-telegram-enabled").checked, email_to:$("delivery-recipient").value,
+      telegram_enabled:$("delivery-telegram-enabled").checked, twenty_url:$("delivery-twenty-url").value,
+      twenty_key:$("delivery-twenty-key").value.trim(), twenty_money_filter:$("delivery-twenty-money").checked,
+      ...($("delivery-twenty-options").hidden ? {} : {twenty_enabled:$("delivery-twenty-enabled").checked}), email_to:$("delivery-recipient").value,
       email_provider:$("delivery-provider").value, google_profile:$("delivery-profile").value,
       drive_folder_id:$("delivery-drive-folder").value, smtp_password:$("delivery-smtp-password").value,
       smtp:{host:$("delivery-smtp-host").value,port:$("delivery-smtp-port").value,security:$("delivery-smtp-security").value,
@@ -185,13 +215,78 @@
   }));
   $("delivery-google-disconnect").addEventListener("click", event => void action(event.currentTarget, async () => {render((await api("/api/delivery/google/disconnect", {})).settings); $("delivery-account-status").textContent=text("noAccount");}));
   $("delivery-smtp-check").addEventListener("click", event => void action(event.currentTarget, async () => {const draft=payload(); const data=await api("/api/delivery/smtp/check", {smtp:draft.smtp,smtp_password:draft.smtp_password}); $("delivery-settings-status").textContent=text(data.account.state);}));
+  $("delivery-twenty-check").addEventListener("click", event => void action(event.currentTarget, async () => {
+    const data=await api("/api/delivery/twenty/check", {twenty_url:$("delivery-twenty-url").value, twenty_key:$("delivery-twenty-key").value.trim()});
+    $("delivery-settings-status").textContent=text(data.account.state === "connected" ? "connected_twenty" : data.account.state);
+  }));
+  // MEETONTRACK-146: CRM note status, record choice and the one-click stage move.
+  function twentyControls(meeting, root) {
+    const box=document.createElement("div"); box.className="twenty-controls";
+    const line=document.createElement("p"); box.append(line);
+    const report=meeting.report || {};
+    const call=body => api("/api/crm/twenty", {meeting_id:meeting.meeting_id, ...body});
+    const run=async (button, fn) => {
+      button.disabled=true;
+      try { await fn(); } catch(error) { line.textContent=text(error.message); } finally { button.disabled=false; }
+    };
+    if(report.twenty_status === "sent") {
+      line.textContent=`${text("twenty")}: ${text("twentySent")} ${report.twenty_target?.name || ""}`.trim()
+        + (report.twenty_withheld ? ` · ${report.twenty_withheld} ${text("twentyWithheld")}` : "");
+      if(report.twenty_target?.object === "opportunity") void call({action:"stage"}).then(({stage}) => {
+        if(stage.state !== "proposed") return;
+        const move=document.createElement("button"); move.type="button"; move.className="quiet-button";
+        move.textContent=`${text("twentyMove")} ${stage.label}`;
+        move.addEventListener("click", () => void run(move, async () => {
+          await call({action:"move", stage:stage.value}); move.remove(); line.textContent+=` · ${text("twentyMoved")}`;
+        }));
+        box.append(move);
+      }).catch(() => {});
+      return box;
+    }
+    if(report.twenty_status !== "needs_choice") {
+      if(report.twenty_status && !["pending","waiting_for_end"].includes(report.twenty_status))
+        line.textContent=`${text("twenty")}: ${text(report.twenty_error ? "twenty_"+report.twenty_error : "failed")}`;
+      return box;
+    }
+    line.textContent=text("twentyChoose");
+    const list=document.createElement("div"), search=document.createElement("input");
+    search.type="search"; search.placeholder=text("twentySearch"); search.setAttribute("aria-label", text("twentySearch"));
+    const show=candidates => list.replaceChildren(...(candidates.length ? candidates : []).map(candidate => {
+      const pick=document.createElement("button"); pick.type="button"; pick.className="quiet-button";
+      pick.textContent=candidate.name || candidate.id;
+      pick.addEventListener("click", () => void run(pick, async () => {
+        line.textContent=text("sending");
+        const request_id=crypto.randomUUID();
+        let job=(await call({action:"choose", ...candidate, request_id})).job;
+        const deadline=Date.now()+300000;
+        while(job.state === "sending") {if(Date.now()>deadline) throw new Error("timeout_outcome_unknown"); await new Promise(resolve=>setTimeout(resolve,1500)); job=(await api("/api/delivery/job")).job;}
+        if(job.error) throw new Error(job.error);
+        meeting.report={...meeting.report, ...job.report};
+        box.replaceWith(twentyControls(meeting, root));
+        root.dispatchEvent(new CustomEvent("delivery-complete", {bubbles:true, detail:meeting}));
+      }));
+      return pick;
+    }));
+    show(report.twenty_candidates || []);
+    let timer;
+    search.addEventListener("input", () => {clearTimeout(timer); timer=setTimeout(async () => {
+      if(search.value.trim().length < 2) return show(report.twenty_candidates || []);
+      try { const found=(await call({action:"search", query:search.value})).candidates; show(found); if(!found.length) list.textContent=text("twentyNothing"); }
+      catch(error) {list.textContent=text(error.message);}
+    }, 300);});
+    box.append(search, list);
+    return box;
+  }
   window.deliveryControls = meeting => {
     const root = document.createElement("section"); root.className="delivery-retry-controls";
     const status = document.createElement("p"); status.setAttribute("role","status");
     const error = meeting.report?.mail_error?.reason;
     if(error) status.textContent=text(error);
     root.append(status);
-    for(const [channel,field,key] of [["email","mail_status","retry"],["drive","drive_status","retryDrive"],["telegram","telegram_status","retryTelegram"]]) {
+    const channels=[["email","mail_status","retry"],["drive","drive_status","retryDrive"],["telegram","telegram_status","retryTelegram"]];
+    if(meeting.report?.twenty_status) channels.push(["twenty","twenty_status","twentyRetry"]);
+    for(const [channel,field,key] of channels) {
+      if(channel === "twenty" && meeting.report.twenty_status === "needs_choice") continue;
       const button=document.createElement("button"); button.type="button"; button.className="quiet-button";
       const prior=meeting.report?.[field];
       button.textContent = text(channel === "email" && prior === "sent" ? "resend" : key);
@@ -216,6 +311,7 @@
         finally {root.querySelectorAll("button").forEach(b=>b.disabled=false);}
       }); root.append(button);
     }
+    if(meeting.report?.twenty_status) root.append(twentyControls(meeting, root));
     return root;
   };
   new MutationObserver(labels).observe(document.documentElement,{attributes:true,attributeFilter:["lang"]});

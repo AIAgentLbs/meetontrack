@@ -142,6 +142,20 @@
               <label class="switch-label"><input type="checkbox" id="delivery-telegram-enabled"><span data-delivery-text="autoTelegram">Отправлять в подключенный Telegram</span></label>
               <p id="delivery-telegram-help"></p>
             </fieldset>
+            <fieldset id="delivery-twenty">
+              <legend>Twenty CRM</legend>
+              <p data-delivery-text="twentyHelp"></p>
+              <div class="delivery-fields">
+                <div><label for="delivery-twenty-url" data-delivery-text="twentyUrl">Адрес CRM</label><input id="delivery-twenty-url" type="url" maxlength="500" autocomplete="off" placeholder="https://crm.example.com"></div>
+                <div><label for="delivery-twenty-key" data-delivery-text="twentyKey">API-ключ</label><input id="delivery-twenty-key" type="password" autocomplete="new-password" maxlength="8192"></div>
+              </div>
+              <p id="delivery-twenty-key-help"></p>
+              <button type="button" class="quiet-button" id="delivery-twenty-check" data-delivery-text="twentyCheck">Проверить</button>
+              <div id="delivery-twenty-options" hidden>
+                <label class="switch-label"><input type="checkbox" id="delivery-twenty-enabled"><span data-delivery-text="twentyEnable">Добавлять заметку о встрече в CRM</span></label>
+                <label class="switch-label"><input type="checkbox" id="delivery-twenty-money"><span data-delivery-text="twentyMoney">Не передавать в CRM суммы и условия договора</span></label>
+              </div>
+            </fieldset>
             <p data-delivery-text="consent">Выключение канала останавливает новые отправки и ожидающие повторы, но не отзывает уже отправленное. После включения старые встречи автоматически не рассылаются: их можно отправить из истории.</p>
             <button type="submit" class="primary-button" id="delivery-save" data-delivery-text="save">Сохранить настройки доставки</button>
             <p id="delivery-settings-status" role="status" aria-live="polite"></p>

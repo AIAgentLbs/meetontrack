@@ -139,9 +139,12 @@ STANDALONE_REPORT = "meeting-report.html"
 # ended needs attention (MEETONTRACK-94); its report keeps waiting, unsent.
 FINAL_WAIT_ATTENTION_SECONDS = 3600
 # What a send left in report.json; a refresh that sends nothing keeps all of it.
+# MEETONTRACK-146: what the Twenty CRM channel leaves in report.json.
+TWENTY_OUTCOME = ("twenty_status", "twenty_note_id", "twenty_target", "twenty_candidates", "twenty_choice",
+                  "twenty_withheld", "twenty_error", "twenty_next_step")
 DELIVERY_OUTCOME = ("drive_status", "drive_folder", "drive_folder_url", "drive_html_url", "drive_pdf_url",
                     "drive_links_status", "mail_status", "gmail_message_id", "mail_error",
-                    "telegram_status", "telegram_message_id", "delivery_started_at")
+                    "telegram_status", "telegram_message_id", "delivery_started_at", *TWENTY_OUTCOME)
 
 
 class ReportPdfError(RuntimeError):
@@ -242,6 +245,10 @@ class MeetingArchive:
             "segments": list(transcript.get("segments") or []),
             "capture_warnings": list(transcript.get("capture_warnings") or []),
         }
+        # Calendar attendees (names or emails) let an optional CRM find the record (MEETONTRACK-146).
+        attendees = [a for a in transcript.get("remote_attendees") or [] if isinstance(a, str)][:50]
+        if attendees:
+            clean["remote_attendees"] = attendees
         for field in ("physical_meeting_id", "physical_started_at", "logical_interval", "audio_range", "explicit_boundary", "ended_at"):
             if field in transcript:
                 clean[field] = transcript[field]
@@ -263,6 +270,8 @@ class MeetingArchive:
                     clean["recording_trigger"] = meta.get("trigger", "")
             if not clean.get("recording_trigger") and previous.get("recording_trigger"):
                 clean["recording_trigger"] = previous["recording_trigger"]
+            if not clean.get("remote_attendees") and previous.get("remote_attendees"):
+                clean["remote_attendees"] = previous["remote_attendees"]
             if transcript.get("final_transcript"):
                 if previous.get("speaker_revision"):
                     return  # Speakers were corrected by hand meanwhile: keep that text.
@@ -760,7 +769,7 @@ class MeetingArchive:
             "report": report_meta,
         }
         for field in ("physical_meeting_id", "physical_started_at", "logical_interval", "audio_range", "explicit_boundary",
-                      "final_transcript", "speaker_review"):
+                      "final_transcript", "speaker_review", "remote_attendees"):
             if field in snapshot:
                 result[field] = snapshot[field]
         result["final_wait"] = self._final_wait(snapshot, ended)
@@ -1082,6 +1091,7 @@ class MeetingArchive:
             "drive_status": str(report.get("drive_status") or ""),
             "mail_status": str(report.get("mail_status") or ""),
             "telegram_status": str(report.get("telegram_status") or ""),
+            **({"twenty_status": str(report["twenty_status"])} if report.get("twenty_status") else {}),
         }
 
     @staticmethod
@@ -1212,6 +1222,7 @@ class MeetingArchive:
                             if previous_report.get("telegram_status") in {"sent", "unknown"}
                             else "waiting_for_end"
                         ),
+                        **{key: previous_report[key] for key in TWENTY_OUTCOME if key in previous_report},
                     }
                 else:
                     # Nothing is sent: the earlier outcome stays as it was, with
@@ -1219,7 +1230,7 @@ class MeetingArchive:
                     delivery = {key: previous_delivery[key] for key in DELIVERY_OUTCOME if key in previous_delivery}
                     if delivery.get("drive_status") in {None, "not_configured", "waiting_for_end"}:
                         delivery["drive_status"] = "pending"  # A finished call no longer waits for its end.
-                    for key in ("mail_status", "telegram_status"):
+                    for key in ("mail_status", "telegram_status", "twenty_status"):
                         if delivery.get(key) == "waiting_for_end" and meta.get("delivery_on_request"):
                             delivery[key] = "pending"
                 meta.update(delivery)
@@ -1237,7 +1248,7 @@ class MeetingArchive:
                 started = previous_delivery.get("delivery_started_at") or (
                     previous_report.get("generated_at") if any(
                         previous_report.get(key) not in {None, "not_configured", "pending", "waiting_for_end"}
-                        for key in ("drive_status", "mail_status", "telegram_status")) else None)
+                        for key in ("drive_status", "mail_status", "telegram_status", "twenty_status")) else None)
                 # A send past the window is the person's own request ("Create the report
                 # again"): it starts a new window, so its failure is retried and shown.
                 if sending and (previous_report.get("delivery_on_request") or (
@@ -1318,11 +1329,15 @@ class MeetingArchive:
             wants_drive = delivery_enabled(settings, "drive")
             wants_mail = delivery_enabled(settings, "email") and meta.get("mail_status") != "unknown"
             wants_telegram = delivery_enabled(settings, "telegram") and meta.get("telegram_status") != "unknown"
+            # A record the person must choose is not retried on its own (MEETONTRACK-146).
+            wants_twenty = (delivery_enabled(settings, "twenty")
+                            and meta.get("twenty_status") not in {"sent", "unknown", "needs_choice"})
             pending = (
                 (wants_drive and meta.get("drive_status") != "uploaded")
                 or (wants_drive and settings.get("drive_folder_id") and not drive_links_ready(meta))
                 or (wants_mail and meta.get("mail_status") != "sent")
                 or (wants_telegram and meta.get("telegram_status") != "sent")
+                or wants_twenty
             )
             if not pending:
                 continue
@@ -1360,7 +1375,7 @@ class MeetingArchive:
         health = self.delivery_monitor.snapshot(settings if isinstance(settings, dict) else {})
         # Reports that reached the person through no channel after retries
         # ended, named so the header can offer one "send again" per report.
-        retry_names = {"gmail": "email", "drive": "drive", "telegram": "telegram"}
+        retry_names = {"gmail": "email", "drive": "drive", "telegram": "telegram", "twenty": "twenty"}
         undelivered: dict[str, list[str]] = {}
         uncertain: set[str] = set()
         missing: set[str] = set()
@@ -1457,7 +1472,8 @@ class MeetingArchive:
                     "telegram_status": str(readable.get("telegram_status") or "unknown"),
                     "drive_status": str(readable.get("drive_status") or "pending"),
                     **{key: value for key, value in receipts.items()
-                       if key in {"mail_status", "gmail_message_id", "telegram_status", "telegram_message_id"}},
+                       if key in {"mail_status", "gmail_message_id", "telegram_status", "telegram_message_id",
+                                  "twenty_status", "twenty_note_id"}},
                     "state_repaired_at": now.isoformat(timespec="seconds"),
                 }
                 repaired.pop("report_missing", None)
@@ -1906,7 +1922,7 @@ class MeetingArchive:
         receipts = _json(source / "delivery-receipts.json", None)
         if receipts is None and (source / "delivery-receipts.json").exists():
             # Unreadable receipts may hide a send: never repeat it on our own (MEETONTRACK-122).
-            receipts = {"mail_status": "unknown", "telegram_status": "unknown"}
+            receipts = {"mail_status": "unknown", "telegram_status": "unknown", "twenty_status": "unknown"}
         receipts = receipts if isinstance(receipts, dict) else {}
         if not manual:
             previous = {**previous, **receipts}
@@ -2127,7 +2143,16 @@ class MeetingArchive:
                 telegram_status = "failed"
             receipt({"telegram_status": telegram_status,
                      "telegram_message_id": telegram_message_id if telegram_status == "sent" else None})
+        twenty = {key: previous[key] for key in TWENTY_OUTCOME if key in previous}
+        if (allowed("twenty") and twenty.get("twenty_status") not in {"sent", "unknown"}
+                and (manual or twenty.get("twenty_status") != "needs_choice")):
+            twenty = {key: twenty[key] for key in ("twenty_choice",) if key in twenty}
+            twenty.update(self._deliver_twenty(detail, settings, twenty.get("twenty_choice"),
+                                               lambda: receipt({"twenty_status": None, "twenty_note_id": None}, before=True)))
+            receipt({"twenty_status": twenty["twenty_status"],
+                         "twenty_note_id": twenty.get("twenty_note_id") if twenty["twenty_status"] == "sent" else None})
         outcome = {
+            **twenty,
             "drive_status": drive_status,
             "drive_folder": drive_folder,
             **drive_links,
@@ -2139,6 +2164,45 @@ class MeetingArchive:
             "telegram_message_id": telegram_message_id,
         }
         return outcome
+
+    def choose_twenty_record(self, meeting_id: str, choice: dict) -> None:
+        """The person's pick for a meeting the CRM could not match by itself (MEETONTRACK-146)."""
+        identity = _safe(str(meeting_id))
+        with self.report_gate(self.report_identity(identity)), self.lock:
+            path = self.reports_root / identity / "report.json"
+            report = _json(path, {})
+            if not report:
+                raise ValueError("report_not_ready")
+            if report.get("twenty_status") in {"sent", "unknown"}:
+                raise ValueError("twenty_already_sent")
+            report["twenty_choice"] = choice
+            report.pop("twenty_candidates", None)
+            _atomic_json(path, report)
+
+    def _deliver_twenty(self, detail: dict, settings: dict, choice: dict | None, before_write) -> dict:
+        """One CRM note per meeting (MEETONTRACK-146); the full transcript stays here."""
+        import twenty_crm
+        try:
+            client = self.delivery_settings.twenty_client()
+        except ValueError:
+            return {"twenty_status": "auth_required", "twenty_error": "twenty_settings_required"}
+        journal = detail.get("journal") or []
+        def lines(*categories, open_only=False):
+            return list(dict.fromkeys(filter(None, (
+                self._brief_line(item.get("text")) for item in journal if item.get("category") in categories
+                and not (open_only and item.get("status") in {"resolved", "closed"})))))[:12]
+        sections = {"decisions": lines("DECISION"), "commitments": lines("COMMITMENT"),
+                    "questions": lines("OPEN_QUESTION", open_only=True)}
+        if not any(sections.values()):
+            sections["summary"] = list((detail.get("overview") or {}).get("points") or [])[:5]
+        attendees = [*map(str, detail.get("remote_attendees") or []),
+                     *(str(p.get("email") or p.get("name") or "") for p in detail.get("participants") or []
+                       if isinstance(p, dict))]
+        return twenty_crm.deliver(
+            client, meeting_id=detail["meeting_id"], title=str(detail.get("title") or ""),
+            started=_date(detail.get("started_at")) or datetime.now().astimezone(), attendees=attendees,
+            sections=sections, choice=choice, money_filter=settings.get("twenty_money_filter") is not False,
+            before_write=before_write)
 
     def report_path(self, meeting_id: str, relative: str) -> Path | None:
         base = (self.reports_root / _safe(meeting_id)).resolve()

@@ -44,6 +44,8 @@ def enabled(settings, channel):
     if settings.get("enabled") is False:
         return False
     flag = settings.get(f"{channel}_enabled")
+    if channel == "twenty":  # MEETONTRACK-146: off until a URL and a key are saved.
+        return flag is True and bool(settings.get("twenty_url")) and settings.get("twenty_key_saved") is True
     if isinstance(flag, bool):
         return flag
     # Preserve pre-existing, owner-configured installations; new installs are off.
@@ -165,6 +167,9 @@ class DeliverySettings:
         self.lock = lock or threading.RLock()
         self.login_lock = threading.RLock()
         self.passwords = PasswordStore(root)
+        from twenty_crm import KEY_SERVICE, KEY_FILE
+        self.twenty_keys = PasswordStore(root, KEY_SERVICE, KEY_FILE)
+        self.twenty_changed = lambda: None  # The server clears cached CRM context.
         from google_oauth import GoogleOAuth
         store_id = hashlib.sha256(str(self.root.resolve()).encode()).hexdigest()[:16]
         self.oauth = GoogleOAuth(PasswordStore(root, "com.aiagentlbs.meetontrack.google." + store_id, "google-oauth.dpapi"))
@@ -263,16 +268,46 @@ class DeliverySettings:
                 "login_pending": self.login is not None and self.login.poll() is None,
                 "own_google": self.own_google_status(),
                 "telegram_configured": bool(raw.get("telegram_account") and raw.get("telegram_config")),
+                "twenty_enabled": enabled(raw, "twenty"), "twenty_url": raw.get("twenty_url", ""),
+                "twenty_key_saved": raw.get("twenty_key_saved") is True,
+                "twenty_money_filter": raw.get("twenty_money_filter") is not False,
                 "local_reports": str(self.home / ".local/share/meeting-copilot/reports")}
 
     def configure(self, payload):
         with self._edit():
             raw = self.read()
             raw.setdefault("email_provider", "gmail" if raw else "smtp")
-            for channel in ("email", "drive", "telegram"):
+            twenty_before = (raw.get("twenty_url"), enabled(raw, "twenty"))
+            if "twenty_url" in payload:
+                from twenty_crm import normalize_url
+                url = normalize_url(payload["twenty_url"]) if str(payload["twenty_url"] or "").strip() else ""
+                if url != raw.get("twenty_url", ""):
+                    # A key belongs to one workspace: a new address needs a new key.
+                    raw["twenty_key_saved"] = False
+                    raw["twenty_enabled"] = False
+                    try:
+                        self.twenty_keys.delete()
+                    except ValueError:
+                        pass
+                raw["twenty_url"] = url
+            twenty_key = payload.get("twenty_key", "")
+            if not isinstance(twenty_key, str) or len(twenty_key) > 8192 or any(c in twenty_key for c in "\r\n\0 "):
+                raise ValueError("invalid_twenty_key")
+            if twenty_key:
+                if not raw.get("twenty_url"):
+                    raise ValueError("twenty_settings_required")
+                self.twenty_keys.set(twenty_key)
+                raw["twenty_key_saved"] = True
+            if "twenty_money_filter" in payload:
+                if type(payload["twenty_money_filter"]) is not bool:
+                    raise ValueError("invalid_enabled")
+                raw["twenty_money_filter"] = payload["twenty_money_filter"]
+            for channel in ("email", "drive", "telegram", "twenty"):
                 key = channel + "_enabled"
                 if key in payload and type(payload[key]) is not bool:
                     raise ValueError("invalid_enabled")
+                if channel == "twenty" and payload.get(key) and not (raw.get("twenty_url") and raw.get("twenty_key_saved")):
+                    raise ValueError("twenty_settings_required")
                 value = payload.get(key, enabled(raw, channel))
                 if value and not enabled(raw, channel):
                     # Connecting does not silently backfill historical reports.
@@ -348,7 +383,38 @@ class DeliverySettings:
                 self.passwords.set(password)
                 raw["smtp_password_saved"] = True
             write_json(self.path, raw)
+            if twenty_before != (raw.get("twenty_url"), enabled(raw, "twenty")) or twenty_key:
+                self.twenty_changed()
             return self.snapshot()
+
+    def twenty_client(self, payload=None):
+        """The configured client, or one for a draft URL/key being checked (nothing saved)."""
+        from twenty_crm import TwentyClient
+        raw = self.read()
+        payload = payload or {}
+        url = str(payload.get("twenty_url") or raw.get("twenty_url") or "")
+        key = payload.get("twenty_key") or ""
+        if not key:
+            from twenty_crm import normalize_url
+            if not url or not raw.get("twenty_key_saved") or normalize_url(url) != raw.get("twenty_url"):
+                raise ValueError("twenty_settings_required")
+            key = self.twenty_keys.get()
+        if not isinstance(key, str) or not key:
+            raise ValueError("twenty_settings_required")
+        return TwentyClient(url, key)
+
+    def twenty_check(self, payload=None):
+        """One read call; never writes to the CRM and never saves the draft."""
+        from twenty_crm import TwentyError
+        try:
+            client = self.twenty_client(payload)
+            client._list("people", limit=1)
+            fields = client.opportunity_fields()
+            return {"state": "connected", "stages": bool(fields and (fields.get("stage") or {}).get("options"))}
+        except TwentyError as error:
+            return {"state": "twenty_" + str(error)}
+        except ValueError as error:
+            return {"state": str(error)}
 
     def google_status(self):
         if self.profile() == "custom":

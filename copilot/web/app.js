@@ -837,6 +837,7 @@ Object.assign(translations.ru, {
   "delivery.reason.retry_expired": "Отчет никуда не отправлен. Нажмите «Подробнее», затем «Отправить снова».",
   "delivery.reason.metadata_invalid": "Файл состояния отчета поврежден. Приложение восстановит его автоматически.",
   "delivery.reason.report_missing": "Файл отчета не найден. Нажмите «Подробнее», затем «Создать отчет заново».",
+  "delivery.reason.needs_choice": "Не удалось однозначно найти запись CRM. Откройте отчет и выберите запись.",
   "delivery.missing.title_date": "Отчет по встрече «{title}» от {date} не найден",
   "delivery.missing.title": "Отчет по встрече «{title}» не найден",
   "delivery.missing.date": "Отчет по встрече от {date} не найден",
@@ -903,6 +904,7 @@ Object.assign(translations.en, {
   "delivery.reason.retry_expired": "The report was not sent anywhere. Press Details, then Send again.",
   "delivery.reason.metadata_invalid": "The report's status file is damaged. The app will repair it automatically.",
   "delivery.reason.report_missing": "The report file was not found. Press Details, then Create the report again.",
+  "delivery.reason.needs_choice": "No single CRM record matched. Open the report and choose the record.",
   "delivery.missing.title_date": "Report for “{title}” on {date} was not found",
   "delivery.missing.title": "Report for “{title}” was not found",
   "delivery.missing.date": "Report for the meeting on {date} was not found",
@@ -1011,7 +1013,7 @@ elements.recognitionResume.addEventListener("click", async () => {
   }
 });
 
-const deliveryChannelNames = { drive: "Google Drive", get gmail() { return uiLanguage === "ru" ? "Почта" : "Email"; }, telegram: "Telegram" };
+const deliveryChannelNames = { drive: "Google Drive", get gmail() { return uiLanguage === "ru" ? "Почта" : "Email"; }, telegram: "Telegram", twenty: "Twenty CRM" };
 
 const deliveryResend = {};
 
@@ -1057,7 +1059,7 @@ async function resendReport(item) {
   deliveryResend[item.meeting_id] = "sending";
   deliverySignature = "";
   renderDeliveryHealth(deliveryHealth);
-  const fields = { email: "mail_status", drive: "drive_status", telegram: "telegram_status" };
+  const fields = { email: "mail_status", drive: "drive_status", telegram: "telegram_status", twenty: "twenty_status" };
   let sent = false, auth = false, unsure = false, blocked = "";
   try {
     const request_id = crypto.randomUUID();
@@ -1167,6 +1169,7 @@ function renderDeliveryHealth(health = {}) {
   const fragment = document.createDocumentFragment();
   const hints = [];
   for (const [key, name] of Object.entries(deliveryChannelNames)) {
+    if (key === "twenty" && !channels.twenty?.configured) continue;  // MEETONTRACK-146: invisible until connected.
     const channel = channels[key] || { state: "not_configured" };
     const state = channel.state || "not_configured";
     const count = channel[state] || 0;
@@ -2727,11 +2730,13 @@ function renderArchiveDetail(meeting) {
   delivery.className = "archive-delivery";
   const refreshDelivery = () => {
   const statuses = [];
-  for (const [channel, field] of [["drive", "drive_status"], ["gmail", "mail_status"], ["telegram", "telegram_status"]]) {
+  const channels = [["drive", "drive_status"], ["gmail", "mail_status"], ["telegram", "telegram_status"]];
+  if (meeting.report?.twenty_status) channels.push(["twenty", "twenty_status"]);
+  for (const [channel, field] of channels) {
     const raw = meeting.report?.[field] || "not_configured";
     const state = raw === "uploaded" || raw === "sent" ? "sent"
       : meeting.report?.delivery_on_request && ["pending", "not_configured"].includes(raw) ? "on_request"
-      : raw === "auth_required" ? "action_required" : raw === "waiting_for_end" ? "waiting"
+      : raw === "auth_required" || raw === "needs_choice" ? "action_required" : raw === "waiting_for_end" ? "waiting"
         : raw === "pending" ? "pending" : raw === "not_configured" ? "not_configured" : "failed";
     statuses.push(`${deliveryChannelNames[channel]}: ${t(`delivery.state.${state}`, { count: 1 })}`);
   }

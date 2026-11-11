@@ -24,6 +24,10 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
   state poll failed silently without `updates.js`), keeps the main screen up
   with recording audio, and drops the removed `#analysis-help` checks. Passes;
   close after release.
+- [ ] [MEETONTRACK-146](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-146/): optional Twenty CRM
+  integration (read context before calls, one note per meeting after, record choice, one-click stage
+  proposal, money/terms filter; `copilot/web/twenty_crm.py`, docs/DELIVERY.md). Code and unit tests are
+  on main; the live check on the dogfood CRM is pending owner approval (API key + test write).
 - [ ] MEETONTRACK-85: `copilot/web/test_meeting_boundary_ui.cjs` times out
   (`locator.waitFor` 3 s, line 45) at 0.1.12 and identically at 0.1.11 (`effb7a2`).
   Not in the release script set. Find whether the fixture or the UI changed,

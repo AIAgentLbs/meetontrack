@@ -32,6 +32,7 @@ from canonical_transcript import canonical_segments
 from meeting_boundaries import MeetingBoundaries, BoundaryConflict, BoundaryUnavailable
 from calendar_meetings import CalendarMeetings
 from google_context import GoogleContext
+import twenty_crm
 from call_plan import CallPlans
 from live_translation import LiveTranslation, helper_path
 from frame_relevance import frame_relevance
@@ -2280,7 +2281,15 @@ ASK формулируй как одну короткую реплику, кот
                 google_context = ""
                 self.thread_id = ""
                 first_turn = True
+            crm_generation = TWENTY_CONTEXT._generation
+            if getattr(self, "crm_generation", crm_generation) != crm_generation:
+                self.thread_id = ""  # CRM records from a channel since turned off must not linger
+                first_turn = True
+            self.crm_generation = crm_generation
             transcript += google_context
+            transcript += TWENTY_CONTEXT.augment(
+                meeting_id, list(getattr(TRANSCRIPT, "remote_attendees", []))
+                if getattr(TRANSCRIPT, "meeting_id", None) == meeting_id else [])
             transcript += local_context
             prompt = (
                 self._base_prompt(question, transcript, meeting, scope)
@@ -2370,6 +2379,66 @@ ARCHIVE = MeetingArchive(
 )
 DELIVERY_RETRY = DeliveryRetry(ARCHIVE)
 GOOGLE_CONTEXT.delivery_settings = ARCHIVE.delivery_settings
+
+
+def twenty_reader():
+    """A CRM client only while the person has the Twenty channel on (MEETONTRACK-146)."""
+    from delivery_settings import enabled
+    settings = getattr(ARCHIVE, "delivery_settings", None)
+    if settings is None or not enabled(settings.read(), "twenty"):
+        return None
+    try:
+        return settings.twenty_client()
+    except ValueError:
+        return None
+
+
+TWENTY_CONTEXT = twenty_crm.TwentyContext(twenty_reader)
+ARCHIVE.delivery_settings.twenty_changed = TWENTY_CONTEXT.reset
+TWENTY_STAGES: dict[str, dict] = {}  # ponytail: proposals live in memory; a restart asks the AI again.
+
+
+def twenty_action(meeting_id: str, payload: dict) -> dict:
+    """Record search, record choice and the one-click stage move from a report."""
+    client = twenty_reader()
+    if client is None:
+        raise ValueError("channel_disabled")
+    action = payload.get("action")
+    if action != "search" and not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", meeting_id):
+        raise ValueError("invalid_retry_request")
+    try:
+        if action == "search":
+            return {"candidates": [{"object": kind, "id": record["id"], "name": twenty_crm._name(record)}
+                                   for kind in ("opportunity", "company")
+                                   for record in client.search(kind, str(payload.get("query") or ""))
+                                   if isinstance(record.get("id"), str)]}
+        report = (ARCHIVE.report_detail(meeting_id) or {}).get("report") or {}
+        target = report.get("twenty_target") or {}
+        if action == "choose":
+            choice = {"object": payload.get("object"), "id": str(payload.get("id") or ""),
+                      "name": str(payload.get("name") or "")[:200]}
+            if choice["object"] not in twenty_crm.TARGET_FIELD or not re.fullmatch(r"[A-Za-z0-9-]{1,64}", choice["id"]):
+                raise ValueError("invalid_twenty_record")
+            ARCHIVE.choose_twenty_record(meeting_id, choice)
+            return {"job": DELIVERY_RETRY.submit({"meeting_id": meeting_id, "channels": ["twenty"],
+                                                  "request_id": str(payload.get("request_id") or "")})}
+        if target.get("object") != "opportunity" or report.get("twenty_status") != "sent":
+            return {"stage": {"state": "unavailable"}}
+        if action == "stage":
+            if meeting_id not in TWENTY_STAGES:
+                detail = ARCHIVE.report_detail(meeting_id) or {}
+                text = "\n".join(f"{item.get('speaker') or ''}: {item.get('text') or ''}" for item in detail.get("transcript", []))
+                TWENTY_STAGES[meeting_id] = twenty_crm.propose_stage(
+                    client, str(target.get("stage") or ""), text,
+                    lambda prompt: AI.run("summary_rewrite", prompt, timeout=120).text)
+            return {"stage": TWENTY_STAGES[meeting_id]}
+        if action == "move":
+            twenty_crm.apply_stage(client, str(target["id"]), str(payload.get("stage") or ""))
+            TWENTY_STAGES[meeting_id] = {"state": "applied", "value": str(payload.get("stage"))}
+            return {"stage": TWENTY_STAGES[meeting_id]}
+    except twenty_crm.TwentyError as error:
+        raise ValueError("twenty_" + str(error)) from None
+    raise ValueError("invalid_twenty_action")
 SUMMARY_REWRITES = SummaryRewrites(ARCHIVE, lambda prompt: AI.run("summary_rewrite", prompt, timeout=180))
 
 
@@ -3056,6 +3125,10 @@ class Handler(BaseHTTPRequestHandler):
                 settings = ARCHIVE.delivery_settings.disconnect()
                 GOOGLE_CONTEXT.disconnect()
                 self._json({"ok": True, "settings": settings})
+            elif path == "/api/delivery/twenty/check":
+                self._json({"ok": True, "account": ARCHIVE.delivery_settings.twenty_check(payload)})
+            elif path == "/api/crm/twenty":
+                self._json({"ok": True, **twenty_action(str(payload.get("meeting_id") or ""), payload)})
             elif path == "/api/delivery/smtp/check":
                 self._json({"ok": True, "account": ARCHIVE.delivery_settings.smtp_check(payload)})
             elif path == "/api/delivery/retry":

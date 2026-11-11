@@ -46,7 +46,8 @@ def drive_links_ready(report: dict) -> bool:
 class DeliveryHealth:
     """Keep notices across reload/restart without exposing report contents."""
 
-    channels = {"drive": "drive_status", "gmail": "mail_status", "telegram": "telegram_status"}
+    channels = {"drive": "drive_status", "gmail": "mail_status", "telegram": "telegram_status",
+                "twenty": "twenty_status"}
     # Email failures that no automatic retry can fix: the person must sign in again.
     mail_auth_reasons = {"authorization_expired", "authorization_required", "authorization_missing",
                          "permission_missing", "smtp_auth_failed"}
@@ -65,6 +66,7 @@ class DeliveryHealth:
             "drive": enabled(settings, "drive"),
             "gmail": enabled(settings, "email"),
             "telegram": enabled(settings, "telegram"),
+            "twenty": enabled(settings, "twenty"),
         }
 
     def _collect(self, settings: dict, now: datetime) -> tuple[dict, dict]:
@@ -126,6 +128,8 @@ class DeliveryHealth:
                     state, reason = "sent", "sent"
                     if channel == "drive" and links_missing:
                         state, reason = "failed", "links_missing"
+                elif raw == "needs_choice":
+                    state, reason = "action_required", "needs_choice"
                 elif raw == "waiting_for_end":
                     state, reason = "waiting", "waiting_for_end"
                 elif raw == "auth_required" or (channel == "gmail" and raw == "failed" and (

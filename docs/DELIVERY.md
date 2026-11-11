@@ -91,6 +91,46 @@ coverage. The browser settings and real local import endpoint were checked with
 synthetic credentials. This is not evidence of successful Google consent on a
 new real account or acceptance on a clean Windows machine. Those remain release gates.
 
+## Twenty CRM (optional)
+
+Settings → Report storage and delivery → Twenty CRM takes the CRM address
+(`https://crm.example.com`) and an API key from Twenty (Settings → APIs &
+Webhooks). The key is stored in macOS Keychain / Windows DPAPI, never in
+`delivery.json`, logs or the page. **Check** makes one read call and saves
+nothing. Until an address and a key are saved, nothing about the CRM appears in
+the app.
+
+- **Before and during a call** the AI sees the CRM records of the calendar
+  attendees: person, company, open deals (stage, next step, close date; never
+  the amount) and the last five note titles. Kept in memory for 10 minutes, never
+  stored with the recording.
+- **After a call** (with "Add a meeting note to the CRM" on) one note per
+  meeting goes to the single open deal of the matched company or person,
+  otherwise to the company, otherwise to the person, and is linked to all of
+  them. It holds decisions, agreements and open questions plus the MeetOnTrack
+  meeting id; the transcript stays on the computer. If the deal has a text
+  field `nextStep`, it is set from the agreements.
+- **No guessing.** Several deals or no match: the report shows "Choose a CRM
+  record" with a search; nothing is written until a record is picked.
+- **Stage** is only proposed ("Move to X"), from the workspace's own stages, and
+  changes only on that click.
+- **Money and contract terms** stay out by default: lines with amounts, prices,
+  budgets, payment, contract, NDA or licence terms are dropped and the note says
+  how many were withheld.
+- Like the other channels it only covers meetings that start after it is
+  turned on, keeps a receipt before writing (no duplicate note after a crash)
+  and never deletes CRM data. An expired or revoked key shows "The CRM key
+  expired or was revoked".
+
+Live check (key on stdin, never on the command line; `test-note` creates a
+note on the given deal, reads it back and soft-deletes it):
+
+```sh
+python3 copilot/web/twenty_crm.py check --url https://crm.example.com < key.txt
+python3 copilot/web/twenty_crm.py probe --url https://crm.example.com --email person@example.com < key.txt
+python3 copilot/web/twenty_crm.py test-note --url https://crm.example.com --opportunity <deal-id> < key.txt
+```
+
 ## Manual retry
 
 Open Meetings → select a meeting → Report → Retry email delivery (or the Drive

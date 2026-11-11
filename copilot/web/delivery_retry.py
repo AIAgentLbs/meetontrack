@@ -21,7 +21,7 @@ class DeliveryRetry:
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", identity) or not re.fullmatch(r"[A-Za-z0-9_-]{16,80}", request):
             raise ValueError("invalid_retry_request")
         channels = payload.get("channels")
-        if not isinstance(channels, list) or not channels or any(c not in {"email", "drive", "telegram"} for c in channels):
+        if not isinstance(channels, list) or not channels or any(c not in {"email", "drive", "telegram", "twenty"} for c in channels):
             raise ValueError("invalid_retry_channels")
         with self.lock:
             if self.job.get("state") == "sending":
@@ -57,12 +57,13 @@ class DeliveryRetry:
                     settings = self.archive.delivery_settings.read()
                     if any(not enabled(settings, c) for c in channels):
                         raise ValueError("channel_disabled")
-                    fields = {"email": "mail_status", "drive": "drive_status", "telegram": "telegram_status"}
+                    fields = {"email": "mail_status", "drive": "drive_status", "telegram": "telegram_status",
+                              "twenty": "twenty_status"}
                     receipts_path = path.parent / "delivery-receipts.json"
                     receipts = read_json(receipts_path)
                     if not receipts and receipts_path.exists() and receipts_path.read_bytes().strip() not in {b"", b"{}"}:
                         # Unreadable receipts may hide a send: ask before resending (MEETONTRACK-122).
-                        receipts = {"mail_status": "unknown", "telegram_status": "unknown"}
+                        receipts = {"mail_status": "unknown", "telegram_status": "unknown", "twenty_status": "unknown"}
                     acknowledged = {**report, **receipts}
                     if not confirm and any(acknowledged.get(fields[c]) in {"sent", "uploaded", "unknown"} for c in channels):
                         raise ValueError("resend_confirmation_required")
@@ -78,6 +79,8 @@ class DeliveryRetry:
                         report["mail_status"] = "unknown"
                     if "telegram" in channels:
                         report["telegram_status"] = "unknown"
+                    if "twenty" in channels:
+                        report["twenty_status"] = "unknown"
                     write_json(path, report)
                     delivery = self.archive.deliver(detail, {**report, "pdf_path": str(pdf or "")},
                                                     previous=previous, channels=channels, manual=True)
