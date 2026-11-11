@@ -14,12 +14,12 @@ repositories and documents you already have locally.
 
 Project page: [English](https://meetontrack.com/) ·
 [Русский](https://meetontrack.com/ru/).
-The command currently installs the checked, pinned **v0.1.28** package, not
+The command currently installs the checked, pinned **v0.1.29** package, not
 unreleased features from `main`. It requires Apple Silicon, macOS 15+, no separate Python or Apple SDK. AI is optional; you choose the tool and model once, for every task. Google Chrome
 (or Microsoft Edge or Chromium) makes the PDF reports; without one, reports are sent as HTML. Quit Capture before reinstalling.
 
-v0.1.28 is one app: the Swift app (rebuilt for this release) with its Python and web payload inside, and a
-source/hash manifest. It is ad-hoc signed, not notarized; update notifications are included. See [release notes](docs/releases/v0.1.28.md) for scope and gates.
+v0.1.29 is one app: the Swift app (rebuilt for this release) with its Python and web payload inside, and a
+source/hash manifest. It is ad-hoc signed, not notarized; update notifications are included. See [release notes](docs/releases/v0.1.29.md) for scope and gates.
 
 ```sh
 curl -fsSL https://meetontrack.com/install.sh | bash
