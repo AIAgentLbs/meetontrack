@@ -253,29 +253,193 @@ def _people(client: TwentyClient, attendees: list[str]) -> list[dict]:
     return list(people.values())
 
 
-def match(client: TwentyClient, attendees: list[str]) -> dict:
-    """Pick one record to attach the note to, or ask the person. Never guesses."""
+EMAIL = re.compile(r"[^\s@<>]+@([^\s@<>]+\.[^\s@<>]+)")
+# Mailbox providers say nothing about the company: never matched by domain. Not a provider choice.
+PUBLIC_DOMAINS = {"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com",
+                  "icloud.com", "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com", "gmx.com", "gmx.de",
+                  "mail.ru", "bk.ru", "inbox.ru", "list.ru", "yandex.ru", "ya.ru", "yandex.com", "rambler.ru"}
+LEGAL_FORMS = re.compile(r"(?<!\w)(?:ооо|тоо|оао|зао|пао|ао|ип|llc|inc|ltd|gmbh|corp|plc|s\.?l|s\.?a)\.?(?!\w)", re.I)
+_NAMES: dict[str, tuple[float, list[dict], list[dict]]] = {}  # base URL -> (time, companies, open deals)
+
+
+def normalize_name(value: object) -> str:
+    text = re.sub(r"[«»\"“”„'’`]", " ", str(value or ""))
+    return " ".join(LEGAL_FORMS.sub(" ", text).casefold().split())
+
+
+def normalize_title(value: object) -> str:
+    """A recurring event keeps its title; dates and times in it do not count."""
+    text = re.sub(r"\d{1,4}[./:-]\d{1,2}(?:[./:-]\d{1,4})?", " ", normalize_name(value))
+    return " ".join(text.split())[:200]
+
+
+def domains(attendees: list[str]) -> list[str]:
+    found = (EMAIL.fullmatch(a.strip().lower()) for a in attendees if isinstance(a, str))
+    return list(dict.fromkeys(m.group(1) for m in found if m and m.group(1) not in PUBLIC_DOMAINS))
+
+
+def memory_keys(attendees: list[str], title: str = "") -> list[str]:
+    emails = [a.strip().lower() for a in attendees if isinstance(a, str) and EMAIL.fullmatch(a.strip().lower())]
+    keys = [f"email:{e}" for e in dict.fromkeys(emails)] + [f"domain:{d}" for d in domains(attendees)]
+    return keys + ([f"title:{normalize_title(title)}"] if normalize_title(title) else [])
+
+
+class Memory:
+    """The person's earlier picks: lookup key -> record id. No CRM content is stored."""
+
+    def __init__(self, path):
+        from pathlib import Path
+        self.path = Path(path)
+        self.lock = threading.Lock()
+
+    def _read(self) -> dict:
+        try:
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+            return value if isinstance(value, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _write(self, value: dict) -> None:
+        import os
+        import tempfile
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(dir=self.path.parent, prefix=".twenty-records-")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(value, stream, indent=1)
+            os.chmod(name, 0o600)
+            os.replace(name, self.path)
+        finally:
+            if os.path.exists(name):
+                os.unlink(name)
+
+    def lookup(self, keys: list[str]) -> tuple[str, dict] | None:
+        stored = self._read()
+        for key in keys:
+            value = stored.get(key)
+            if isinstance(value, dict) and value.get("object") in TARGET_FIELD and isinstance(value.get("id"), str):
+                return key, {"object": value["object"], "id": value["id"]}
+        return None
+
+    def remember(self, keys: list[str], choice: dict) -> None:
+        with self.lock:
+            stored = self._read()
+            stored.update({key: {"object": choice["object"], "id": choice["id"]} for key in keys})
+            self._write(stored)
+
+    def forget(self, record_id: str) -> None:
+        with self.lock:
+            stored = self._read()
+            self._write({k: v for k, v in stored.items() if not (isinstance(v, dict) and v.get("id") == record_id)})
+
+
+def _all(client: TwentyClient, plural: str, pages: int = 20) -> list[dict]:
+    """Every record of one kind, 60 per page. ponytail: capped at 1200 records."""
+    found, cursor = [], ""
+    for _ in range(pages):
+        payload = client._request("GET", f"/{plural}", {"limit": "60", **({"starting_after": cursor} if cursor else {})})
+        batch = records(payload)
+        found += batch
+        info = payload.get("pageInfo") if isinstance(payload, dict) else None
+        if not isinstance(info, dict) and isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+            info = payload["data"].get("pageInfo")
+        cursor = str((info or {}).get("endCursor") or "")
+        if not batch or not (info or {}).get("hasNextPage") or not cursor:
+            break
+    return found
+
+
+def _name_lists(client: TwentyClient) -> tuple[list[dict], list[dict]]:
+    cached = _NAMES.get(client.base)
+    if cached and time.monotonic() - cached[0] < 300:
+        return cached[1], cached[2]
+    companies = [{"id": c["id"], "name": _name(c)} for c in _all(client, "companies") if isinstance(c.get("id"), str)]
+    deals = [{"id": o["id"], "name": _name(o), "companyId": str(o.get("companyId") or ""), "stage": str(o.get("stage") or "")}
+             for o in _all(client, "opportunities") if isinstance(o.get("id"), str)
+             and not CLOSED_STAGE.search(str(o.get("stage") or ""))]
+    _NAMES[client.base] = (time.monotonic(), companies, deals)
+    return companies, deals
+
+
+def _name_hits(client: TwentyClient, texts: list[str]) -> list[tuple[str, dict]]:
+    haystack = " | ".join(normalize_name(t) for t in texts if t)
+    if not haystack.strip(" |"):
+        return []
+    companies, deals = _name_lists(client)
+    def found(record):
+        name = normalize_name(record["name"])
+        return len(name) >= 3 and re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", haystack)
+    hits = [("company", c) for c in companies if found(c)] + [("opportunity", o) for o in deals if found(o)]
+    deal_hits = [r for k, r in hits if k == "opportunity"]
+    # "Acme" and the deal "Acme pilot" both in a title name one deal, not two records.
+    if len(deal_hits) == 1 and all(k == "opportunity" or r["id"] == deal_hits[0]["companyId"] for k, r in hits):
+        return [("opportunity", deal_hits[0])]
+    return hits
+
+
+def match(client: TwentyClient, attendees: list[str], *, texts: list[str] = (), memory: Memory | None = None,
+          title: str = "") -> dict:
+    """Pick one record to attach the note to, or ask the person. Never guesses.
+
+    Order: the person's earlier pick, attendee emails/names, email domain, record names in the titles.
+    """
+    if memory is not None:
+        remembered = memory.lookup(memory_keys(attendees, title))
+        if remembered:
+            kind, identity = remembered[1]["object"], remembered[1]["id"]
+            try:
+                record = client.get(kind, identity)
+            except TwentyError as error:
+                if str(error) != "not_found":
+                    raise
+                record = {}
+            if not record or record.get("deletedAt"):
+                memory.forget(identity)
+                return {"status": "needs_choice", "candidates": [], "people": [], "companies": [],
+                        "reason": "remembered_not_found"}
+            company = str(record.get("companyId") or (identity if kind == "company" else ""))
+            return {"status": "matched", "people": [], "companies": [company] if company else [], "company": company,
+                    "remembered": True, "target": {"object": kind, "id": identity, "name": _name(record),
+                    **({"stage": str(record.get("stage") or "")} if kind == "opportunity" else {})}}
     people = _people(client, attendees)
     companies = list(dict.fromkeys(str(p["companyId"]) for p in people if p.get("companyId")))
+    by_domain: dict[str, dict] = {}
+    if not people:
+        for domain in domains(attendees):
+            found = client._list("companies", f"domainName.primaryLinkUrl[ilike]:{_quote('%' + domain + '%')}", 5)
+            by_domain.update({c["id"]: c for c in found if isinstance(c.get("id"), str)})
+        companies = list(by_domain)
     opportunities: dict[str, dict] = {}
-    for company in companies:
+    named: list[tuple[str, dict]] = []
+    if not people and not companies:
+        named = _name_hits(client, [*texts, *(a for a in attendees if "@" not in a)])
+        if len(named) == 1 and named[0][0] == "opportunity":
+            opportunities = {named[0][1]["id"]: named[0][1]}
+        elif len(named) == 1:
+            companies = [named[0][1]["id"]]
+            by_domain = {named[0][1]["id"]: named[0][1]}
+    for company in companies if not opportunities else []:
         opportunities.update({o["id"]: o for o in client.open_opportunities(company_id=company) if o.get("id")})
-    if not companies:
+    if not companies and not opportunities:
         for person in people:
             opportunities.update({o["id"]: o for o in client.open_opportunities(person_id=person["id"]) if o.get("id")})
-    result = {"people": [p["id"] for p in people], "companies": companies}
+    result = {"people": [p["id"] for p in people], "companies": companies, "person_records": people}
     def pick(kind, record):
         return {**result, "status": "matched", "target": {"object": kind, "id": record["id"], "name": _name(record),
                 **({"stage": str(record.get("stage") or "")} if kind == "opportunity" else {})},
                 "company": str(record.get("companyId") or (companies[0] if len(companies) == 1 else ""))}
-    if len(opportunities) == 1:
+    if len(named) > 1:
+        candidates = [{"object": kind, "id": r["id"], "name": _name(r)} for kind, r in named]
+    elif len(opportunities) == 1:
         return pick("opportunity", next(iter(opportunities.values())))
-    if not opportunities and len(companies) == 1:
-        return pick("company", {"id": companies[0], "name": ""})
-    if not opportunities and not companies and len(people) == 1:
+    elif not opportunities and len(companies) == 1:
+        return pick("company", by_domain.get(companies[0]) or {"id": companies[0], "name": ""})
+    elif not opportunities and not companies and len(people) == 1:
         return pick("person", people[0])
-    candidates = [{"object": "opportunity", "id": o["id"], "name": _name(o)} for o in opportunities.values()]
-    candidates += [{"object": "person", "id": p["id"], "name": _name(p)} for p in people] if not candidates else []
+    else:
+        candidates = ([{"object": "opportunity", "id": o["id"], "name": _name(o)} for o in opportunities.values()]
+                      or [{"object": "company", "id": c, "name": _name(by_domain.get(c, {}))} for c in companies]
+                      or [{"object": "person", "id": p["id"], "name": _name(p)} for p in people])
     return {**result, "status": "needs_choice", "candidates": candidates[:10]}
 
 
@@ -309,12 +473,13 @@ def note_markdown(meeting_id: str, sections: dict[str, list[str]], *, money_filt
 
 
 def deliver(client: TwentyClient, *, meeting_id: str, title: str, started: datetime, attendees: list[str],
-            sections: dict[str, list[str]], choice: dict | None, money_filter: bool, before_write) -> dict:
+            sections: dict[str, list[str]], choice: dict | None, money_filter: bool, before_write,
+            texts: list[str] = (), memory: Memory | None = None) -> dict:
     """Create one note and link it. Status: sent, needs_choice, auth_required, failed or unknown."""
     outcome: dict = {}
     try:
         if choice:
-            found = match(client, attendees) if choice["object"] != "person" else {"people": []}
+            found = {"people": [p["id"] for p in _people(client, attendees)] if choice["object"] != "person" else []}
             target = {"object": choice["object"], "id": choice["id"], "name": str(choice.get("name") or "")[:200]}
             company = choice["id"] if choice["object"] == "company" else ""
             if choice["object"] == "opportunity":
@@ -323,9 +488,10 @@ def deliver(client: TwentyClient, *, meeting_id: str, title: str, started: datet
                 target["stage"] = str(record.get("stage") or "")
             matched = {"status": "matched", "target": target, "people": found.get("people", []), "company": company}
         else:
-            matched = match(client, attendees)
+            matched = match(client, attendees, texts=[title, *texts], memory=memory, title=title)
         if matched["status"] == "needs_choice":
-            return {"twenty_status": "needs_choice", "twenty_candidates": matched["candidates"]}
+            return {"twenty_status": "needs_choice", "twenty_candidates": matched["candidates"],
+                    **({"twenty_error": matched["reason"]} if matched.get("reason") else {})}
         target = matched["target"]
         outcome["twenty_target"] = target
         markdown, commitments, withheld = note_markdown(meeting_id, sections, money_filter=money_filter)
@@ -397,8 +563,9 @@ def apply_stage(client: TwentyClient, opportunity_id: str, stage: str) -> None:
 class TwentyContext:
     """Read-only CRM facts for the AI, in memory for 10 minutes. Never stored with the recording."""
 
-    def __init__(self, client_factory):
+    def __init__(self, client_factory, memory: Memory | None = None):
         self.client_factory = client_factory  # returns a TwentyClient, or None when off
+        self.memory = memory
         self._lock = threading.Lock()
         self._generation = 0
         self._results: dict[str, tuple[float, str]] = {}
@@ -412,10 +579,17 @@ class TwentyContext:
     def _item(kind: str, record: dict, **extra) -> dict:
         return {"type": kind, "name": _name(record)[:200], **{k: str(v)[:300] for k, v in extra.items() if v}}
 
-    def _collect(self, client: TwentyClient, attendees: list[str]) -> list[dict]:
+    def _collect(self, client: TwentyClient, attendees: list[str], title: str = "") -> list[dict]:
+        """The same resolution as the note: earlier pick, people, domain, names in the title."""
         items = []
-        people = _people(client, attendees)[:5]
-        companies = list(dict.fromkeys(str(p["companyId"]) for p in people if p.get("companyId")))[:3]
+        found = match(client, attendees, texts=[title], memory=self.memory, title=title)
+        people = found.get("person_records", [])[:5]
+        target = found.get("target") or {}
+        companies = list(dict.fromkeys(filter(None, [*found.get("companies", []), found.get("company", "")])))[:3]
+        if target.get("object") == "opportunity" and not companies:
+            deal = client.get("opportunity", target["id"])
+            items.append(self._item("opportunity", deal, stage=deal.get("stage"), next_step=deal.get("nextStep"),
+                                    close_date=deal.get("closeDate")))
         for person in people:
             items.append(self._item("person", person, job_title=person.get("jobTitle")))
         for company in companies:
@@ -432,9 +606,9 @@ class TwentyContext:
                               "date": str(note.get("createdAt") or "")[:40]})
         return items
 
-    def augment(self, meeting_id: str, attendees: list[str]) -> str:
+    def augment(self, meeting_id: str, attendees: list[str], title: str = "") -> str:
         client = self.client_factory()
-        if client is None or not meeting_id or not attendees:
+        if client is None or not meeting_id or not (attendees or title):
             return ""
         with self._lock:
             cached = self._results.get(meeting_id)
@@ -442,7 +616,7 @@ class TwentyContext:
         if cached and time.monotonic() - cached[0] < 600:
             return cached[1]
         try:
-            items = self._collect(client, attendees)
+            items = self._collect(client, attendees, title)
         except TwentyError as error:
             return ("\n[CRM context unavailable: the CRM key expired or was revoked.]" if str(error) == "auth_expired"
                     else "\n[CRM context unavailable; do not claim the CRM was checked.]")

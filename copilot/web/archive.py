@@ -2178,6 +2178,12 @@ class MeetingArchive:
             report["twenty_choice"] = choice
             report.pop("twenty_candidates", None)
             _atomic_json(path, report)
+            detail = self.report_detail(identity) or {}
+        import twenty_crm
+        # The next meeting with these people, their company domain or this recurring title goes there too.
+        twenty_crm.Memory(self.config_root / "twenty-records.json").remember(
+            twenty_crm.memory_keys([str(a) for a in detail.get("remote_attendees") or []],
+                                   str(detail.get("source_title") or detail.get("title") or "")), choice)
 
     def _deliver_twenty(self, detail: dict, settings: dict, choice: dict | None, before_write) -> dict:
         """One CRM note per meeting (MEETONTRACK-146); the full transcript stays here."""
@@ -2198,8 +2204,11 @@ class MeetingArchive:
         attendees = [*map(str, detail.get("remote_attendees") or []),
                      *(str(p.get("email") or p.get("name") or "") for p in detail.get("participants") or []
                        if isinstance(p, dict))]
+        names = [str(p.get("name") or "") for p in detail.get("participants") or [] if isinstance(p, dict)]
         return twenty_crm.deliver(
             client, meeting_id=detail["meeting_id"], title=str(detail.get("title") or ""),
+            texts=[str(detail.get("source_title") or ""), *names],
+            memory=twenty_crm.Memory(self.config_root / "twenty-records.json"),
             started=_date(detail.get("started_at")) or datetime.now().astimezone(), attendees=attendees,
             sections=sections, choice=choice, money_filter=settings.get("twenty_money_filter") is not False,
             before_write=before_write)

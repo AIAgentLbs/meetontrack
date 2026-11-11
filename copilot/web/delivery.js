@@ -114,6 +114,7 @@
     twenty_forbidden:["The CRM key has no access to this data. Check its role in Twenty.","У ключа CRM нет доступа к этим данным. Проверьте его роль в Twenty."],
     twenty_rate_limited:["The CRM is busy. Try again in a minute.","CRM перегружена. Повторите через минуту."],
     twenty_timeout:["The CRM did not answer in time.","CRM не ответила вовремя."], twenty_unreachable:["The CRM is unreachable. Check the address.","CRM недоступна. Проверьте адрес."],
+    twenty_remembered_not_found:["The CRM record chosen for these meetings earlier was not found. Choose a record again.","Запись CRM, выбранная для таких встреч раньше, не найдена. Выберите запись заново."],
     twenty_already_sent:["The note is already in the CRM.","Заметка уже есть в CRM."],
     attachment_too_large:["PDF exceeds the email limit. Use the Google Drive copy.","PDF превышает лимит письма. Используйте копию на Google Drive."],
   };
@@ -248,7 +249,7 @@
         line.textContent=`${text("twenty")}: ${text(report.twenty_error ? "twenty_"+report.twenty_error : "failed")}`;
       return box;
     }
-    line.textContent=text("twentyChoose");
+    line.textContent=text(report.twenty_error === "remembered_not_found" ? "twenty_remembered_not_found" : "twentyChoose");
     const list=document.createElement("div"), search=document.createElement("input");
     search.type="search"; search.placeholder=text("twentySearch"); search.setAttribute("aria-label", text("twentySearch"));
     const show=candidates => list.replaceChildren(...(candidates.length ? candidates : []).map(candidate => {

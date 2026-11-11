@@ -110,8 +110,18 @@ the app.
   them. It holds decisions, agreements and open questions plus the MeetOnTrack
   meeting id; the transcript stays on the computer. If the deal has a text
   field `nextStep`, it is set from the agreements.
+- **How the record is found**, in order: a record picked earlier for the same
+  attendee email, company email domain or recurring meeting title; people by
+  attendee email or full name; companies whose website matches an attendee's
+  email domain (public mail such as gmail.com or mail.ru is skipped); a company
+  or open deal named in the meeting title, calendar title or participant names
+  (whole words, legal forms like LLC/ООО and quotes ignored, names under three
+  characters skipped). The same lookup feeds the context before a call.
 - **No guessing.** Several deals or no match: the report shows "Choose a CRM
-  record" with a search; nothing is written until a record is picked.
+  record" with a search; nothing is written until a record is picked. The pick
+  is remembered in `~/.config/meeting-copilot/twenty-records.json` (record ids
+  only, no CRM content); if that record is later deleted, the report says so and
+  asks again.
 - **Stage** is only proposed ("Move to X"), from the workspace's own stages, and
   changes only on that click.
   Stages and the `nextStep` field come from the data model when the key may read

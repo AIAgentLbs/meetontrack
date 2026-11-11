@@ -2289,7 +2289,7 @@ ASK формулируй как одну короткую реплику, кот
             transcript += google_context
             transcript += TWENTY_CONTEXT.augment(
                 meeting_id, list(getattr(TRANSCRIPT, "remote_attendees", []))
-                if getattr(TRANSCRIPT, "meeting_id", None) == meeting_id else [])
+                if getattr(TRANSCRIPT, "meeting_id", None) == meeting_id else [], meeting)
             transcript += local_context
             prompt = (
                 self._base_prompt(question, transcript, meeting, scope)
@@ -2393,7 +2393,7 @@ def twenty_reader():
         return None
 
 
-TWENTY_CONTEXT = twenty_crm.TwentyContext(twenty_reader)
+TWENTY_CONTEXT = twenty_crm.TwentyContext(twenty_reader, twenty_crm.Memory(ARCHIVE.config_root / "twenty-records.json"))
 ARCHIVE.delivery_settings.twenty_changed = TWENTY_CONTEXT.reset
 TWENTY_STAGES: dict[str, dict] = {}  # ponytail: proposals live in memory; a restart asks the AI again.
 

@@ -18,8 +18,9 @@ KEY = "synthetic-secret-key-123"
 class FakeCRM:
     """A tiny in-memory Twenty answering the REST shapes the client parses."""
 
-    def __init__(self, people=(), opportunities=(), fields=None, fail=None):
+    def __init__(self, people=(), opportunities=(), fields=None, fail=None, companies=()):
         self.people, self.opportunities = list(people), list(opportunities)
+        self.companies = list(companies)
         self.fields = fields
         self.fail = fail or {}
         self.calls = []
@@ -33,11 +34,28 @@ class FakeCRM:
         if path == "/people":
             return {"data": {"people": [p for p in self.people if f'"{p["email"]}"' in flt
                                         or (f'"{p["name"]["firstName"]}"' in flt and f'"{p["name"]["lastName"]}"' in flt)]}}
+        if path in {"/companies", "/opportunities"} and not flt:  # full listing, 60 per page
+            items = self.companies if path == "/companies" else self.opportunities
+            start = int((query or {}).get("starting_after") or 0)
+            page = items[start:start + int(query["limit"])]
+            return {"data": {path[1:]: page}, "pageInfo": {"hasNextPage": start + len(page) < len(items),
+                                                           "endCursor": str(start + len(page))}}
+        if path == "/companies":
+            return {"data": {"companies": [c for c in self.companies
+                                           if c.get("domain") and f"%{c['domain']}%" in flt]}}
+        if path.startswith("/companies/") and self.companies:
+            found = [c for c in self.companies if c["id"] == path.rsplit("/", 1)[-1]]
+            if not found:
+                raise TwentyError("not_found")
+            return {"data": {"company": found[0]}}
         if path == "/opportunities":
             return {"data": {"opportunities": [o for o in self.opportunities
                                                if f'"{o.get("companyId")}"' in flt or f'"{o.get("pointOfContactId")}"' in flt
                                                or "ilike" in flt]}}
         if path.startswith("/opportunities/"):
+            known = [o for o in self.opportunities if o["id"] == path.rsplit("/", 1)[-1]]
+            if known and "name" in known[0]:  # named fixtures answer for themselves
+                return {"data": {"opportunity": known[0]}}
             return {"data": {"opportunity": {"id": path.rsplit("/", 1)[-1], "companyId": "c-7", "stage": "MEETING"}}}
         if path.startswith("/companies"):
             return {"data": {"company": {"id": path.rsplit("/", 1)[-1], "name": "Acme",
@@ -67,6 +85,9 @@ def person(pid, email, company="c-1", first="Ann", last="Lee"):
 
 
 class TwentyClientTests(unittest.TestCase):
+    def setUp(self):
+        twenty_crm._NAMES.clear()
+
     def client(self, fake):
         client = TwentyClient("https://crm.example.com/", KEY)
         client._request = fake
@@ -210,6 +231,71 @@ class TwentyClientTests(unittest.TestCase):
         twenty_crm.apply_stage(client, "o-1", "PROPOSAL")
         self.assertEqual(fake.methods("PATCH")[0][3], {"stage": "PROPOSAL"})
 
+    def test_domain_match_skips_public_mail_and_never_guesses(self):
+        companies = [{"id": "c-1", "name": "Acme", "domain": "acme.example.com"},
+                     {"id": "c-2", "name": "Beta", "domain": "beta.example.com"},
+                     {"id": "c-3", "name": "Beta Labs", "domain": "beta.example.com"}]
+        deals = [{"id": "o-1", "name": "Pilot", "companyId": "c-1", "stage": "PILOT"}]
+        fake = FakeCRM(companies=companies, opportunities=deals)
+        found = match(self.client(fake), ["ann@acme.example.com"])
+        self.assertEqual(found["target"]["id"], "o-1")
+        self.assertIn("domainName.primaryLinkUrl[ilike]", fake.calls[1][2]["filter"])
+        found = match(self.client(fake), ["bob@beta.example.com"])
+        self.assertEqual((found["status"], {c["id"] for c in found["candidates"]}), ("needs_choice", {"c-2", "c-3"}))
+        fake.calls.clear()
+        self.assertEqual(twenty_crm.domains(["x@gmail.com", "y@Mail.ru", "z@acme.example.com"]), ["acme.example.com"])
+        self.assertEqual(match(self.client(fake), ["x@gmail.com"])["status"], "needs_choice")
+        self.assertFalse(any("domainName" in str(c[2]) for c in fake.calls))
+
+    def test_name_match_in_titles_whole_word_and_only_when_unique(self):
+        companies = [{"id": f"c-{i}", "name": f"Filler {i}"} for i in range(70)]
+        companies += [{"id": "c-acme", "name": 'ООО "Акме"'}, {"id": "c-ab", "name": "AB"},
+                      {"id": "c-beta", "name": "Beta Inc."}, {"id": "c-gam", "name": "Gamma"}]
+        deals = [{"id": "o-1", "name": "Акме пилот", "companyId": "c-acme", "stage": "PILOT"},
+                 {"id": "o-x", "name": "Closed one", "companyId": "c-gam", "stage": "WON"}]
+        fake = FakeCRM(companies=companies, opportunities=deals)
+        client = self.client(fake)
+        # Company found on the second page of the listing (beyond 60), with quotes and legal form removed.
+        found = match(client, [], texts=["Созвон «Акме» ТОО"])
+        self.assertEqual(found["target"], {"object": "opportunity", "id": "o-1", "name": "Акме пилот", "stage": "PILOT"})
+        self.assertTrue(any((c[2] or {}).get("starting_after") == "60" for c in fake.calls))
+        # The company and its own deal both named still mean one deal.
+        self.assertEqual(match(client, [], texts=["Акме пилот: kickoff"])["target"]["id"], "o-1")
+        # Whole words only; names shorter than 3 characters are ignored; closed deals are not candidates.
+        self.assertEqual(match(client, [], texts=["Betamax AB review"])["status"], "needs_choice")
+        self.assertEqual(match(client, [], texts=["closed one retro"])["status"], "needs_choice")
+        self.assertEqual(match(client, [], texts=["BETA weekly"])["target"], {"object": "company", "id": "c-beta", "name": "Beta Inc."})
+        # Two records named: ask, never pick.
+        found = match(client, [], texts=["Beta and Gamma sync"])
+        self.assertEqual((found["status"], {c["id"] for c in found["candidates"]}), ("needs_choice", {"c-beta", "c-gam"}))
+        # Participant names count too, and the lists are cached in memory.
+        listings = len([c for c in fake.calls if not (c[2] or {}).get("filter")])
+        self.assertEqual(match(client, ["Gamma"], texts=["Weekly"])["target"]["id"], "c-gam")
+        self.assertEqual(len([c for c in fake.calls if not (c[2] or {}).get("filter")]), listings)
+
+    def test_remembered_pick_wins_and_a_deleted_record_asks_again(self):
+        with tempfile.TemporaryDirectory() as folder:
+            memory = twenty_crm.Memory(Path(folder) / "twenty-records.json")
+            keys = twenty_crm.memory_keys(["Ann@Acme.example.com", "x@gmail.com", "Ann Lee"], "Weekly sync 11.11")
+            self.assertEqual(keys, ["email:ann@acme.example.com", "email:x@gmail.com", "domain:acme.example.com",
+                                    "title:weekly sync"])
+            memory.remember(keys, {"object": "opportunity", "id": "o-2", "name": "secret deal name"})
+            stored = (Path(folder) / "twenty-records.json").read_text()
+            self.assertNotIn("secret", stored)  # ids only, no CRM content
+            deals = [{"id": "o-1", "name": "Pilot", "companyId": "c-1"}, {"id": "o-2", "name": "Other", "companyId": "c-9"}]
+            fake = FakeCRM([person("p-1", "ann@acme.example.com")], deals)
+            # Another meeting with the same recurring title (different date) uses the earlier pick.
+            found = match(self.client(fake), ["bob@other.example.com"], memory=memory, title="Weekly sync 18.11")
+            self.assertEqual((found["target"]["id"], found["company"]), ("o-2", "c-9"))
+            # The record was deleted: say so and ask again; the stale mapping is gone.
+            fake.fail = {("GET", "/opportunities/o-2"): "not_found"}
+            found = match(self.client(fake), ["ann@acme.example.com"], memory=memory, title="")
+            self.assertEqual((found["status"], found["reason"]), ("needs_choice", "remembered_not_found"))
+            self.assertIsNone(memory.lookup(keys))
+            result = twenty_crm.deliver(self.client(FakeCRM()), meeting_id="m", title="t", started=datetime(2026, 1, 1),
+                                        attendees=[], sections={}, choice=None, money_filter=True, before_write=lambda: None)
+            self.assertEqual(result["twenty_status"], "needs_choice")
+
     def test_open_api_fallback_when_metadata_is_refused(self):
         properties = {name: {"type": "string"} for name in (
             "amount", "closeDate", "companyId", "createdAt", "createdBy", "deletedAt", "id", "name", "ownerId",
@@ -254,6 +340,15 @@ class TwentyClientTests(unittest.TestCase):
         self.assertEqual(result["twenty_next_step"], "updated")
         self.assertEqual(crm.methods("PATCH")[0][3], {"nextStep": "Ann sends the deck"})
         self.assertFalse(any("salesRepoUrl" in json.dumps(c) for c in crm.calls))
+
+    def test_read_context_for_a_title_matched_meeting(self):
+        fake = FakeCRM(companies=[{"id": "c-acme", "name": "Acme"}],
+                       opportunities=[{"id": "o-1", "name": "Rollout", "companyId": "c-acme", "stage": "PILOT",
+                                       "nextStep": "Send plan", "salesRepoUrl": "https://repo.example.com/x"}])
+        text = TwentyContext(lambda: self.client(fake)).augment("m-1", [], "Acme weekly")
+        for value in ("Acme", "Rollout", "PILOT", "Send plan"):
+            self.assertIn(value, text)
+        self.assertNotIn("repo.example.com", text)
 
     def test_read_context_is_bounded_cached_and_off_when_disabled(self):
         fake = FakeCRM([person("p-1", "ann@example.com")],
