@@ -17,6 +17,9 @@ enum AudioProcesses {
         let name: String
         let runningInput: Bool
         let runningOutput: Bool
+        /// The process's own name ("Google Chrome Helper (Aperitif)"), kept so
+        /// an ignore list written against it still matches.
+        var rawName = ""
     }
 
     /// Every audio process except our own — our capture must never be evidence
@@ -34,19 +37,44 @@ enum AudioProcesses {
             let bundleID = string(object, kAudioProcessPropertyBundleID)
                 ?? app?.bundleIdentifier
                 ?? ""
-            let name = app?.localizedName
+            let rawName = app?.localizedName
                 ?? executableName(pid: pid)
                 ?? bundleID.split(separator: ".").last.map(String.init)
                 ?? ""
+            // A process with no bundle id is matched by its executable name,
+            // so only bundled processes get the friendlier name.
+            let name = bundleID.isEmpty
+                ? rawName
+                : displayName(bundlePath: app?.bundleURL?.path, localizedName: rawName) ?? rawName
             return Process(
                 object: object,
                 pid: pid,
                 bundleID: bundleID,
                 name: name,
                 runningInput: (uint32(object, kAudioProcessPropertyIsRunningInput) ?? 0) != 0,
-                runningOutput: (uint32(object, kAudioProcessPropertyIsRunningOutput) ?? 0) != 0
+                runningOutput: (uint32(object, kAudioProcessPropertyIsRunningOutput) ?? 0) != 0,
+                rawName: rawName
             )
         }
+    }
+
+    /// The name a person knows the process by: the app it belongs to, never
+    /// its helper. Chrome opens the microphone from a helper named "Google
+    /// Chrome Helper (Aperitif)", which reached a folder name, cut to "Google
+    /// Chrome Helper (Ap" (MEETONTRACK-145). A helper's bundle lives inside its
+    /// app's bundle, so the outermost `.app` on the path is the app; failing
+    /// that, a trailing " Helper" or " Helper (…)" is dropped from the name.
+    static func displayName(bundlePath: String?, localizedName: String?) -> String? {
+        if let app = bundlePath?.split(separator: "/").first(where: { $0.hasSuffix(".app") }),
+           app.count > 4 {
+            return String(app.dropLast(4))
+        }
+        guard let name = localizedName, !name.isEmpty else { return nil }
+        if let helper = name.range(of: #" Helper( \(.*)?$"#, options: .regularExpression),
+           helper.lowerBound > name.startIndex {
+            return String(name[..<helper.lowerBound])
+        }
+        return name
     }
 
     /// Every process belonging to one of these families.

@@ -593,8 +593,11 @@ class MeetingArchive:
 
     @classmethod
     def _is_generic_title(cls, value: str) -> bool:
-        clean = value.strip()
-        return clean in cls.generic_titles or clean.startswith("Google Chrome Helper")
+        # A same-minute folder collision appends "-2"; it names nothing.
+        clean = re.sub(r"-\d+$", "", value.strip())
+        # Any browser helper process ("Google Chrome Helper (Ap", "Microsoft
+        # Edge Helper"), full or cut mid-word (MEETONTRACK-145).
+        return clean in cls.generic_titles or bool(re.fullmatch(r".+ Helper(?: \(.*)?", clean))
 
     @classmethod
     def _speaker_title(cls, snapshot: dict) -> str:

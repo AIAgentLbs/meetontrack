@@ -131,6 +131,9 @@ struct MeetingContext {
             .joined(separator: " ")
         guard !cleaned.isEmpty else { return nil }
         guard cleaned.count > limit else { return cleaned }
-        return String(cleaned.prefix(limit)).trimmingCharacters(in: .whitespaces)
+        // Cut at a word boundary: "Google Chrome Helper (Ap" reads as a bug.
+        let head = cleaned.prefix(limit + 1)
+        let cut = head.lastIndex(of: " ").map { head[..<$0] } ?? cleaned.prefix(limit)
+        return String(cut).trimmingCharacters(in: .whitespaces)
     }
 }

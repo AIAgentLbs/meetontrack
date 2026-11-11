@@ -33,6 +33,16 @@ struct CallAppDetectionTests {
         #expect(result.families == ["us.zoom.xos"])
     }
 
+    @Test("An ignore entry written against a helper's own name still applies")
+    func ignoreByRawHelperName() {
+        let helper = AudioProcesses.Process(
+            object: 1, pid: 100, bundleID: "com.google.Chrome.helper", name: "Google Chrome",
+            runningInput: true, runningOutput: false, rawName: "Google Chrome Helper (Aperitif)")
+        let result = MicActivityMonitor.evaluate(
+            processes: [helper], callApps: callApps, ignoring: ["Google Chrome Helper (Aperitif)"])
+        #expect(!result.active)
+    }
+
     /// These are defaults rather than setup advice: without their bundle-id
     /// family, a call in one of these apps or browsers never starts a recording.
     @Test("Popular call apps and browsers start automatic recording", arguments: [

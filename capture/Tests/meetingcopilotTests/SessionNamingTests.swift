@@ -85,6 +85,29 @@ struct SessionNamingTests {
         #expect(session.dir.lastPathComponent.hasSuffix("(zoom.us)"))
     }
 
+    /// MEETONTRACK-145: a Meet call in Chrome was named after the helper
+    /// process holding the mic, cut mid-word to "Google Chrome Helper (Ap".
+    @Test("A browser helper is named after its app, never after the helper")
+    func helperNamedAfterApp() {
+        let helper = "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework"
+            + "/Versions/142.0/Helpers/Google Chrome Helper (Aperitif).app"
+        #expect(AudioProcesses.displayName(
+            bundlePath: helper, localizedName: "Google Chrome Helper (Aperitif)") == "Google Chrome")
+        #expect(AudioProcesses.displayName(
+            bundlePath: nil, localizedName: "Google Chrome Helper (Aperitif)") == "Google Chrome")
+        #expect(AudioProcesses.displayName(
+            bundlePath: nil, localizedName: "Microsoft Edge Helper") == "Microsoft Edge")
+        #expect(AudioProcesses.displayName(bundlePath: nil, localizedName: "zoom.us") == "zoom.us")
+        #expect(AudioProcesses.displayName(bundlePath: nil, localizedName: nil) == nil)
+    }
+
+    @Test("A long name is cut at a word boundary, not mid-word")
+    func cutAtWordBoundary() {
+        let suffix = MeetingContext(app: "Google Chrome Helper (Aperitif)").folderSuffix
+        #expect(suffix == "Google Chrome Helper")
+        #expect(MeetingContext(app: String(repeating: "x", count: 30)).folderSuffix?.count == 24)
+    }
+
     @Test("Two meetings in the same minute get separate folders")
     func collisionsAreSuffixed() throws {
         let root = try makeRoot()

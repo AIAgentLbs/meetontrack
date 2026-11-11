@@ -121,6 +121,8 @@ class MemoryLifecycleTests(unittest.TestCase):
             root = Path(directory)
             archive = server.MeetingArchive(root / "recordings", root / "archive", root / "reports", root)
             self.assertEqual(archive.display_title({"meeting_id": "one", "meeting": "Zoom"}, frames=[{"window_title": "Customer call"}]), "Customer call")
+            for helper in ("Google Chrome Helper (Ap", "Microsoft Edge Helper", "Brave Browser Helper (Renderer)", "Google Chrome-2"):
+                self.assertEqual(archive.display_title({"meeting_id": "one", "meeting": helper}, frames=[{"window_title": "Meet - abc-defg-hij"}]), "Meet - abc-defg-hij")
 
     def test_old_meeting_translation_results_released(self):
         translator = LiveTranslation()
