@@ -28,6 +28,10 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
   integration (read context before calls, one note per meeting after, record choice, one-click stage
   proposal, money/terms filter; `copilot/web/twenty_crm.py`, docs/DELIVERY.md). Code and unit tests are
   on main; the live check on the dogfood CRM is pending owner approval (API key + test write).
+  Deferred Codex P2 (2026-11-11): (a) when every `/noteTargets` link fails the note stays `sent`
+  with `twenty_error: link_partial`; make it actionable and retry only the missing links, never a
+  new note (`twenty_crm.deliver`); (b) read context for a person without `companyId` lists only the
+  person; add person-linked deals (`pointOfContactId`) and person notes (`TwentyContext._collect`).
 - [ ] MEETONTRACK-85: `copilot/web/test_meeting_boundary_ui.cjs` times out
   (`locator.waitFor` 3 s, line 45) at 0.1.12 and identically at 0.1.11 (`effb7a2`).
   Not in the release script set. Find whether the fixture or the UI changed,

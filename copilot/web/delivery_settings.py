@@ -278,6 +278,7 @@ class DeliverySettings:
             raw = self.read()
             raw.setdefault("email_provider", "gmail" if raw else "smtp")
             twenty_before = (raw.get("twenty_url"), enabled(raw, "twenty"))
+            stale_twenty_key = False
             if "twenty_url" in payload:
                 from twenty_crm import normalize_url
                 url = normalize_url(payload["twenty_url"]) if str(payload["twenty_url"] or "").strip() else ""
@@ -285,10 +286,7 @@ class DeliverySettings:
                     # A key belongs to one workspace: a new address needs a new key.
                     raw["twenty_key_saved"] = False
                     raw["twenty_enabled"] = False
-                    try:
-                        self.twenty_keys.delete()
-                    except ValueError:
-                        pass
+                    stale_twenty_key = True
                 raw["twenty_url"] = url
             twenty_key = payload.get("twenty_key", "")
             if not isinstance(twenty_key, str) or len(twenty_key) > 8192 or any(c in twenty_key for c in "\r\n\0 "):
@@ -296,8 +294,7 @@ class DeliverySettings:
             if twenty_key:
                 if not raw.get("twenty_url"):
                     raise ValueError("twenty_settings_required")
-                self.twenty_keys.set(twenty_key)
-                raw["twenty_key_saved"] = True
+                raw["twenty_key_saved"] = True  # stored below, once the whole form is valid
             if "twenty_money_filter" in payload:
                 if type(payload["twenty_money_filter"]) is not bool:
                     raise ValueError("invalid_enabled")
@@ -382,6 +379,13 @@ class DeliverySettings:
             if password:
                 self.passwords.set(password)
                 raw["smtp_password_saved"] = True
+            if twenty_key:
+                self.twenty_keys.set(twenty_key)
+            elif stale_twenty_key:
+                try:
+                    self.twenty_keys.delete()
+                except ValueError:
+                    pass
             write_json(self.path, raw)
             if twenty_before != (raw.get("twenty_url"), enabled(raw, "twenty")) or twenty_key:
                 self.twenty_changed()

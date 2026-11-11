@@ -37,6 +37,8 @@ class FakeCRM:
             return {"data": {"opportunities": [o for o in self.opportunities
                                                if f'"{o.get("companyId")}"' in flt or f'"{o.get("pointOfContactId")}"' in flt
                                                or "ilike" in flt]}}
+        if path.startswith("/opportunities/"):
+            return {"data": {"opportunity": {"id": path.rsplit("/", 1)[-1], "companyId": "c-7", "stage": "MEETING"}}}
         if path.startswith("/companies"):
             return {"data": {"company": {"id": path.rsplit("/", 1)[-1], "name": "Acme",
                                          "domainName": {"primaryLinkUrl": "https://acme.example.com"}}}}
@@ -76,7 +78,7 @@ class TwentyClientTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 twenty_crm.normalize_url(bad)
         client = TwentyClient("https://crm.example.com", KEY)
-        with patch("twenty_crm.urllib.request.urlopen") as urlopen:
+        with patch("twenty_crm._OPENER.open") as urlopen:
             with self.assertRaises(TwentyError):
                 client._request("DELETE", "/notes/x")
             urlopen.assert_not_called()
@@ -87,10 +89,10 @@ class TwentyClientTests(unittest.TestCase):
         client = TwentyClient("https://crm.example.com", KEY)
         def http(code):
             return urllib.error.HTTPError("u", code, "x", {"Retry-After": "0"}, io.BytesIO(b""))
-        with patch("twenty_crm.urllib.request.urlopen", side_effect=http(401)):
+        with patch("twenty_crm._OPENER.open", side_effect=http(401)):
             with self.assertRaisesRegex(TwentyError, "auth_expired"):
                 client._request("GET", "/people")
-        with patch("twenty_crm.urllib.request.urlopen", side_effect=[http(429), http(429)]) as urlopen, \
+        with patch("twenty_crm._OPENER.open", side_effect=[http(429), http(429)]) as urlopen, \
              patch("twenty_crm.time.sleep") as sleep:
             with self.assertRaisesRegex(TwentyError, "rate_limited"):
                 client._request("GET", "/people")
@@ -108,6 +110,13 @@ class TwentyClientTests(unittest.TestCase):
         self.assertEqual({c["id"] for c in found["candidates"]}, {"o-1", "o-2"})
         closed = FakeCRM([person("p-1", "ann@example.com")], [{"id": "o-1", "companyId": "c-1", "stage": "CLOSED_WON"}])
         self.assertEqual(match(self.client(closed), ["ann@example.com"])["target"]["object"], "company")
+        # Redirects are refused: the key never follows them to another host.
+        import urllib.error
+        client = TwentyClient("https://crm.example.com", KEY)
+        with patch("twenty_crm._OPENER.open", side_effect=urllib.error.HTTPError("u", 302, "x", {}, io.BytesIO(b""))):
+            with self.assertRaisesRegex(TwentyError, "redirect_refused"):
+                client._request("GET", "/people")
+        self.assertTrue(any(isinstance(h, twenty_crm._NoRedirect) for h in twenty_crm._OPENER.handlers))
         nobody = FakeCRM()
         self.assertEqual(match(self.client(nobody), ["zed@example.com", "Single"])["status"], "needs_choice")
         # Two people with one name never pick either of them.
@@ -163,13 +172,24 @@ class TwentyClientTests(unittest.TestCase):
         self.assertEqual(fake.methods("POST"), [])
         result, _ = self.deliver(fake, choice={"object": "opportunity", "id": "o-2", "name": "Chosen"})
         self.assertEqual(result["twenty_target"]["id"], "o-2")
-        self.assertEqual(fake.methods("POST", "/noteTargets")[0][3]["targetOpportunityId"], "o-2")
+        links = [c[3] for c in fake.methods("POST", "/noteTargets")]
+        self.assertEqual(links[:2], [{"noteId": "note-1", "targetOpportunityId": "o-2"},
+                                     {"noteId": "note-1", "targetCompanyId": "c-7"}])
+
+    def test_money_in_the_title_is_withheld(self):
+        fake = FakeCRM([person("p-1", "ann@example.com")])
+        result = twenty_crm.deliver(self.client(fake), meeting_id="m-1", title="Acme contract EUR 40000",
+                                    started=datetime(2026, 11, 11), attendees=["ann@example.com"], sections={},
+                                    choice=None, money_filter=True, before_write=lambda: None)
+        self.assertEqual(fake.methods("POST", "/notes")[0][3]["title"], "2026-11-11 Meeting")
+        self.assertEqual(result["twenty_withheld"], 1)
 
     def test_401_and_lost_acknowledgement(self):
         fake = FakeCRM([person("p-1", "ann@example.com")], fail={("GET", "/people"): "auth_expired"})
         self.assertEqual(self.deliver(fake)[0]["twenty_status"], "auth_required")
-        fake = FakeCRM([person("p-1", "ann@example.com")], fail={("POST", "/notes"): "timeout"})
-        self.assertEqual(self.deliver(fake)[0]["twenty_status"], "unknown")
+        for error in ("timeout", "server_error"):
+            fake = FakeCRM([person("p-1", "ann@example.com")], fail={("POST", "/notes"): error})
+            self.assertEqual(self.deliver(fake)[0]["twenty_status"], "unknown")
         # A link failure after the note exists never creates a second note.
         fake = FakeCRM([person("p-1", "ann@example.com")], fail={("POST", "/noteTargets"): "http_error"})
         result, _ = self.deliver(fake)
@@ -264,6 +284,9 @@ class TwentyChannelTests(unittest.TestCase):
         self.assertEqual(self.store["k"], KEY)
         self.assertTrue(settings.read()["twenty_enabled_at"])
         # A different workspace needs a new key; the old one is removed.
+        with self.assertRaisesRegex(ValueError, "twenty_settings_required"):
+            settings.configure({"twenty_url": "https://other.example.com", "twenty_enabled": True})
+        self.assertEqual(self.store["k"], KEY)  # a rejected form keeps the saved key
         snapshot = settings.configure({"twenty_url": "https://other.example.com"})
         self.assertFalse(snapshot["twenty_enabled"] or snapshot["twenty_key_saved"])
         self.assertNotIn("k", self.store)
