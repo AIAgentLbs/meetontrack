@@ -17,9 +17,19 @@ def inventory(roots):
             if not (path / '.git').exists():
                 continue
             dirs.clear()
+            # MEETONTRACK-129: the repository's own fsmonitor, hooks, external diff and filter/diff/merge
+            # driver commands are blanked on the command line, which wins over its .git/config.
+            env = os.environ | {'GIT_OPTIONAL_LOCKS':'0', 'GIT_TERMINAL_PROMPT':'0', 'GIT_CONFIG_NOSYSTEM':'1'}
+            base = ['git', '-C', str(path), '--no-pager', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'diff.external=']
+            try:
+                keys = subprocess.run([*base, 'config', '--local', '--includes', '--name-only', '--get-regexp', r'^(filter|diff|merge)\..+\.(clean|smudge|process|command|textconv|driver)$'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3, env=env).stdout.split()
+            except (OSError, subprocess.TimeoutExpired):
+                records.append({'name':path.name,'path':str(path),'head':'','branch':'DETACHED','status':'unknown_timeout'})
+                continue  # drivers unknown: run no git there at all
+            base +=[arg for key in dict.fromkeys(keys) for arg in ('-c', f'{key}=')]
             def git(*args):
                 try:
-                    result = subprocess.run(['git', '-C', str(path), *args], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3, env=os.environ | {'GIT_OPTIONAL_LOCKS':'0', 'GIT_TERMINAL_PROMPT':'0'})
+                    result = subprocess.run([*base, *args], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3, env=env)
                     return result.stdout.strip() if result.returncode == 0 else None
                 except (OSError, subprocess.TimeoutExpired):
                     return None

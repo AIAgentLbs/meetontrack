@@ -12,6 +12,7 @@ import tempfile
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -46,12 +47,31 @@ GIT_TIMEOUT_SECONDS = 5
 TIMEOUT_SENTINEL = "__MEETING_COPILOT_TIMEOUT__"
 
 
+@lru_cache(maxsize=None)
+def untrusted_git(repo: Path) -> tuple[tuple[str, ...], dict]:
+    """argv prefix and env for git in a repository whose .git/config is not ours (MEETONTRACK-129):
+    its fsmonitor, hooks, external diff and filter/diff/merge driver commands are blanked on the
+    command line, which wins over repository config. Same rule as untrusted_git in copilot/web/server.py."""
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
+    base = ["git", "-C", str(repo), "--no-optional-locks", "--no-pager", "-c", "core.fsmonitor=false",
+            "-c", "core.hooksPath=/dev/null", "-c", "diff.external="]
+    try:
+        keys = subprocess.run([*base, "config", "--local", "--includes", "--name-only", "--get-regexp",
+                               r"^(filter|diff|merge)\..+\.(clean|smudge|process|command|textconv|driver)$"],
+                              capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS, check=False,
+                              stdin=subprocess.DEVNULL, env=env).stdout.split()
+    except (OSError, subprocess.TimeoutExpired):
+        return (), env  # drivers unknown: callers run no git there at all
+    return tuple(base + [arg for key in dict.fromkeys(keys) for arg in ("-c", f"{key}=")]), env
+
+
 def command(repo: Path, *args: str) -> str:
-    env = os.environ.copy()
-    env["GIT_OPTIONAL_LOCKS"] = "0"
+    base, env = untrusted_git(repo)
+    if not base:
+        return TIMEOUT_SENTINEL
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo), "--no-optional-locks", *args],
+            [*base, *args],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -65,9 +85,9 @@ def command(repo: Path, *args: str) -> str:
 
 
 def working_tree_status(repo: Path) -> tuple[str, list[str]]:
-    env = os.environ.copy()
-    env["GIT_OPTIONAL_LOCKS"] = "0"
-    base = ["git", "-C", str(repo), "--no-optional-locks"]
+    base, env = untrusted_git(repo)
+    if not base:
+        return "unknown_timeout", [f"repository config read exceeded {GIT_TIMEOUT_SECONDS} seconds"]
     try:
         unstaged = subprocess.run(
             [*base, "diff", "--quiet", "--"],
