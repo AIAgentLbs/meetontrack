@@ -370,6 +370,34 @@ struct LiveTranscriptTests {
         await coordinator.finishRecording()
     }
 
+    @Test("A different choice saved mid-recording restarts live text on it, past the retry cooldown")
+    func switchedChoiceRestartsTheLivePipeline() async throws {
+        // An id no adapter runs: loading fails fast, no model files touched.
+        let chosen = OSAllocatedUnfairLock(initialState: STTChoice(engine: "fluidaudio", model: "first-test-model", language: "en"))
+        let coordinator = LiveTranscriptionCoordinator(
+            resolve: { .ready(chosen.withLock { $0 }) }, liveReason: { _ in nil })
+        // Every pipeline stop detaches the sinks: a restart shows up as more detaches.
+        let detaches = OSAllocatedUnfairLock(initialState: 0)
+        func settled() async throws -> Int {
+            for _ in 0..<100 {
+                if case .error = await coordinator.snapshot.status { break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            return detaches.withLock { $0 }
+        }
+        await coordinator.beginRecording(
+            enabled: true, update: { _ in }, attach: { sinks in if sinks == nil { detaches.withLock { $0 += 1 } } })
+        _ = try await settled()
+        await coordinator.checkHealth()  // the one retry; the next would wait out the cooldown
+        let afterRetry = try await settled()
+        await coordinator.checkHealth()
+        #expect(try await settled() == afterRetry, "the same choice waits out the cooldown")
+        chosen.withLock { $0 = STTChoice(engine: "fluidaudio", model: "second-test-model", language: "en") }
+        await coordinator.checkHealth()
+        #expect(try await settled() > afterRetry, "a new choice restarts at once")
+        await coordinator.finishRecording()
+    }
+
     @Test("Ending the recording releases everything the closures captured")
     func finishRecordingReleasesTheCapturedSession() async {
         // AppController's closures capture the recording session. The live

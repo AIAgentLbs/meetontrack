@@ -98,6 +98,10 @@ actor ParakeetLiveRecognizer: LiveRecognizer {
     private var chunks: [String] = []
     private var callback: (@Sendable (String) -> Void)?
     private var updates: Task<Void, Never>?
+    /// Seconds handed to the manager and seconds its windows have decoded:
+    /// each update is one window advancing by `chunkSeconds`.
+    private var enqueued: Double = 0
+    private var decoded: Double = 0
     nonisolated let pauseEndingUtterance: Double
 
     private init(models: AsrModels, source: AudioSource, manager: SlidingWindowAsrManager) {
@@ -133,6 +137,7 @@ actor ParakeetLiveRecognizer: LiveRecognizer {
     /// Each update is one newly processed window; the utterance is all of
     /// them so far.
     private func received(_ text: String) {
+        decoded += config.chunkSeconds
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         chunks.append(trimmed)
@@ -143,10 +148,17 @@ actor ParakeetLiveRecognizer: LiveRecognizer {
         self.callback = callback
     }
 
-    // ponytail: streamAudio only enqueues, so the coordinator's backlog limit
-    // does not see a slow Parakeet decoder; bound it if live falls behind.
+    /// streamAudio only enqueues into an unbounded queue, so this returns
+    /// once the decoder is within two windows of the audio: a slow decoder
+    /// then fills the coordinator's bounded queue (overload) and a stalled one
+    /// stops its progress (recovery) instead of growing memory unseen.
     func process(_ buffer: sending AVAudioPCMBuffer) async throws {
+        enqueued += Double(buffer.frameLength) / buffer.format.sampleRate
         await manager.streamAudio(buffer)
+        // ponytail: 50 ms poll; an update-driven continuation if it shows in profiles.
+        while enqueued - decoded > 2 * pauseEndingUtterance {
+            try await Task.sleep(for: .milliseconds(50))
+        }
     }
 
     func finishUtterance() async throws -> String {
@@ -154,6 +166,8 @@ actor ParakeetLiveRecognizer: LiveRecognizer {
         let final = try await finished.finish()
         updates?.cancel()
         chunks = []
+        enqueued = 0
+        decoded = 0
         await finished.cancel()
         manager = try await Self.started(models: models, source: source)
         await listen()
