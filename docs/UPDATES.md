@@ -111,8 +111,10 @@ first move to this layout needs the installer once: it retires the
 `com.aiagentlbs.meeting-copilot` agent and deletes `~/.local/share/meeting-copilot`
 `python/`, `web/`, `release.json` and the three helpers in `bin/` only after the
 new app is in place; data and settings there are untouched. Sparkle itself
-stays disabled. Windows ZIP installs are not registered with Velopack, so its
-existing update service reports NotInstalled.
+stays disabled. Windows ZIP installs are not registered with Velopack, so the
+recorder has no in-app Velopack check (removed in MEETONTRACK-81); its tray, like
+the Mac menu without Sparkle, offers no "Check for updates", and updates go through
+the assistant's Install button above.
 
 Required acceptance before promotion:
 
