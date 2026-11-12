@@ -17,7 +17,7 @@ const auth = { ...healthy, state: 'action_required',
   channels: { ...healthy.channels, gmail: channel('action_required', { action_required: 1, issues: [{ meeting_id: 'm2', reason: 'auth_required' }] }) } };
 
 (async () => {
-  let delivery = healthy, retries = [], recreated = [], jobPolls = 0, language = 'ru', jobReport = { mail_status: 'sent' };
+  let heldPoll = null, delivery = healthy, retries = [], recreated = [], jobPolls = 0, language = 'ru', jobReport = { mail_status: 'sent' };
   const json = (res, value) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
   const state = () => ({
     transcript: { meeting_id: 'idle', meeting: '', status: 'idle', segments: [], live: false },
@@ -31,6 +31,7 @@ const auth = { ...healthy, state: 'action_required',
     if (req.url.startsWith('/api/archive?') || req.url === '/api/archive') return json(res, { ok: true, meetings: [], delivery });
     if (req.url === '/api/delivery/job') {
       jobPolls += 1;
+      if (jobReport === null) { heldPoll = res; return; }  // answered by the test, after its clock moves
       if (jobReport.mail_status === 'sent') delivery = healthy;
       return json(res, { ok: true, job: { state: 'complete', request_id: retries.at(-1).request_id, report: jobReport } });
     }
@@ -107,6 +108,19 @@ const auth = { ...healthy, state: 'action_required',
     assert.doesNotMatch(await page.locator('#delivery-undelivered').innerText(), /интернет/);
     await settings.click();
     await page.locator('#settings-panel').waitFor({ state: 'visible', timeout: 3000 });
+
+    // MEETONTRACK-93: a resend still sending at the 5-minute deadline may yet arrive: never "Could not send".
+    jobReport = null;
+    await reload(undelivered(weekly));
+    await pillIs('Отчет по встрече «Weekly sync» от 16 октября не отправлен');
+    await pill.click();
+    await page.locator('#delivery-undelivered button').click();
+    while (!heldPoll) await new Promise(resolve => setTimeout(resolve, 50));
+    await page.evaluate(() => { const real = Date.now.bind(Date); Date.now = () => real() + 301000; });
+    json(heldPoll, { ok: true, job: { state: 'sending', request_id: retries.at(-1).request_id, report: {} } });
+    await page.locator('#delivery-undelivered').filter({ hasText: 'Возможно, он уже пришел' }).waitFor({ timeout: 6000 });
+    assert.doesNotMatch(await page.locator('#delivery-undelivered').innerText(), /Не получилось отправить/);
+    jobReport = { mail_status: 'sent' };
 
     // MEETONTRACK-92: a report whose file is gone offers to create it again, not "check the archive".
     await reload(undelivered({ ...weekly, missing: true }));

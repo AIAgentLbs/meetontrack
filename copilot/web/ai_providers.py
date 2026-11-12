@@ -653,6 +653,7 @@ class AntigravityAdapter:
 
 class OllamaAdapter:
     name, label, reads_files, web_search = "ollama", "Ollama", False, False
+    takes_rules = True  # keeps a session's rules apart from its trimmable turns (MEETONTRACK-50)
     SESSIONS, HISTORY = 8, 40  # conversations kept in memory, turn messages kept per conversation (plus its rules)
     REPLY_TOKENS = 4096  # context kept free for the answer (same as Swift LLMBackend.ollamaReplyTokens)
 
@@ -663,22 +664,28 @@ class OllamaAdapter:
         length = info.get(f"{info.get('general.architecture')}.context_length")
         return length if isinstance(length, int) and not isinstance(length, bool) and length > 0 else None
 
+    @staticmethod
+    def tokens(text):
+        """Upper estimate of the tokens in `text` without the model's tokenizer (MEETONTRACK-8):
+        a Latin, Cyrillic, Greek, Arabic or Hebrew character (2 UTF-8 bytes or fewer) counts as one,
+        any other (CJK, emoji) as its UTF-8 bytes, which a byte-level tokenizer never exceeds.
+        ponytail: images are not counted; ask Ollama's tokenizer if image-heavy requests get cut."""
+        return sum(1 if ord(char) < 0x800 else len(char.encode("utf-8")) for char in str(text))
+
     @classmethod
     def fit(cls, pinned, turns, prompt, context):
         """(messages to send before the prompt, num_ctx). `pinned` is the session's system message
-        (its first prompt: the session rules) and is never dropped; only the oldest conversation
-        turns are, whole, never cut mid-message. A request that cannot fit is rejected.
-        ponytail: one character counts as at least one token (true for Latin/Cyrillic); images not
-        counted; use the tokenizer if CJK or image-heavy requests get cut."""
-        size = lambda messages: sum(len(str(m.get("content", ""))) for m in messages)
-        budget, pinned = context - cls.REPLY_TOKENS, [pinned] if pinned else []
-        if len(prompt) + size(pinned) > budget:
+        (its rules) and is never dropped; only the oldest conversation turns are, whole, never cut
+        mid-message. A request that cannot fit is rejected."""
+        size = lambda messages: sum(cls.tokens(m.get("content", "")) for m in messages)
+        budget, pinned, asked = context - cls.REPLY_TOKENS, [pinned] if pinned else [], cls.tokens(prompt)
+        if asked + size(pinned) > budget:
             raise RuntimeError(f"The text is longer than this Ollama model's context of {context} tokens. "
                                "Choose a model with a longer context in Getting started.")
         turns = list(turns)
-        while turns and len(prompt) + size(pinned + turns) > budget:
+        while turns and asked + size(pinned + turns) > budget:
             turns = turns[1:]  # oldest message first
-        used = len(prompt) + size(pinned + turns)
+        used = asked + size(pinned + turns)
         return pinned + turns, min(context, used + cls.REPLY_TOKENS)
 
     def __init__(self, host=None):
@@ -740,7 +747,7 @@ class OllamaAdapter:
         return _available(self, models, "local")
 
     def call(self, choice, prompt, *, executable="", env=None, timeout, roots=(), image=None, resume="", keep_session=False,
-             web=False):
+             web=False, rules=""):
         if web:
             raise AIChoiceError("unavailable", "Ollama cannot search the web.")
         if roots:
@@ -748,6 +755,7 @@ class OllamaAdapter:
                                                "Claude Code for live analysis, or disconnect the repositories.")
         with self.lock:
             pinned, turns = self.sessions.get(resume, (None, ())) if resume else (None, ())
+        pinned = pinned or ({"role": "system", "content": rules} if rules else None)
         try:
             context = self.context_length(self._request("/api/show", {"model": choice["model"]}, timeout=10))
         except (OSError, ValueError) as error:
@@ -775,10 +783,10 @@ class OllamaAdapter:
         if keep_session or resume:  # Ollama is stateless: the conversation is kept here
             with self.lock:
                 session = resume if resume in self.sessions else uuid.uuid4().hex
-                # the first prompt carries the session rules: kept as the system message, never trimmed
-                kept = (pinned, [*history[1 if pinned else 0:], message]) if pinned else \
-                    ({"role": "system", "content": prompt}, [])
-                self.sessions[session] = (kept[0], (kept[1] + [{"role": "assistant", "content": text}])[-self.HISTORY:])
+                # the session rules stay the system message, never trimmed; the meeting snapshots
+                # and questions are turns, so the oldest can make room on a small context
+                turns = [*history[1 if pinned else 0:], message, {"role": "assistant", "content": text}]
+                self.sessions[session] = (pinned, turns[-self.HISTORY:])
                 self.sessions.move_to_end(session)
                 while len(self.sessions) > self.SESSIONS:
                     self.sessions.popitem(last=False)
@@ -1023,8 +1031,15 @@ class AIService:
             raise AIChoiceError(ticket.state, ticket.reason)
         options.setdefault("env", self.env)
         options.setdefault("timeout", 120)
-        return self.adapters[ticket.choice["provider"]].call(ticket.choice, prompt, executable=ticket.executable,
-                                                              **options)
+        adapter = self.adapters[ticket.choice["provider"]]
+        # `rules`: a session's fixed instructions. An adapter that keeps them apart gets them so;
+        # every other one reads them at the head of the prompt.
+        rules = options.pop("rules", "")
+        if rules and getattr(adapter, "takes_rules", False):
+            options["rules"] = rules
+        elif rules:
+            prompt = rules + prompt
+        return adapter.call(ticket.choice, prompt, executable=ticket.executable, **options)
 
     def needs_sign_in(self, provider):
         """True when the last discovery of `provider` found it installed but not signed in. Cache only."""

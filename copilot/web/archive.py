@@ -33,6 +33,7 @@ from delivery_settings import DeliverySettings, enabled as delivery_enabled
 from private_dirs import private_dir
 from canonical_transcript import canonical_segments
 from meeting_boundaries import interval_contains
+from live_translation import echoes
 
 
 def _json(path: Path, fallback: Any) -> Any:
@@ -99,7 +100,8 @@ def _overlaps(segment: dict, first, last) -> bool:
 
 def _keep_translations(previous: list[dict], segments: list[dict]) -> None:
     """Live translations exist only in memory; meeting.json is their durable copy."""
-    translated = {(s.get("source"), s.get("timestamp"), s.get("text")): s for s in previous if s.get("translation_en")}
+    translated = {(s.get("source"), s.get("timestamp"), s.get("text")): s for s in previous
+                  if s.get("translation_en") and not echoes(s.get("text"), s.get("translation_en"))}
     for segment in segments:
         old = translated.get((segment.get("source"), segment.get("timestamp"), segment.get("text")))
         if old and not segment.get("translation_en"):
@@ -197,6 +199,7 @@ class MeetingArchive:
         self.analysis_pending: Callable[[str], bool] = lambda meeting_id: False
         # meeting_id -> (meeting.json, report.json) versions already found up to date.
         self._history_checked: dict[str, tuple] = {}
+        self._final_wait_since: datetime | None = None
         private_dir(self.archive_root, recover=True)
         private_dir(self.reports_root, recover=True)
 
@@ -480,9 +483,15 @@ class MeetingArchive:
                 return False
             if not failure.exists() or not self._report_retry_ready(meeting_id):
                 return False
-        ended = _date(str((self.report_detail(meeting_id) or {}).get("ended_at") or ""))
-        recent = bool(ended and (datetime.now().astimezone() - ended).total_seconds()
-                      <= self.delivery_retry_days * 86400)
+        detail = self.report_detail(meeting_id) or {}
+        ended = _date(str(detail.get("ended_at") or ""))
+        report = detail.get("report") or {}
+        # A final transcript arriving after the window still sends a report that never went out,
+        # as the waiting warning promised (MEETONTRACK-118); older history waits for the button.
+        recent = bool(ended and ((datetime.now().astimezone() - ended).total_seconds()
+                                 <= self.delivery_retry_days * 86400 or (
+            ended >= self._final_wait_from() and not report.get("delivery_started_at")
+            and not report.get("delivery_on_request"))))
         self.generate_report(meeting_id, on_request=not recent)
         return True
 
@@ -727,7 +736,10 @@ class MeetingArchive:
             if capture_directory else self._match_recording(times, str(snapshot.get("started_at") or ""))
         )
         title = self._best_title(snapshot, frames, recording)
-        segments = list(snapshot.get("segments") or [])
+        # A stored "translation" repeating its own source is dropped on read (MEETONTRACK-64).
+        segments = [{key: value for key, value in segment.items() if key != "translation_en"}
+                    if echoes(segment.get("text"), segment.get("translation_en")) else segment
+                    for segment in snapshot.get("segments") or []]
         started = str(snapshot.get("started_at") or (recording or {}).get("started_at") or "")
         ended = str(
             (recording or {}).get("ended_at")
@@ -772,22 +784,31 @@ class MeetingArchive:
                       "final_transcript", "speaker_review", "remote_attendees"):
             if field in snapshot:
                 result[field] = snapshot[field]
-        result["final_wait"] = self._final_wait(snapshot, ended)
+        result["final_wait"] = self._final_wait(snapshot, ended, report_meta)
         annotated = self.annotate_speakers({**result, "segments": segments})
         annotated["fact_checks"] = with_speakers(annotated["fact_checks"], annotated["segments"])  # corrections reach rows
         annotated["transcript"] = annotated.pop("segments")
         return self._library_detail(annotated)
 
-    def _final_wait(self, snapshot: dict, ended: str) -> dict | None:
+    def _final_wait_from(self) -> datetime:
+        """Meetings that ended before this are history the final-transcript warning stays quiet
+        about past the delivery window: those still inside it when MEETONTRACK-118 first ran."""
+        if self._final_wait_since is None:
+            self._final_wait_since = self.delivery_monitor.first_seen("final_wait_since")
+        return self._final_wait_since - timedelta(days=self.delivery_retry_days)
+
+    def _final_wait(self, snapshot: dict, ended: str, report: dict | None = None) -> dict | None:
         """A finished meeting whose report waits for the recorder's final transcript (MEETONTRACK-94).
 
-        Only inside the delivery window: older meetings are never sent on their own.
+        Past the delivery window only while its report never went out (MEETONTRACK-118);
+        history from before that change stays quiet.
         """
         finished = _date(ended)
         if not snapshot or snapshot.get("final_transcript") or snapshot.get("status") != "finished" or not finished:
             return None
         waited = (datetime.now().astimezone() - finished).total_seconds()
-        if waited > self.delivery_retry_days * 86400:
+        if waited > self.delivery_retry_days * 86400 and (
+                finished < self._final_wait_from() or (report or {}).get("delivery_started_at")):
             return None
         return {"state": "missing" if waited >= FINAL_WAIT_ATTENTION_SECONDS else "waiting",
                 "reason": "final_transcript", "minutes": max(0, int(waited // 60))}
@@ -1410,7 +1431,7 @@ class MeetingArchive:
             ended = _date(str(snapshot.get("ended_at") or snapshot.get("updated_at") or "")) if isinstance(snapshot, dict) else None
             if (path.parent.name in listed or not ended or snapshot.get("final_transcript")
                     or snapshot.get("status") != "finished"
-                    or not 0 <= (now - ended).total_seconds() <= self.delivery_retry_days * 86400):
+                    or not self._final_wait_from() <= ended <= now):
                 continue  # Cheap checks first: the full detail reads every index.
             detail = self.detail(path.parent.name)
             wait = (detail or {}).get("final_wait")

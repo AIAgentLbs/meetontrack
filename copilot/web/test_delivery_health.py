@@ -1,6 +1,7 @@
 """Synthetic, offline delivery checks: no real mail, uploads or report data."""
 
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -194,6 +195,21 @@ class DeliveryHealthTests(unittest.TestCase):
         reasons = {issue["reason"] for item in health["channels"].values() for issue in item["issues"]}
         self.assertNotIn("metadata_invalid", reasons)
         self.assertEqual(health["undelivered"], [])  # Email delivered it: nothing to resend.
+
+    def test_an_old_repaired_report_still_offers_send_again(self):
+        # MEETONTRACK-93: the rebuilt status takes the PDF's date, here 10 days old.
+        archive = self._archive()
+        folder = self.reports / "test"
+        (folder / "report.json").write_text("{broken", encoding="utf-8")
+        (folder / "index.html").write_text("<p>report</p>", encoding="utf-8")
+        (folder / "meeting-report.pdf").write_bytes(b"%PDF-test")
+        old = (datetime.now() - timedelta(days=10)).timestamp()
+        os.utime(folder / "meeting-report.pdf", (old, old))
+        archive.check_delivery_health()
+        with patch.object(archive, "detail", return_value={"title": "Weekly sync"}):
+            undelivered = archive.delivery_health()["undelivered"]
+        self.assertEqual([item["meeting_id"] for item in undelivered], ["test"])
+        self.assertTrue(undelivered[0]["uncertain"])
 
     def test_undated_status_without_receipts_offers_send_again(self):
         archive = self._archive()

@@ -527,26 +527,47 @@ class OllamaTests(unittest.TestCase):
         small = {"model_info": {"general.architecture": "a1", "a1.context_length": 4096 + 100}}
         choice = {"provider": "ollama", "model": "local-a", "effort": "", "speed": ""}
         with self.server({"local-a": small, "local-b": {"capabilities": ["completion"]}}) as (adapter, chats):
-            first = adapter.call(choice, "x" * 30, timeout=5, keep_session=True)
+            first = adapter.call(choice, "x" * 30, timeout=5, rules="r" * 10, keep_session=True)
             second = adapter.call(choice, "y" * 30, timeout=5, resume=first.session, keep_session=True)
             adapter.call(choice, "z" * 30, timeout=5, resume=second.session, keep_session=True)
             with self.assertRaises(RuntimeError):
                 adapter.call(choice, "w" * 101, timeout=5)
             with self.assertRaises(RuntimeError):  # the rules plus the prompt cannot fit: rejected, not cut
-                adapter.call(choice, "v" * 80, timeout=5, resume=second.session, keep_session=True)
+                adapter.call(choice, "v" * 95, timeout=5, resume=second.session, keep_session=True)
             with self.assertRaises(AIChoiceError):
                 adapter.call({**choice, "model": "local-b"}, "p", timeout=5)
-        self.assertEqual(chats[0]["options"]["num_ctx"], 30 + 4096)
+        self.assertEqual(chats[0]["options"]["num_ctx"], 40 + 4096)
         # the oldest turn no longer fits: dropped whole; the session rules stay as the system message
         self.assertEqual([(m["role"], m["content"]) for m in chats[2]["messages"]],
-                         [("system", "x" * 30), ("user", "y" * 30), ("assistant", "OK None 3"), ("user", "z" * 30)])
+                         [("system", "r" * 10), ("assistant", "OK None 2"), ("user", "y" * 30),
+                          ("assistant", "OK None 4"), ("user", "z" * 30)])
         self.assertLessEqual(chats[2]["options"]["num_ctx"], 4096 + 100)
         self.assertEqual(len(chats), 3)
+
+    def test_an_old_meeting_snapshot_makes_room_the_rules_stay(self):
+        # MEETONTRACK-50: the first question carries a long transcript; on a small context the
+        # next question must drop that snapshot, not be rejected because it was pinned.
+        small = {"model_info": {"general.architecture": "a1", "a1.context_length": 4096 + 100}}
+        choice = {"provider": "ollama", "model": "local-a", "effort": "", "speed": ""}
+        with self.server({"local-a": small}) as (adapter, chats):
+            first = adapter.call(choice, "s" * 80, timeout=5, rules="RULES", keep_session=True)
+            adapter.call(choice, "q" * 60, timeout=5, resume=first.session, keep_session=True)
+        sent = chats[-1]["messages"]
+        self.assertEqual(sent[0], {"role": "system", "content": "RULES"})
+        self.assertNotIn("s" * 80, [m["content"] for m in sent])
+        self.assertEqual(sent[-1]["content"], "q" * 60)
+
+    def test_context_counts_wide_scripts_by_their_bytes(self):
+        # MEETONTRACK-8: a CJK character may take several tokens; Latin and Cyrillic take one at most.
+        context = OllamaAdapter.REPLY_TOKENS + 100
+        self.assertEqual(OllamaAdapter.fit(None, [], "ж" * 100, context)[1], context)
+        with self.assertRaises(RuntimeError):
+            OllamaAdapter.fit(None, [], "漢" * 40, context)
 
     def test_history_cap_keeps_the_session_rules(self):
         choice = {"provider": "ollama", "model": "local-a", "effort": "", "speed": ""}
         with self.server({"local-a": CTX}) as (adapter, chats), patch.object(OllamaAdapter, "HISTORY", 4):
-            session = adapter.call(choice, "RULES", timeout=5, keep_session=True).session
+            session = adapter.call(choice, "hello", timeout=5, rules="RULES", keep_session=True).session
             for turn in range(5):
                 adapter.call(choice, f"q{turn}", timeout=5, resume=session, keep_session=True)
         sent = chats[-1]["messages"]

@@ -67,6 +67,13 @@ class MeetingLibraryTests(unittest.TestCase):
         self.archive.sync_transcript(changed)
         self.assertNotIn("translation_en", json.loads(path.read_text())["segments"][0])
 
+    def test_a_stored_translation_repeating_its_source_is_not_shown(self):
+        # MEETONTRACK-64: no-op "EN:" lines kept from before the fix are dropped on read.
+        echoed = json.loads(json.dumps(self.snapshot))
+        echoed["segments"][0].update(translation_en="We discussed the lighthouse integration", language="bg")
+        self.archive.sync_transcript(echoed)
+        self.assertNotIn("translation_en", self.archive.detail("example")["transcript"][0])
+
     def test_empty_or_unknown_rename_is_rejected(self):
         for identity, title in [("missing", "Test"), ("example", " "), ("example", "x" * 201)]:
             with self.subTest(identity=identity, title=title):
