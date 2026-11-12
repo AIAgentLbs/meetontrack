@@ -91,9 +91,6 @@ without publishing a GitHub Release; see [README.md](README.md).
 
 ## Tester checklist
 
-[`docs/testing/windows-hardware-checklist.md`](../docs/testing/windows-hardware-checklist.md)
-is the full list. The short version:
-
 1. Install, allow the microphone, look at Setup in light and dark.
 2. Add an AssemblyAI/OpenAI/ElevenLabs key or download Parakeet; pick a summary
    route (Claude Code, Codex, a key, or Ollama).
