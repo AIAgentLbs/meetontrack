@@ -273,6 +273,12 @@ struct AIChoiceTests {
             try LLMBackend.ollamaBody(
                 choice, prompt: String(repeating: "x", count: limit + 1), contextLength: 8192)
         }
+        // MEETONTRACK-8: a CJK character counts by its UTF-8 bytes, Cyrillic as one.
+        #expect(LLMBackend.ollamaTokens("жж漢") == 5)
+        #expect(throws: LLMError.self) {
+            try LLMBackend.ollamaBody(
+                choice, prompt: String(repeating: "漢", count: limit / 3 + 1), contextLength: 8192)
+        }
     }
 
     @Test("Summary chunks shrink to the backend's limit, and stay put without one")

@@ -50,6 +50,32 @@ class LiveTranslationTests(unittest.TestCase):
             })
         self.assertNotIn("translation_en", result["segments"][0])
 
+    def test_a_translation_repeating_its_source_is_not_stored(self):
+        # MEETONTRACK-64: a short Russian phrase misdetected as Bulgarian comes back unchanged.
+        key = ("meeting-1", "system", "t1")
+        with patch.object(LiveTranslation, "_language", return_value=("bg", 1.0)), \
+             patch.object(LiveTranslation, "_translate", return_value="Да, конечно, давайте."):
+            self.translator._work(key, "да конечно давайте")
+        self.assertEqual(self.translator.results[key]["translation_en"], "")
+
+    def test_a_needed_choice_is_announced_and_kept_until_the_ai_answers(self):
+        from ai_providers import AIChoiceError
+        foreign, english = ("meeting-1", "system", "t1"), ("meeting-1", "system", "t2")
+        with patch.object(self.translator.pool, "submit"):
+            self.translator.annotate({"meeting_id": "meeting-1", "segments": []})
+        before = self.translator.revision
+        with patch.object(LiveTranslation, "_language", return_value=("pt", 0.99)), \
+             patch.object(LiveTranslation, "_translate", side_effect=AIChoiceError("needs_choice", "choose")):
+            self.translator._work(foreign, "Esta é uma frase em português.")
+        self.assertGreater(self.translator.revision, before)  # MEETONTRACK-51: cached snapshots refresh
+        with patch.object(LiveTranslation, "_language", return_value=("en", 0.99)):
+            self.translator._work(english, "A complete English sentence.")
+        self.assertEqual(self.translator.error_state, "needs_choice")  # MEETONTRACK-52
+        with patch.object(LiveTranslation, "_language", return_value=("pt", 0.99)), \
+             patch.object(LiveTranslation, "_translate", return_value="In English"):
+            self.translator._work(foreign, "Esta é uma frase em português.")
+        self.assertEqual(self.translator.error_state, "")
+
 
 if __name__ == "__main__":
     unittest.main()

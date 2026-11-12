@@ -208,26 +208,32 @@ struct LLMBackend {
         return length
     }
 
-    /// Prompt characters that fit a context of `contextLength` tokens.
-    /// ponytail: counts one character as at least one token, which holds for
-    /// the Latin and Cyrillic text of a transcript; use a tokenizer if CJK
-    /// transcripts get truncated.
+    /// Prompt tokens that fit a context of `contextLength` tokens.
     static func ollamaInputLimit(contextLength: Int) -> Int {
         max(0, contextLength - ollamaReplyTokens)
+    }
+
+    /// Upper estimate of the tokens in `text` without the model's tokenizer
+    /// (MEETONTRACK-8, same rule as Python `OllamaAdapter.tokens`): a Latin,
+    /// Cyrillic, Greek, Arabic or Hebrew scalar counts as one, any other (CJK,
+    /// emoji) as its UTF-8 bytes, which a byte-level tokenizer never exceeds.
+    static func ollamaTokens(_ text: String) -> Int {
+        text.unicodeScalars.reduce(0) { $0 + ($1.value < 0x800 ? 1 : $1.utf8.count) }
     }
 
     /// The /api/chat body. `num_ctx` is what this prompt needs, never above
     /// what the model reports; a prompt that cannot fit is an error, not a
     /// silent truncation.
     static func ollamaBody(_ choice: AIChoice, prompt: String, contextLength: Int) throws -> [String: Any] {
-        guard prompt.count <= ollamaInputLimit(contextLength: contextLength) else {
+        let tokens = ollamaTokens(prompt)
+        guard tokens <= ollamaInputLimit(contextLength: contextLength) else {
             throw LLMError.tooLong("ollama", choice.model, contextLength)
         }
         var body: [String: Any] = [
             "model": choice.model,
             "messages": [["role": "user", "content": prompt]],
             "stream": false,
-            "options": ["num_ctx": min(contextLength, prompt.count + ollamaReplyTokens)],
+            "options": ["num_ctx": min(contextLength, tokens + ollamaReplyTokens)],
         ]
         switch choice.effort {
         case "": break

@@ -91,9 +91,12 @@ class DeliveryHealth:
                 started and now - started > timedelta(days=self.retry_days))
             # Completed historical reports do not fill the recent summary. An
             # unresolved delivery must not silently disappear when retry ends,
-            # and a send the person asked for is judged too.
+            # and a send the person asked for is judged too. A rebuilt status file
+            # carries the old PDF's date, but whether it went out is unknown: it is
+            # judged until delivered, never skipped as history (MEETONTRACK-93).
             if (expired and path.parent.name not in tracked_meetings and not report.get("last_delivery_request")
-                    and not report.get("report_missing")):  # Only the person can create it again: always offer it.
+                    and not report.get("report_missing")  # Only the person can create it again: always offer it.
+                    and not report.get("state_repaired_at")):
                 continue
             considered += 1
             # Any channel that delivered means the person has this report.
@@ -214,6 +217,16 @@ class DeliveryHealth:
                            "events": events[-50:], "checked_at": now.isoformat(timespec="seconds")})
             self._save(stored)
         return self.snapshot(settings, now=now)
+
+    def first_seen(self, key: str) -> datetime:
+        """When this install first asked for `key`, kept in the state file (stored on first use)."""
+        with self.lock:
+            stored = _read(self.state_file)
+            seen = _date(stored.get(key))
+            if seen is None:
+                seen = datetime.now().astimezone()
+                self._save({**stored, key: seen.isoformat(timespec="seconds")})
+            return seen
 
     def acknowledge(self, through: int) -> None:
         if isinstance(through, bool) or not isinstance(through, int) or through < 0:

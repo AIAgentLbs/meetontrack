@@ -1074,7 +1074,9 @@ async function resendReport(item) {
       && item.channels.some(channel => ["sent", "uploaded"].includes(job.report?.[fields[channel]]));
     auth = item.channels.some(channel => job.report?.[fields[channel]] === "auth_required")
       || deliveryAuthReasons.includes(job.report?.mail_error?.reason);
-    unsure = item.channels.some(channel => job.report?.[fields[channel]] === "unknown");
+    // Still sending at the deadline: it may yet arrive, so never "Could not send" (MEETONTRACK-93).
+    unsure = (job.state === "sending" && job.request_id === request_id)
+      || item.channels.some(channel => job.report?.[fields[channel]] === "unknown");
     blocked = ["meeting_not_finished", "report_not_ready", "final_transcript_missing"].includes(job.error) ? job.error : "";
   } catch (_error) {
     sent = false;

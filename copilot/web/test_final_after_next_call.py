@@ -650,5 +650,47 @@ class FinalOnlyDeliveryTests(unittest.TestCase):
             self.assertEqual(self.sent, [])
 
 
+class LateFinalTranscriptTests(unittest.TestCase):
+    """MEETONTRACK-118: a call that ended 4 days ago, never sent, whose final transcript never came."""
+
+    def __getattr__(self, name):  # The shared call fixture: root, config, archive, finalize, sent.
+        case = self.__dict__.get("case")
+        if case is None:
+            raise AttributeError(name)
+        return getattr(case, name)
+
+    def setUp(self):
+        self.case = FinalTranscriptAfterNextCallTests("test_dropout_in_the_last_minute_is_explained_not_flagged")
+        self.case.setUp(days_ago=4)
+        self.addCleanup(self.case.doCleanups)
+        self.final = json.loads((self.first / "transcript.json").read_text())["segments"]
+        (self.first / "transcript.json").unlink()  # Only live text.
+        self.next_call_ends()
+
+    def watched_since(self, moment: datetime) -> None:
+        path = self.config / "delivery-health.json"
+        stored = json.loads(path.read_text()) if path.exists() else {}
+        path.write_text(json.dumps({**stored, "final_wait_since": iso(moment)}))
+        self.case.archive = MeetingArchive(self.root / "recordings", self.root / "archive", self.root / "reports", self.config)
+
+    def flagged(self) -> bool:
+        return "FIRST-CALL" in [item["meeting_id"] for item in self.archive.delivery_health()["undelivered"]]
+
+    def test_still_flagged_after_the_window_and_a_late_final_sends_it(self):
+        self.watched_since(datetime.now(timezone.utc) - timedelta(days=5))
+        self.finalize()
+        self.assertEqual(self.archive.detail("FIRST-CALL")["final_wait"]["state"], "missing")
+        self.assertTrue(self.flagged())
+        self.write_final(self.final)
+        self.finalize()
+        self.assertEqual(self.sent, ["FIRST-CALL"], "The late final sends it, as the warning promised")
+        self.assertFalse(self.flagged())
+
+    def test_history_from_before_the_change_is_not_flagged(self):
+        self.watched_since(datetime.now(timezone.utc))
+        self.finalize()
+        self.assertIsNone(self.archive.detail("FIRST-CALL")["final_wait"])
+        self.assertFalse(self.flagged())
+
 if __name__ == "__main__":
     unittest.main()

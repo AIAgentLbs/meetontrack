@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import re
 import subprocess
 import threading
 import time
@@ -21,6 +22,13 @@ def helper_path(name: str) -> Path:
 
 
 DETECTOR = helper_path("detect-speech-language")
+
+
+def echoes(text: object, translation: object) -> bool:
+    """A "translation" with the same words as its source adds nothing (MEETONTRACK-64): a short
+    Russian phrase misdetected as bg/kk comes back unchanged."""
+    words = lambda value: re.sub(r"\W+", " ", str(value or "").casefold()).strip()
+    return bool(translation) and words(text) == words(translation)
 
 
 class LiveTranslation:
@@ -69,9 +77,11 @@ class LiveTranslation:
     def _work(self, key: tuple[str, str, str], text: str) -> None:
         try:
             language, confidence = self._language(text)
-            translation = ""
+            translation, asked = "", False
             if language not in {"en", "ru", "und"} and confidence >= 0.72:
-                translation = self._translate(text)
+                translation, asked = self._translate(text), True
+                if echoes(text, translation):
+                    translation = ""
             with self.lock:
                 if self.meeting_id and key[0] != self.meeting_id:
                     return
@@ -80,14 +90,20 @@ class LiveTranslation:
                     "translation_en": translation, "at": time.monotonic(),
                 }
                 self.revision += 1
-                self.error = self.error_state = ""
+                # Only a translation that reached the AI proves a missing choice was made
+                # (MEETONTRACK-52); an English or Russian line must not hide it.
+                if asked or self.error_state not in {"needs_choice", "unavailable"}:
+                    self.error = self.error_state = ""
                 self.retry_after.pop(key, None)
         except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
             with self.lock:
                 if key[0] == self.meeting_id:
                     # A missing or unusable AI choice is shown as such (AI_CHOICE / AI_UNAVAILABLE).
-                    self.error = str(exc) if getattr(exc, "state", "") else type(exc).__name__
-                    self.error_state = getattr(exc, "state", "") or "error"
+                    error = str(exc) if getattr(exc, "state", "") else type(exc).__name__
+                    state = getattr(exc, "state", "") or "error"
+                    if (error, state) != (self.error, self.error_state):
+                        self.revision += 1  # snapshots are cached by revision (MEETONTRACK-51)
+                    self.error, self.error_state = error, state
                     self.retry_after[key] = time.monotonic() + 60
         finally:
             with self.lock:
