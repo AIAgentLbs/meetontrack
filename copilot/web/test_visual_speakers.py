@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from server import MeetingFrames, spoken_name
+from server import MeetingFrames, snap_zoom_speakers, spoken_name
 from speaker_edits import SpeakerEdits
 
 
@@ -114,6 +114,37 @@ class VisualSpeakerTests(unittest.TestCase):
                 {"text": "Video", "x": 0.08, "y": 0.03, "width": 0.05},
             ])
         self.assertEqual(result, ("", ""))
+
+    # MEETONTRACK-91: live call 2026-10-22, the highlighted tile was read garbled.
+    def snapped(self, speaker, other_lines, same_frame_lines=()):
+        items = [{**frame("00:00", speaker), "visual_text": "\n".join([speaker, *same_frame_lines])},
+                 {**frame("01:00", ""), "visual_text": "\n".join(other_lines)}]
+        return snap_zoom_speakers(items)[0]["speaker"]
+
+    def test_garbled_mixed_script_label_snaps_to_full_tile_label(self):
+        self.assertEqual(self.snapped("ат umar&Sol", ["Катя из Kumar&Solo", "Mike Shishkin"]),
+                         "Катя из Kumar&Solo")
+        names = self.annotate(
+            [{**frame("00:00", "ат umar&Sol"), "visual_text": "ат umar&Sol\nMike Shishkin"},
+             {**frame("05:00", "Mike Shishkin"), "visual_text": "Катя из Kumar&Solo\nMike Shishkin"}],
+            [phrase("00:01")])
+        self.assertEqual(names, ["Катя из Kumar&Solo"])
+
+    def test_near_miss_labels_are_not_merged(self):
+        # A whole first name may be a different person than the longer label.
+        self.assertEqual(self.snapped("Anna", ["Anna Smith"]), "Anna")
+        self.assertEqual(self.snapped("Ivan", ["Ivan Petrov"]), "Ivan")
+        # Too little survives to tell who it is.
+        self.assertEqual(self.snapped("Kum", ["Катя из Kumar&Solo"]), "Kum")
+        self.assertEqual(self.snapped("umar", ["Катя из Kumar&Solo"]), "umar")
+        # Two full labels fit: abstain instead of guessing.
+        self.assertEqual(self.snapped("ат umar&Sol", ["Катя из Kumar&Solo", "Натали из Kumar&Solo"]),
+                         "ат umar&Sol")
+        # Both labels on screen together are two tiles, two people.
+        self.assertEqual(self.snapped("Mari Ivan", ["Maria Ivanova"], ["Maria Ivanova"]), "Mari Ivan")
+        self.assertEqual(self.snapped("Mari Ivan", ["Maria Ivanova"]), "Maria Ivanova")
+        # Unrelated text never becomes a name.
+        self.assertEqual(self.snapped("ат umar&Sol", ["Kickoff agenda 2026", "Share Screen"]), "ат umar&Sol")
 
 
 if __name__ == "__main__":
