@@ -33,6 +33,11 @@ jobs:
         with:
           python-version: '3.13'
       - uses: astral-sh/setup-uv@v6
+      - name: Workflow safety and update source checks (MEETONTRACK-110)
+        shell: pwsh
+        run: |
+          uv run --with pyyaml python -m unittest discover -v -s windows/tests -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { throw 'Windows source checks failed' }
       - name: Meeting report PDF with Chrome, then with Edge only (MEETONTRACK-120)
         shell: pwsh
         working-directory: copilot/web
