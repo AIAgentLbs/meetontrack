@@ -410,6 +410,39 @@ struct AIChoiceTests {
         #expect(Summarizer.mergeBatches(["aa", "bb", "cc"], limit: 100) == [["aa", "bb", "cc"]])
     }
 
+    @Test("A CJK transcript is chunked by Ollama tokens, so every request fits (MEETONTRACK-153)")
+    func cjkChunksFitOllamaTokens() async throws {
+        final class Box: @unchecked Sendable {
+            let lock = NSLock()
+            var sizes: [Int] = []
+            func add(_ size: Int) { lock.lock(); sizes.append(size); lock.unlock() }
+        }
+        let box = Box()
+        let budget = 6000
+        var backend = LLMBackend(name: "ollama", model: "m") { system, prompt in
+            box.add(LLMBackend.ollamaTokens("\(system)\n\n\(prompt)"))
+            return LLMReply(text: String(repeating: "注", count: 300), model: "m")
+        }
+        backend.inputLimit = { budget }
+        backend.measure = LLMBackend.ollamaTokens
+        // 4000 characters (under the budget by count), 12000 tokens.
+        let body = Array(repeating: String(repeating: "漢", count: 40), count: 100)
+            .joined(separator: "\n")
+        _ = try await Summarizer.produce(body: body, header: "", language: nil, backend: backend)
+        #expect(box.sizes.count > 1)
+        #expect(box.sizes.allSatisfy { $0 <= budget }, "a request exceeded the budget: \(box.sizes)")
+
+        // The resolved Ollama backend measures in tokens; the CLIs keep characters.
+        let ollama = try ready(LLMBackend.resolve(
+            config: config(["provider": "ollama", "model": "m", "effort": "", "speed": ""]),
+            tool: { _ in nil }))
+        #expect(ollama.measure("漢") == 3)
+        let codex = try ready(LLMBackend.resolve(
+            config: config(["provider": "codex", "model": "m", "effort": "", "speed": ""]),
+            tool: { _ in "/bin/echo" }))
+        #expect(codex.measure("漢") == 1)
+    }
+
     @Test("The newest installed CLI wins, as in the web server; the override comes first")
     func newestCLIWins() throws {
         let dir = try scratch()

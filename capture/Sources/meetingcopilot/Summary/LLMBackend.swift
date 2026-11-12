@@ -20,9 +20,12 @@ struct LLMBackend {
     let model: String
     /// (system prompt, user prompt) → the answer and the model that gave it.
     let call: (String, String) async throws -> LLMReply
-    /// The most prompt characters one call may carry, when the provider has a
+    /// The most prompt units (see `measure`) one call may carry, when the provider has a
     /// limit worth sizing to (Ollama's context window); nil means no such limit.
     var inputLimit: () async throws -> Int? = { nil }
+    /// How `inputLimit` measures a prompt: characters, or Ollama's tokens
+    /// (MEETONTRACK-153), so a CJK transcript is chunked to what really fits.
+    var measure: (String) -> Int = { $0.count }
 
     /// The backend for the person's choice, from their config. Runs the
     /// one-time migration of the old summary settings first.
@@ -382,6 +385,7 @@ struct LLMBackend {
             return LLMReply(text: content, model: json["model"] as? String ?? choice.model)
         }
         backend.inputLimit = { ollamaInputLimit(contextLength: try await contextLength()) }
+        backend.measure = ollamaTokens
         return backend
     }
 

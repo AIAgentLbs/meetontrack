@@ -63,8 +63,17 @@ def email(value, optional=False):
     return value
 
 
+def _test_run():
+    """True in a process that loaded a test framework (MEETONTRACK-152): the suite must never
+    reach the user's keychain, where a locked item stops the run on an access prompt.
+    The app never imports unittest (test_delivery_settings checks the server's import graph)."""
+    return "unittest" in sys.modules or "pytest" in sys.modules
+
+
 class PasswordStore:
     """macOS Keychain or Windows user-bound DPAPI; never plaintext/argv/logs."""
+    _test_memory = {}  # Stands in for the keychain in test runs, one entry per store.
+
     def __init__(self, root, service="com.aiagentlbs.meetontrack.smtp", filename="smtp-password.dpapi"):
         self.path = Path(root) / filename
         self.service = service.encode("utf-8")
@@ -111,6 +120,17 @@ class PasswordStore:
             if item:
                 cf.CFRelease(item)
 
+    def _keychain(self, password=None, delete=False):
+        if not _test_run():
+            return self._mac(password, delete)
+        key = (self.service, str(self.path))
+        if delete:
+            self._test_memory.pop(key, None)
+        elif password is None:
+            return self._test_memory.get(key, "")
+        else:
+            self._test_memory[key] = password
+
     def _windows(self, value, decrypt=False):
         class Blob(ctypes.Structure):
             _fields_ = [("size", ctypes.c_uint32), ("data", ctypes.POINTER(ctypes.c_ubyte))]
@@ -128,14 +148,14 @@ class PasswordStore:
 
     def get(self):
         if sys.platform == "darwin":
-            return self._mac()
+            return self._keychain()
         if os.name == "nt":
             return self._windows(self.path.read_bytes(), True).decode() if self.path.exists() else ""
         raise ValueError("credential_store_unavailable")
 
     def set(self, value):
         if sys.platform == "darwin":
-            self._mac(value)
+            self._keychain(value)
         elif os.name == "nt":
             protected = self._windows(value.encode())
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -152,7 +172,7 @@ class PasswordStore:
 
     def delete(self):
         if sys.platform == "darwin":
-            self._mac(delete=True)
+            self._keychain(delete=True)
         elif os.name == "nt":
             self.path.unlink(missing_ok=True)
         else:

@@ -133,17 +133,18 @@ enum Summarizer {
         backend: LLMBackend
     ) async throws -> LLMReply {
         let system = systemPrompt(language: language)
+        let measure = backend.measure
         let limit = chunkLimit(
             backendLimit: try await backend.inputLimit(),
-            overhead: system.count + header.count + chunkInstructions.count + mergeInstructions.count
-                + summaryInstructions.count + 64)
-        if body.count <= limit {
+            overhead: measure(system + header + chunkInstructions + mergeInstructions
+                + summaryInstructions) + 64)
+        if measure(body) <= limit {
             return try await backend.call(
                 system, "\(header)\n\(summaryInstructions)\n\n---\n\(body)"
             )
         }
 
-        let chunks = split(body, limit: limit)
+        let chunks = split(body, limit: limit, measure: measure)
         var notes: [String] = []
         for (index, chunk) in chunks.enumerated() {
             notes.append(try await backend.call(
@@ -154,8 +155,8 @@ enum Summarizer {
         // Notes that do not fit one merge are combined in batches that do,
         // round after round, until they fit (or no batch can shrink them, and
         // the backend's own "too long" error says so).
-        while notes.joined(separator: noteSeparator).count > limit {
-            let batches = mergeBatches(notes, limit: limit)
+        while measure(notes.joined(separator: noteSeparator)) > limit {
+            let batches = mergeBatches(notes, limit: limit, measure: measure)
             guard batches.count < notes.count else { break }
             var combined: [String] = []
             for batch in batches {
@@ -177,11 +178,13 @@ enum Summarizer {
 
     /// Consecutive notes grouped so each group's text stays within `limit`;
     /// a note longer than that is a group of its own.
-    static func mergeBatches(_ notes: [String], limit: Int) -> [[String]] {
+    static func mergeBatches(
+        _ notes: [String], limit: Int, measure: (String) -> Int = { $0.count }
+    ) -> [[String]] {
         var batches: [[String]] = []
         var current: [String] = []
         for note in notes {
-            let size = (current + [note]).joined(separator: noteSeparator).count
+            let size = measure((current + [note]).joined(separator: noteSeparator))
             if !current.isEmpty && size > limit {
                 batches.append(current)
                 current = []
@@ -201,7 +204,7 @@ enum Summarizer {
             .joined(separator: "\n")
     }
 
-    /// Transcript characters per call: the usual size, or less when the
+    /// Transcript size per call (in the backend's `measure`): the usual size, or less when the
     /// backend's own limit (minus the prompt around the transcript) is smaller.
     static func chunkLimit(backendLimit: Int?, overhead: Int) -> Int {
         // Nothing fits: keep the usual size so the call fails with the
@@ -211,18 +214,19 @@ enum Summarizer {
     }
 
     /// Split on line boundaries so a chunk never ends mid-sentence.
-    private static func split(_ text: String, limit: Int) -> [String] {
+    private static func split(_ text: String, limit: Int, measure: (String) -> Int) -> [String] {
         var chunks: [String] = []
         var current: [String] = []
         var size = 0
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            if size + line.count > limit && !current.isEmpty {
+            let lineSize = measure(String(line))
+            if size + lineSize > limit && !current.isEmpty {
                 chunks.append(current.joined(separator: "\n"))
                 current = []
                 size = 0
             }
             current.append(String(line))
-            size += line.count + 1
+            size += lineSize + 1
         }
         if !current.isEmpty { chunks.append(current.joined(separator: "\n")) }
         return chunks
