@@ -538,7 +538,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
     /// </summary>
     public static void OpenAssistant()
     {
-        const string url = "http://127.0.0.1:43121/";
+        var url = AssistantAddress.Url(RecordedAssistantPort(), AnswersAsAssistant);
         try
         {
             dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
@@ -559,6 +559,31 @@ public sealed class AmanuRuntime : IAsyncDisposable
         {
             Open(url);
         }
+    }
+
+    /// <summary>The port meeting-copilot.ps1 recorded when 43121 was taken (MEETONTRACK-131), if any.</summary>
+    private static string? RecordedAssistantPort()
+    {
+        try
+        {
+            return File.ReadAllText(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".local", "share", "meeting-copilot", "server-port"));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>Whether the service on <paramref name="port"/> is MeetOnTrack's, as /api/health says.</summary>
+    private static bool AnswersAsAssistant(int port)
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
+            using var health = JsonDocument.Parse(client.GetStringAsync($"http://127.0.0.1:{port}/api/health").GetAwaiter().GetResult());
+            return health.RootElement.ValueKind == JsonValueKind.Object
+                && health.RootElement.TryGetProperty("service", out var service)
+                && service.ValueKind == JsonValueKind.String && service.ValueEquals("meeting-copilot");
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException) { return false; }
     }
 
     /// <summary>The default https browser when it can open an app window, null when it can't, Edge when unknown.</summary>

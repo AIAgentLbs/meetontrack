@@ -92,7 +92,6 @@ public sealed class AppSettings
         settings.AutoRecord.Enabled = false;
         settings.Transcription.Engine = "local";
         settings.Summary.Backend = "none";
-        settings.SpeakerNames.Backend = "none";
         settings.LiveTranscription.Enabled = false;
         settings.OnStop = null;
         return settings;
@@ -261,23 +260,15 @@ public sealed class SummarySettings
     public string AnthropicModel => string.IsNullOrWhiteSpace(Model) ? DefaultAnthropicModel : Model;
 }
 
+/// <summary>
+/// Naming asks the same AI as the summary, so there is nothing to choose here
+/// but on or off. An old <c>backend</c> or <c>model</c> key stays in the file
+/// for the web app's migration and is not read.
+/// </summary>
 public sealed class SpeakerNameSettings
 {
-    public static readonly IReadOnlyList<string> Backends =
-        ["summary", "auto", "claude-cli", "anthropic-api", "codex-cli", "openai-api", "ollama", "none"];
-
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
-
-    /// <summary>
-    /// <c>summary</c> sends the transcript wherever summaries go, and nowhere when
-    /// they are off. Anything else is a choice for naming alone; <c>none</c> asks no model.
-    /// </summary>
-    [JsonPropertyName("backend")]
-    public string Backend { get; set; } = "summary";
-
-    [JsonPropertyName("model")]
-    public string? Model { get; set; }
 }
 
 public sealed class CommandHook

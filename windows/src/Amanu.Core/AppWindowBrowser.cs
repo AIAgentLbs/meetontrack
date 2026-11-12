@@ -32,3 +32,22 @@ public static class AppWindowBrowser
         return Known.Contains(name, StringComparer.OrdinalIgnoreCase) ? exe : null;
     }
 }
+
+/// <summary>
+/// Where the assistant's local service answers: 43121 unless another program held that port
+/// when it started (MEETONTRACK-131, as MEETONTRACK-130 on the Mac); then meeting-copilot.ps1
+/// recorded the port it used in <c>server-port</c>.
+/// </summary>
+public static class AssistantAddress
+{
+    public const int DefaultPort = 43121;
+
+    /// <summary>
+    /// The recorded port when it is one and answers as MeetOnTrack, so a stale record never
+    /// opens another program's page; otherwise 43121.
+    /// </summary>
+    public static string Url(string? recorded, Func<int, bool> answersAsAssistant) =>
+        int.TryParse(recorded?.Trim(), out var port) && port is > 0 and < 65536 && port != DefaultPort && answersAsAssistant(port)
+            ? $"http://127.0.0.1:{port}/"
+            : $"http://127.0.0.1:{DefaultPort}/";
+}

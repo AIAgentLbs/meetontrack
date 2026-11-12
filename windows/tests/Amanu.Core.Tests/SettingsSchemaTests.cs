@@ -28,7 +28,6 @@ public sealed class SettingsSchemaTests
         settings.Summary.Template = "t";
         settings.Summary.Model = "m";
         settings.Summary.OpenAiCompatible = true;
-        settings.SpeakerNames.Model = "m";
         settings.UserName = "me";
 
         var described = SettingsSchema.Entries.Select(entry => entry.Path).ToHashSet();
@@ -48,7 +47,6 @@ public sealed class SettingsSchemaTests
         settings.Summary.Template = "t";
         settings.Summary.Model = "m";
         settings.Summary.OpenAiCompatible = true;
-        settings.SpeakerNames.Model = "m";
         settings.UserName = "me";
         var node = SettingsDocument.ToNode(settings);
 

@@ -1,16 +1,16 @@
 using Amanu.Core.Configuration;
+using Amanu.Core.Localization;
 using Amanu.Core.Processing;
 
 namespace Amanu.Core.Tests;
 
 public sealed class EgressTests
 {
-    private static AppSettings Settings(bool summary = true, string backend = "auto", string names = "summary", bool namesOn = true)
+    private static AppSettings Settings(bool summary = true, string backend = "auto", bool namesOn = true)
     {
         var settings = AppSettings.CreateDefault("C:\\Docs");
         settings.Summary.Enabled = summary;
         settings.Summary.Backend = backend;
-        settings.SpeakerNames.Backend = names;
         settings.SpeakerNames.Enabled = namesOn;
         return settings;
     }
@@ -30,11 +30,37 @@ public sealed class EgressTests
     }
 
     [Fact]
-    public void An_explicit_naming_backend_is_a_choice_for_naming_alone()
+    public void Naming_has_no_ai_of_its_own_and_an_old_naming_backend_is_not_read()
     {
-        Assert.Equal("anthropic-api", MeetingEgress.Route(EgressPurpose.SpeakerNames, Settings(summary: false, names: "anthropic-api"))!.Preference);
-        Assert.Null(MeetingEgress.Route(EgressPurpose.SpeakerNames, Settings(names: "none")));
+        using var directory = new TemporaryDirectory();
+        var store = new AppSettingsStore(Path.Combine(directory.Path, "config.json"), directory.Path);
+        File.WriteAllText(store.ConfigPath, """
+            {"summary": {"enabled": false}, "speaker_names": {"backend": "anthropic-api", "model": "x"}}
+            """);
+
+        Assert.Null(MeetingEgress.Route(EgressPurpose.SpeakerNames, store.Load().Settings));
+        Assert.Equal(MeetingEgress.Route(EgressPurpose.Summary, Settings(backend: "codex-cli")),
+            MeetingEgress.Route(EgressPurpose.SpeakerNames, Settings(backend: "codex-cli")));
         Assert.Null(MeetingEgress.Route(EgressPurpose.SpeakerNames, Settings(namesOn: false)));
+        Assert.DoesNotContain(SettingsSchema.Entries, entry => entry.Path is "speaker_names.backend" or "speaker_names.model");
+    }
+
+    [Fact]
+    public void Speakers_read_as_you_and_others()
+    {
+        using (Localized.Use(InterfaceLanguage.English))
+        {
+            Assert.Equal("You", SpeakerLabels.Display("me"));
+            Assert.Equal("Others", SpeakerLabels.Display("them"));
+            Assert.Equal("Others B", SpeakerLabels.Display("them B"));
+            Assert.Equal("You A", SpeakerLabels.Display("me A"));
+            Assert.Equal("Sam", SpeakerLabels.Display("Sam"));
+        }
+        using (Localized.Use(InterfaceLanguage.Russian))
+        {
+            Assert.Equal("Вы", SpeakerLabels.Display("me"));
+            Assert.Equal("Остальные A", SpeakerLabels.Display("them A"));
+        }
     }
 
     [Fact]

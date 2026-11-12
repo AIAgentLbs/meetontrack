@@ -10,7 +10,7 @@ $config=Join-Path $env:USERPROFILE '.config\meeting-copilot'
 $data=Join-Path $env:USERPROFILE '.local\share\meeting-copilot'
 $env:PYTHONUTF8='1'
 $env:PYTHONIOENCODING='utf-8'
-function Stop-OtherVersions([string]$Root,[int]$Port=43121,[switch]$KeepCapture){
+function Stop-OtherVersions([string]$Root,[int[]]$Port=@(43121),[switch]$KeepCapture){
     # MEETONTRACK-65: after an update the previous version's web server keeps the port, so the
     # new version never serves. Stop only the process listening on it, and only when it is our
     # own Python from another versions\<v> folder; other jobs on that Python are left alone.
@@ -42,9 +42,19 @@ function Stop-OtherVersions([string]$Root,[int]$Port=43121,[switch]$KeepCapture)
     Start-Process "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -WindowStyle Hidden -ArgumentList '-NoProfile','-EncodedCommand',([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($waiter)))
 }
 $release=[string](Get-Content (Join-Path $root 'release.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version
-function Test-Ready {
-    try {$h=Invoke-RestMethod 'http://127.0.0.1:43121/api/health' -TimeoutSec 2; return $h.service -eq 'meeting-copilot' -and [string]$h.version -eq $release} catch {return $false}
+function Test-Ready([int]$Port){
+    try {$h=Invoke-RestMethod "http://127.0.0.1:$Port/api/health" -TimeoutSec 2; return $h.service -eq 'meeting-copilot' -and [string]$h.version -eq $release} catch {return $false}
 }
+function Test-PortFree([int]$Port){
+    $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,$Port)
+    try {$listener.Start(); return $true} catch {return $false} finally {$listener.Stop()}
+}
+# MEETONTRACK-131, as on the Mac (MEETONTRACK-130): the port is 43121 unless another program holds it;
+# that program is left alone and the service runs on a free port, recorded in server-port for the tray,
+# the installer and this launcher. A stale record is harmless: only a service answering as this version counts.
+$portFile=Join-Path $data 'server-port'
+$recorded=try{[int](Get-Content -LiteralPath $portFile -Raw -ErrorAction Stop).Trim()}catch{0}
+$ports=@(@(43121,$recorded) | Where-Object {$_ -gt 0 -and $_ -lt 65536} | Select-Object -Unique)
 foreach($file in @($capture,$python,$server,"$config\config.json","$config\SESSION.md")){
     if(-not(Test-Path $file -PathType Leaf)){throw "Missing installation component: $file"}
 }
@@ -73,18 +83,26 @@ if($check){
     Write-Host '[OK] Capture, bundled Python and speech models. AI tool, model and account access are chosen and checked in Getting started.'
     exit 0
 }
-Stop-OtherVersions $root
+Stop-OtherVersions $root -Port $ports
 # Once set up, the recorder starts in the tray: an update or sign-in shows the assistant, not the recorder
 # window too. Before setup it opens its setup window.
 if(-not(Get-Process MeetingCopilotCapture -ErrorAction SilentlyContinue)){
     if(Test-Path "$data\capture-data\setup.json" -PathType Leaf){Start-Process -FilePath $capture -ArgumentList '--background'}else{Start-Process -FilePath $capture}
 }
-$ready=Test-Ready
+$port=$ports | Where-Object {Test-Ready $_} | Select-Object -First 1
+$ready=[bool]$port
 if(-not $ready){
-    Start-Process -FilePath $pythonw -ArgumentList @('-X','utf8',"`"$server`"",'--no-open') -WorkingDirectory $root
-    for($i=0;$i -lt 40 -and -not $ready;$i++){Start-Sleep -Milliseconds 250; $ready=Test-Ready}
+    $port=43121
+    if(-not(Test-PortFree $port)){
+        $free=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0); $free.Start(); $port=$free.LocalEndpoint.Port; $free.Stop()
+        Write-Host "MeetOnTrack: port 43121 is held by another program; using $port"
+    }
+    Start-Process -FilePath $pythonw -ArgumentList @('-X','utf8',"`"$server`"",'--no-open','--port',$port) -WorkingDirectory $root
+    for($i=0;$i -lt 40 -and -not $ready;$i++){Start-Sleep -Milliseconds 250; $ready=Test-Ready $port}
 }
-if(-not $ready){throw "MeetOnTrack $release web service did not start; port 43121 may be used by another program"}
+if(-not $ready){throw "MeetOnTrack $release web service did not start on port $port"}
+try {[IO.File]::WriteAllText("$portFile.tmp","$port`n"); Move-Item -LiteralPath "$portFile.tmp" -Destination $portFile -Force} catch {Write-Host "MeetOnTrack: could not record the port: $_"}
+$url="http://127.0.0.1:$port/"
 # One assistant window, not a new tab per launch: bring an open one forward, else an app window (no tab
 # strip, the page's icon) of the default browser when it is Chromium, so links such as Google sign-in open
 # where the user is signed in; another default browser gets a plain tab, Edge only when the default can't
@@ -119,6 +137,6 @@ public static IntPtr Find(string title) {
     if($window -ne [IntPtr]::Zero){
         if([MeetOnTrack.Win]::IsIconic($window)){[void][MeetOnTrack.Win]::ShowWindow($window,9)}  # activation leaves a minimized window minimized
         [void](New-Object -ComObject WScript.Shell).AppActivate($title)
-    }else{try{$browser=Get-AppBrowser; if(-not $browser){throw 'no app-window browser'}; Start-Process $browser -ArgumentList '--app=http://127.0.0.1:43121/' -ErrorAction Stop}catch{Start-Process 'http://127.0.0.1:43121/'}}
+    }else{try{$browser=Get-AppBrowser; if(-not $browser){throw 'no app-window browser'}; Start-Process $browser -ArgumentList "--app=$url" -ErrorAction Stop}catch{Start-Process $url}}
 }
-Write-Host 'MeetOnTrack: http://127.0.0.1:43121'
+Write-Host "MeetOnTrack: $url"

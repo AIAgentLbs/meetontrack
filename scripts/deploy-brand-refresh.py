@@ -19,8 +19,17 @@ APP = Path('/Applications/Meeting Copilot Capture.app')
 FILES = ('index.html', 'updates.js')
 
 
+def assistant():
+    """The local service: on 43121 unless another program held it (MEETONTRACK-130/131)."""
+    try:
+        port = int((Path.home() / ".local/share/meeting-copilot/server-port").read_text().strip())
+    except (OSError, ValueError):
+        port = 43121
+    return f"http://127.0.0.1:{port}"
+
+
 def state():
-    with urlopen('http://127.0.0.1:43121/api/state', timeout=8) as response:
+    with urlopen(assistant() + '/api/state', timeout=8) as response:
         return json.load(response)
 
 
@@ -29,7 +38,7 @@ def require_idle():
     if (data.get('transcript', {}).get('status') not in ('idle', 'finished') or
             data.get('recording_health', {}).get('capture', {}).get('audio_recording') is not False):
         raise RuntimeError('Recorder active or state unknown; deployment refused')
-    with urlopen('http://127.0.0.1:43121/api/delivery/job', timeout=5) as response:
+    with urlopen(assistant() + '/api/delivery/job', timeout=5) as response:
         if json.load(response).get('job', {}).get('state') not in ('idle', 'complete', 'failed'):
             raise RuntimeError('Delivery busy; deployment refused')
 

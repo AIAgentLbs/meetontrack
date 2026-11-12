@@ -17,12 +17,10 @@ public sealed record EgressRoute(string Preference, string? AnthropicModel);
 /// </summary>
 /// <remarks>
 /// The summary goes where <c>summary.backend</c> says, and nowhere when summaries
-/// are off or the backend is <c>none</c>. Naming follows the summary unless
-/// <c>speaker_names.backend</c> names a backend of its own; with summaries off and
-/// no backend of its own, naming asks no model at all. On macOS naming used to
-/// default to <c>auto</c> whatever the summary said, so a person who picked
-/// Ollama so that nothing left the computer still had every transcript read by a
-/// cloud model. Anything new that wants to show a model a transcript asks here.
+/// are off or the backend is <c>none</c>. Naming always goes with the summary: the
+/// AI is chosen once, and with summaries off naming asks no model at all. An old
+/// <c>speaker_names.backend</c> or <c>speaker_names.model</c> in the file is not
+/// read (MEETONTRACK-83). Anything new that wants to show a model a transcript asks here.
 /// </remarks>
 public static class MeetingEgress
 {
@@ -34,13 +32,7 @@ public static class MeetingEgress
             : null;
         if (purpose == EgressPurpose.Summary) return summaryRoute;
 
-        var names = settings.SpeakerNames;
-        if (!names.Enabled) return null;
-        if (names.Backend != "summary")
-        {
-            return names.Backend == "none" ? null : new EgressRoute(names.Backend, names.Model ?? summary.Model);
-        }
-        return summaryRoute is null ? null : summaryRoute with { AnthropicModel = names.Model ?? summaryRoute.AnthropicModel };
+        return settings.SpeakerNames.Enabled ? summaryRoute : null;
     }
 }
 

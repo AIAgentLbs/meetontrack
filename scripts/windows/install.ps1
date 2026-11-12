@@ -19,7 +19,7 @@ function Test-OwnRunValue([string]$Value,[string]$VersionsRoot){
     # versioned path, which outlives updates and races the Startup shortcut that owns sign-in.
     return $Value -match '^\s*"([^"]+)"' -and $Matches[1].StartsWith($VersionsRoot.TrimEnd('\')+'\','OrdinalIgnoreCase')
 }
-function Stop-OtherVersions([string]$Root,[int]$Port=43121,[switch]$KeepCapture){
+function Stop-OtherVersions([string]$Root,[int[]]$Port=@(43121),[switch]$KeepCapture){
     # MEETONTRACK-65: after an update the previous version's web server keeps the port, so the
     # new version never serves. Stop only the process listening on it, and only when it is our
     # own Python from another versions\<v> folder; other jobs on that Python are left alone.
@@ -115,7 +115,7 @@ try {
     Copy-Item "$temporary\payload\*" $destination -Recurse -Force
     $script:copilotDownloadPython=Join-Path $destination 'python\python.exe'
     if(-not(Test-Path "$configRoot\config.json")){
-        $settings=@{recordings_dir=(Join-Path $dataRoot 'recordings'); keep_audio=$true; system_audio='all'; interface_language='auto'; auto_record=@{enabled=$true;min_duration_seconds=300}; transcription=@{enabled=$true;engine='local';local_engine='parakeet'}; live_transcription=@{enabled=$true}; summary=@{enabled=$false;backend='none'}; speaker_names=@{backend='none'}}
+        $settings=@{recordings_dir=(Join-Path $dataRoot 'recordings'); keep_audio=$true; system_audio='all'; interface_language='auto'; auto_record=@{enabled=$true;min_duration_seconds=300}; transcription=@{enabled=$true;engine='local';local_engine='parakeet'}; live_transcription=@{enabled=$true}; summary=@{enabled=$false;backend='none'}}
         [IO.File]::WriteAllText("$configRoot\config.json",($settings|ConvertTo-Json -Depth 8),$utf8)
     }
     if(Test-Path "$configRoot\SESSION.md"){

@@ -19,8 +19,17 @@ FILES = ("archive.py", "delivery_retry.py", "delivery_settings.py", "telegram_de
          "index.html", "delivery.js", "app.js")
 
 
+def assistant():
+    """The local service: on 43121 unless another program held it (MEETONTRACK-130/131)."""
+    try:
+        port = int((Path.home() / ".local/share/meeting-copilot/server-port").read_text().strip())
+    except (OSError, ValueError):
+        port = 43121
+    return f"http://127.0.0.1:{port}"
+
+
 def state():
-    with urlopen("http://127.0.0.1:43121/api/state", timeout=5) as response:
+    with urlopen(assistant() + "/api/state", timeout=5) as response:
         return json.load(response)
 
 
@@ -32,7 +41,7 @@ def idle(snapshot):
 def ready():
     if not idle(state()):
         return False
-    with urlopen("http://127.0.0.1:43121/api/delivery/job", timeout=5) as response:
+    with urlopen(assistant() + "/api/delivery/job", timeout=5) as response:
         return json.load(response).get("job", {}).get("state") in {"idle", "complete", "failed"}
 
 

@@ -37,15 +37,22 @@ public static class SpeakerLabels
         }).ToArray();
     }
 
-    /// <summary>How a label reads in the window: "me" and "them" in the interface language.</summary>
+    /// <summary>
+    /// How a label reads in the window: the microphone is "You", the call is
+    /// "Others", in the interface language, as on the Mac. The file keeps "me"
+    /// and "them"; the letter after either stays, since it tells voices apart.
+    /// </summary>
     public static string Display(string label) => label switch
     {
-        Me => Localization.Localized.T("me", "я"),
-        Them => Localization.Localized.T("them", "они"),
-        _ when label.StartsWith("them ", StringComparison.Ordinal) => Localization.Localized.T("them", "они") + label[4..],
-        _ when label.StartsWith("me ", StringComparison.Ordinal) => Localization.Localized.T("me", "я") + label[2..],
+        Me => You,
+        Them => Others,
+        _ when label.StartsWith("them ", StringComparison.Ordinal) => Others + label[4..],
+        _ when label.StartsWith("me ", StringComparison.Ordinal) => You + label[2..],
         _ => label,
     };
+
+    private static string You => Localization.Localized.T("You", "Вы");
+    private static string Others => Localization.Localized.T("Others", "Остальные");
 
     private static bool TrySplit(string? label, out string side, out string voice)
     {
