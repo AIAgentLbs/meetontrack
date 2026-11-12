@@ -343,6 +343,41 @@ class BlockerBannerTests(unittest.TestCase):
         self.assertTrue(result["disabled"])
 
 
+PRICING_PROBE = r"""
+const fs = require("fs");
+const source = fs.readFileSync(process.argv[2], "utf8");
+const body = source.slice(source.indexOf("  function pricingLink("), source.indexOf("  function choiceBox("));
+const node = (tag, text) => ({tag, textContent: text || "", children: [], append(...items) { this.children.push(...items); }});
+const pricingLink = new Function("node", "word", `${body}; return pricingLink;`)(node, english => english);
+const engines = JSON.parse(fs.readFileSync(process.argv[3], "utf8")).engines;
+console.log(JSON.stringify(engines.map(engine => {
+  const line = pricingLink(engine), link = line && line.children[0];
+  return link && {href: link.href, target: link.target, rel: link.rel, text: link.textContent};
+})));
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class PricingLinkTests(STTTestCase):
+    def test_cloud_engines_link_to_the_provider_pricing_page_and_show_no_prices(self):
+        engines = self.service().options()["engines"]
+        self.assertEqual([engine["pricing_url"] for engine in engines[:3]],
+                         ["", "https://www.assemblyai.com/pricing", "https://developers.openai.com/api/docs/pricing"])
+        with tempfile.TemporaryDirectory() as folder:
+            probe = Path(folder) / "probe.js"
+            probe.write_text(PRICING_PROBE, encoding="utf-8")
+            run = subprocess.run(["node", str(probe), str(WEB / "speech.js"), str(WEB / "fixture_stt_options.json")],
+                                 capture_output=True, text=True, timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        links = json.loads(run.stdout)
+        self.assertIsNone(links[0])  # local engine: nothing to pay
+        for link, engine in zip(links[1:3], engines[1:3]):
+            self.assertEqual(link, {"href": engine["pricing_url"], "target": "_blank", "rel": "noopener noreferrer",
+                                    "text": "Provider pricing"})
+        self.assertIsNone(links[3])  # only https links, never javascript:
+        self.assertIsNone(re.search(r"[$€£]\s?\d", (WEB / "speech.js").read_text(encoding="utf-8")))
+
+
 class VocabularyParityTests(unittest.TestCase):
     def test_constants_match_shared_vocabulary(self):
         self.assertEqual(stt.OPTIONS_CONTRACT, VOCABULARY["options_contract"])

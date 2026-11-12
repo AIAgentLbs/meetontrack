@@ -21,6 +21,7 @@
       "needs_key": false,
       "has_key": null,
       "model_entry": "list",
+      "pricing_url": "",
       "listing": {
         "source": "fixture",
         "error": ""
@@ -166,6 +167,7 @@
       "needs_key": true,
       "has_key": true,
       "model_entry": "free_text",
+      "pricing_url": "https://www.assemblyai.com/pricing",
       "listing": {
         "source": "none",
         "error": "AssemblyAI publishes no model list endpoint; type the model id and press Check"
@@ -204,6 +206,7 @@
       "needs_key": true,
       "has_key": true,
       "model_entry": "list",
+      "pricing_url": "https://developers.openai.com/api/docs/pricing",
       "listing": {
         "source": "GET https://api.openai.com/v1/models",
         "error": ""
@@ -274,6 +277,7 @@
       "needs_key": true,
       "has_key": false,
       "model_entry": "list",
+      "pricing_url": "javascript:alert(1)",
       "listing": {
         "source": "fixture",
         "error": "no API key"

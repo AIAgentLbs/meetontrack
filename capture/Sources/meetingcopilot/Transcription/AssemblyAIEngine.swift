@@ -59,6 +59,8 @@ actor AssemblyAIEngine: TranscriptionEngine {
     }
 
     private static let base = URL(string: "https://api.assemblyai.com/v2")!
+    /// The provider's own pricing page; the app shows no prices itself.
+    static let pricingURL = "https://www.assemblyai.com/pricing"
     private static let pollInterval: TimeInterval = 10
     private static let pollTimeout: TimeInterval = 3 * 3600
 

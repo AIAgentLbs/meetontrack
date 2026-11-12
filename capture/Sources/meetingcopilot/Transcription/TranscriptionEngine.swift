@@ -97,8 +97,14 @@ enum MultichannelSpeakerLabels {
 /// — a session with no transcript is picked up again at every launch, so a
 /// permanent failure retried forever means uploading the same recording to a
 /// paid API on every restart, which is what meetingcopilot did until 2026.08.17.
-protocol TranscriptionFailure: Error {
+protocol TranscriptionFailure: LocalizedError {
     var isPermanent: Bool { get }
+}
+
+/// `localizedDescription` ignores `description`, so without this a status line
+/// read "(STTRuntime.Failure error 1.)" instead of the reason (MEETONTRACK-151).
+extension TranscriptionFailure where Self: CustomStringConvertible {
+    var errorDescription: String? { description }
 }
 
 /// A speech-to-text engine meetingcopilot can run. Engines are prepared lazily (model
