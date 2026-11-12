@@ -145,5 +145,26 @@ class DeliverySettingsTests(unittest.TestCase):
         client.send_message.assert_not_called()
 
 
+class TestKeychainTests(unittest.TestCase):
+    def test_the_suite_never_reaches_the_real_keychain(self):  # MEETONTRACK-152
+        import subprocess, sys
+        import delivery_settings
+        from delivery_settings import PasswordStore
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(PasswordStore, "_mac", side_effect=AssertionError("real keychain")), \
+                patch.object(delivery_settings.sys, "platform", "darwin"):
+            store = PasswordStore(Path(tmp), "test.service", "x.dpapi")
+            self.assertEqual(store.get(), "")
+            store.set("secret")
+            self.assertEqual(store.get(), "secret")
+            self.assertEqual(PasswordStore(Path(tmp), "other.service", "y.dpapi").get(), "")
+            store.delete()
+            self.assertEqual(store.get(), "")
+        # The app itself, not started by a test runner, still uses the keychain.
+        probe = subprocess.run([sys.executable, "-c", "import server, delivery_settings; print(delivery_settings._test_run())"],
+                               cwd=Path(__file__).parent, capture_output=True, text=True, timeout=30)
+        self.assertEqual(probe.stdout.strip(), "False", probe.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
