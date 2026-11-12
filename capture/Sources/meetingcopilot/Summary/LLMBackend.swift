@@ -14,7 +14,7 @@ import Foundation
 /// request body, and no tools: CLIs run in a fresh empty folder with their
 /// tools, shell, MCP and web search turned off.
 struct LLMBackend {
-    /// The provider adapter: `codex`, `claude` or `ollama`.
+    /// The provider adapter: `codex`, `claude`, `antigravity` or `ollama`.
     let name: String
     /// The model id that was asked for.
     let model: String
@@ -51,6 +51,13 @@ struct LLMBackend {
                     return .unavailable("claude offers no speed tier \(choice.speed)")
                 }
                 return .ready(claude(path: path, choice: choice))
+            case "antigravity":
+                guard let path = tool("agy") else { return .unavailable("the agy CLI is not installed") }
+                // `agy models` reports no speed tiers (same rule as Python choice_problem).
+                guard choice.speed.isEmpty else {
+                    return .unavailable("antigravity offers no speed tier \(choice.speed)")
+                }
+                return .ready(antigravity(path: path, choice: choice, environment: environment))
             default:
                 return .ready(ollama(choice: choice, url: ollamaChatURL(environment: environment)))
             }
@@ -180,6 +187,94 @@ struct LLMBackend {
                     timeout: 1800,
                     currentDirectory: workdir)
                 return try claudeReply(Data(stdout.utf8), requested: choice.model)
+            }
+        }
+    }
+
+    // MARK: - Antigravity
+
+    /// The saved sign-in, relative to a home folder (Python AntigravityAdapter.TOKEN).
+    static let antigravityToken = ".gemini/antigravity-cli/antigravity-oauth-token"
+
+    /// The settings agy reads in the app-owned home: headless, every tool it
+    /// would have to ask for (files, writes) is denied; shell commands and web
+    /// pages are denied outright. Python `_prepare` without `web`.
+    static let antigravitySettings =
+        #"{"toolPermission": "strict", "permissions": {"deny": ["command(*)", "read_url(*)"]}}"#
+
+    /// Python AntigravityAdapter.call's argv: the effort is part of the model
+    /// id as `agy models` lists it; the prompt goes on stdin.
+    static func antigravityArguments(_ choice: AIChoice) -> [String] {
+        let model = choice.effort.isEmpty ? choice.model : "\(choice.model)-\(choice.effort)"
+        return ["--sandbox", "--disable-slash-commands", "--model", model,
+                "--input-format", "stream-json", "--output-format", "stream-json", "-p", ""]
+    }
+
+    /// One stream-json user event on stdin: no argv length limit.
+    static func antigravityInput(_ prompt: String) throws -> String {
+        let event: [String: Any] = ["event": "user", "message": ["content": prompt]]
+        return String(decoding: try JSONSerialization.data(withJSONObject: event), as: UTF8.self) + "\n"
+    }
+
+    /// The person's environment with HOME moved to the app-owned home and
+    /// none of their agy/Gemini overrides (accounts, API keys, endpoints).
+    static func antigravityEnvironment(_ environment: [String: String], home: String) -> [String: String] {
+        var env = environment.filter { key, _ in
+            !["ANTIGRAVITY_", "AGY_", "GEMINI_", "GOOGLE_GEMINI_"].contains { key.uppercased().hasPrefix($0) }
+        }
+        env["HOME"] = home
+        return env
+    }
+
+    /// The answer from the last `result` event, read as Python reads it.
+    static func antigravityReply(_ result: Subprocess.Output, model: String) throws -> LLMReply {
+        let final = jsonLines(result.stdout).reversed()
+            .first { $0["event"] as? String == "result" && $0["result"] is [String: Any] }?["result"]
+            as? [String: Any] ?? [:]
+        let text = (final["response"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let denied = Set((final["denied_actions"] as? [[String: Any]] ?? []).compactMap { $0["action"] as? String })
+        if text.isEmpty, !denied.isEmpty {
+            throw LLMError.exit(Int(result.status), "Antigravity tried a blocked action ("
+                + denied.sorted().joined(separator: ", ") + ") instead of answering. MeetOnTrack lets it "
+                + "only answer in text. Retry or choose another model.")
+        }
+        guard result.status == 0, final["status"] as? String == "SUCCESS", !text.isEmpty else {
+            let error = final["error"] as? String ?? ""
+            throw LLMError.exit(Int(result.status), !error.isEmpty ? error
+                : String(decoding: result.stderr.prefix(600), as: UTF8.self)
+                    + String(decoding: result.stdout.suffix(600), as: UTF8.self))
+        }
+        return LLMReply(text: text, model: model)
+    }
+
+    /// Each call gets a fresh app-owned home (strict settings plus a link to
+    /// the person's sign-in; never their own ~/.gemini, which may say
+    /// always-proceed) and a fresh empty working folder. Both are removed
+    /// afterwards: agy keeps conversations and history and has no ephemeral
+    /// mode, so nothing of the meeting stays, and no two calls share a home.
+    private static func antigravity(path: String, choice: AIChoice, environment: [String: String]) -> LLMBackend {
+        LLMBackend(name: "antigravity", model: choice.model) { system, prompt in
+            let person = environment["HOME"].flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory()
+            let token = URL(fileURLWithPath: person).appendingPathComponent(antigravityToken)
+            guard FileManager.default.fileExists(atPath: token.path) else {
+                // agy without a sign-in starts one and waits; ask the person instead
+                throw LLMError.exit(0, "Antigravity login required: no saved sign-in")
+            }
+            return try await inEmptyFolder { home in
+                let folder = home.appendingPathComponent(".gemini/antigravity-cli", isDirectory: true)
+                try FileManager.default.createDirectory(
+                    at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                try Data(antigravitySettings.utf8).write(to: folder.appendingPathComponent("settings.json"))
+                try FileManager.default.createSymbolicLink(
+                    at: folder.appendingPathComponent(token.lastPathComponent), withDestinationURL: token)
+                return try await inEmptyFolder { workdir in
+                    let result = try await Subprocess.run(
+                        executable: path, arguments: antigravityArguments(choice),
+                        input: Data(try antigravityInput("\(system)\n\n\(prompt)").utf8),
+                        timeout: 1800, currentDirectory: workdir,
+                        environment: antigravityEnvironment(environment, home: home.path))
+                    return try antigravityReply(result, model: choice.model)
+                }
             }
         }
     }

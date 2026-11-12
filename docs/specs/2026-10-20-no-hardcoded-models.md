@@ -203,9 +203,12 @@ Options are read from the exact binary or service the app will call.
   image through `--image`; Claude reads a copy in a fresh folder that holds only
   that copy. The session rules (`SESSION.md`) travel inside the prompt, so no
   call needs `~/.config`.
-- Antigravity: listed with its models but unavailable for every purpose
-  ("cannot enforce read-only/no-tools: permission_mode always-proceed") until agy
-  can enforce it.
+- Antigravity: runs with HOME set to an app-owned folder whose settings say
+  `toolPermission: strict` and deny `command(*)` (and `read_url(*)` unless the
+  call asks for the web), `--sandbox --disable-slash-commands`, the prompt as a
+  stream-json event on stdin; no repositories or screenshots. The Mac recorder
+  (Summary/LLMBackend.swift) runs it the same way for summaries and speaker
+  names, with a fresh home per call (MEETONTRACK-106).
 - Translation and screenshots surface `needs_choice` / `unavailable` with the
   reason (`AIChoiceError`); a screenshot is not taken without a usable choice,
   so nothing is discarded as irrelevant for a missing setting.
