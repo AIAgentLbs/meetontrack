@@ -20,7 +20,7 @@
     unavailable: ["engine or model unavailable", "движок или модель недоступны"],
     network: ["no network", "нет сети"]
   };
-  let options = null, state = {}, draft = null, message = "", polling = 0, loading = false, lastCheck = null;
+  let options = null, state = {}, draft = null, message = "", polling = 0, loading = false, lastCheck = null, typedKey = "";
   const node = (tag, text) => {const item = document.createElement(tag); if (text) item.textContent = text; return item;};
   async function api(path, data) {
     const response = await fetch(path, data === undefined ? {cache: "no-store"} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(data)});
@@ -134,12 +134,14 @@
       selectable(engineOf(draft.engine) || {}) ? draft.engine : "", value => choose({engine: value, model: "", language: ""})));
     const engine = engineOf(draft.engine);
     if (!engine || !selectable(engine)) return box;
-    if (engine.needs_key && engine.has_key !== true) {
-      let key = "";
-      box.append(field(word("API key", "Ключ API"), "", value => {key = value;}, "password"));
+    // A stored key the provider rejects (HTTP 401/403 on the listing) stays replaceable.
+    const rejected = /\bHTTP 40[13]\b/.test(engine.listing?.error || "");
+    if (engine.needs_key && (engine.has_key !== true || rejected)) {
+      // Kept outside the form: a redraw (a choice, a finished download) does not drop a key being typed.
+      box.append(field(word("API key", "Ключ API"), typedKey, value => {typedKey = value;}, "password"));
       const save = node("button", word("Save key", "Сохранить ключ")); save.type = "button"; save.className = "quiet-button";
       save.addEventListener("click", async () => {
-        try {await api("/api/stt/key", {engine: engine.id, key}); message = ""; await load(true);}
+        try {await api("/api/stt/key", {engine: engine.id, key: typedKey}); typedKey = ""; message = ""; await load(true);}
         catch (error) {message = plainError(error); render();}
       });
       box.append(save);
@@ -162,7 +164,7 @@
     if (facts.live_reason) box.append(node("p", facts.live_reason));
     if (engine.kind === "local" && facts.downloaded === false) {
       box.append(downloadButton(facts, draft.model));
-      const line = progress(job(draft.model)); if (line) box.append(node("p", line));
+      const line = node("p", progress(job(draft.model))); line.className = "speech-progress"; box.append(line);
     }
     if (!implied(facts)) {
       if (facts.language_entry === "free_text") {
@@ -206,10 +208,13 @@
     if (run) li.append(node("span", " " + (run.state === "running" ? word("Transcribing…", "Расшифровка…") : run.state === "done" ? word("Done.", "Готово.") : word("Failed: ", "Ошибка: ") + (run.stderr || run.exit_code))));
     return li;
   }
-  function render() {
+  // form = false (polling): the mounted form stays, so focus and a key being typed survive; only progress changes.
+  function render(form = true) {
     for (const [id, texts] of Object.entries(labels)) $(id).textContent = texts[en() ? 0 : 1];
     $("speech-status").textContent = statusText();
-    if (draft) $("speech-choice").replaceChildren(choiceBox());
+    const line = $("speech-choice").querySelector(".speech-progress");
+    if (draft && form !== false) $("speech-choice").replaceChildren(choiceBox());
+    else if (draft && line) line.textContent = progress(job(draft.model));
     $("speech-message").textContent = [message, checkText()].filter(Boolean).join(" ");
     const deferred = state.deferred || [];
     $("speech-deferred-heading").hidden = !deferred.length;
@@ -220,7 +225,7 @@
       const reply = await api("/api/stt");  // status nested under "choice", like /api/ai
       state = {...reply.choice, downloads: reply.downloads, retranscribe: reply.retranscribe, check: reply.check};
     } catch (error) {message = plainError(error);}
-    render();
+    render(false);
   }
   async function load(refresh = false, resetDraft = false) {
     loading = true; render();

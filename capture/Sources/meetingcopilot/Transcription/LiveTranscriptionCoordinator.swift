@@ -47,6 +47,9 @@ actor LiveTranscriptionCoordinator {
     }
 
     private let resolve: @Sendable () -> STTResolution
+    private let liveReason: @Sendable (STTChoice) -> String?
+    /// The choice the running (or failed) pipeline was started with; nil while unavailable.
+    private var pipelineChoice: STTChoice?
     private var transcript = LiveTranscriptState()
     private var status: Status = .idle
     private var isRecording = false
@@ -84,8 +87,12 @@ actor LiveTranscriptionCoordinator {
     private var recoveryExhausted = false
     private let inputTimes = OSAllocatedUnfairLock(initialState: [Source: Date]())
 
-    init(resolve: @escaping @Sendable () -> STTResolution = { Config.speechRecognition() }) {
+    init(
+        resolve: @escaping @Sendable () -> STTResolution = { Config.speechRecognition() },
+        liveReason: @escaping @Sendable (STTChoice) -> String? = { LiveModels.unavailableReason($0) }
+    ) {
         self.resolve = resolve
+        self.liveReason = liveReason
     }
 
     var snapshot: Snapshot {
@@ -175,6 +182,7 @@ actor LiveTranscriptionCoordinator {
         pipelineStartedAt = Date()
         inputTimes.withLock { $0.removeAll() }
         let (resolved, reason) = liveChoice()
+        pipelineChoice = resolved
         guard let choice = resolved else {
             status = .unavailable(reason)
             publish()
@@ -218,7 +226,7 @@ actor LiveTranscriptionCoordinator {
     private func liveChoice() -> (STTChoice?, String) {
         switch resolve() {
         case .ready(let ready):
-            if let reason = LiveModels.unavailableReason(ready) { return (nil, reason) }
+            if let reason = liveReason(ready) { return (nil, reason) }
             return (ready, "")
         case .needsChoice(let reason), .unavailable(let reason):
             return (nil, reason)
@@ -525,18 +533,21 @@ actor LiveTranscriptionCoordinator {
 
     func checkHealth() {
         guard isRecording, transcript.isEnabled else { return }
-        // The choice is read when recording starts. While it cannot run live,
-        // every tick reads it again, so a model saved or adopted mid-call starts
-        // live text within seconds without restarting the recording (MEETONTRACK-76).
-        if case .unavailable = status {
-            let (choice, reason) = liveChoice()
-            if choice == nil {
-                status = .unavailable(reason)
-            } else {
+        // Every tick reads the choice again, so a model saved, adopted, switched
+        // or removed mid-call restarts live text within seconds on what is
+        // chosen now, without restarting the recording (MEETONTRACK-76).
+        let (choice, reason) = liveChoice()
+        if choice != pipelineChoice || choice == nil {
+            if choice != pipelineChoice {
+                stopPipeline(releaseSharedModels: true)
+                recoveryPolicy = RecognitionRecoveryPolicy()
+                recoveryExhausted = false
                 transcript.setEnabled(false)
                 let epoch = transcript.setEnabled(true)
                 status = .loading
                 startPipeline(epoch: epoch)
+            } else {
+                status = .unavailable(reason)
             }
             publish()
             return
