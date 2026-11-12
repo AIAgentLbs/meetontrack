@@ -5,6 +5,7 @@ code must learn them from discovery.
 """
 import json
 import os
+import shlex
 import stat
 import subprocess
 import sys
@@ -109,7 +110,10 @@ def fake_cli(directory, name, source, **values):
     path = Path(directory) / name
     for key, value in values.items():
         source = source.replace(key, value)
-    path.write_text(f"#!{PY}\n" + source)
+    # A shebang cannot hold the packaged interpreter's path ("Meeting Copilot Capture.app" has
+    # spaces), so a sh launcher runs the source with it (MEETONTRACK-115).
+    path.with_suffix(".py").write_text(source)
+    path.write_text(f'#!/bin/sh\nexec {shlex.quote(PY)} {shlex.quote(str(path.with_suffix(".py")))} "$@"\n')
     path.chmod(0o755)
     return path
 
@@ -697,6 +701,8 @@ class SettingsStoreTests(unittest.TestCase):
         self.assertEqual({k: v for k, v in saved.items() if k != "ai"}, {k: v for k, v in fixture.items() if k != "ai"})
         self.assertEqual(saved["ai"]["choice"], M2)
         self.assertEqual(saved["ai"]["purposes"], fixture["ai"]["purposes"])  # not ours any more, kept untouched
+        if WEB.parent.name == "payload":  # the app ships web/ without the repository docs
+            self.skipTest("docs/config.schema.json is checked in the repository, not in the package")
         schema = json.loads((WEB.parents[1] / "docs/config.schema.json").read_text())
         keys = set(schema["$defs"]["choice"]["properties"])
         self.assertEqual(keys, set(ai_providers.CHOICE_KEYS))

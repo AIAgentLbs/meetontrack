@@ -71,6 +71,11 @@ def main():
         for helper in ('zoom-window-finder', 'zoom-frame-inspector', 'detect-speech-language'):
             subprocess.run(['codesign', '--verify', '--strict', str(payload / 'bin' / helper)], check=True)
         subprocess.run([str(runtime), '-I', '-B', '-c', 'import numpy, PIL.Image'], check=True)
+        # Provider tests under the packaged interpreter, the only one the service uses (MEETONTRACK-115).
+        (fixture.root / 'test-home').mkdir()
+        subprocess.run([str(runtime), '-B', '-m', 'unittest', 'test_ai_providers'], cwd=payload / 'web', check=True,
+                       env={'HOME': str(fixture.root / 'test-home'), 'PATH': '/usr/bin:/bin',
+                            'PYTHONDONTWRITEBYTECODE': '1'})
         served = smoke_server(runtime, payload / 'web', fixture.root / 'server-home', manifest['version'], config)
         subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)  # nothing written into it
         recording = share / 'recordings' / 'synthetic-keep.txt'
