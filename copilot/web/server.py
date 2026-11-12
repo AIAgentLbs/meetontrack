@@ -281,6 +281,25 @@ def session_rules(path: Path = SESSION_FILE, limit: int = 20000) -> str:
         return "- нет"
 
 
+def untrusted_git(repo) -> tuple[list[str], dict]:
+    """argv prefix and env for git in a repository whose .git/config is not ours (MEETONTRACK-129).
+
+    Its fsmonitor, hooks, external diff and every filter/diff/merge driver command it defines are
+    blanked on the command line, which wins over repository config, so reading status runs none of
+    them. Same rule in copilot/config/refresh-repos.py and scripts/windows/refresh-repos.py."""
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
+    base = ["git", "-C", str(repo), "--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+            "-c", "diff.external="]
+    try:  # reading config runs nothing; --includes follows include.path as git itself would
+        keys = subprocess.run([*base, "config", "--local", "--includes", "--name-only", "--get-regexp",
+                               r"^(filter|diff|merge)\..+\.(clean|smudge|process|command|textconv|driver)$"],
+                              capture_output=True, text=True, timeout=5, check=False,
+                              stdin=subprocess.DEVNULL, env=env).stdout.split()
+    except (OSError, subprocess.TimeoutExpired):
+        return [], env  # drivers unknown: run no git there at all
+    return base + [arg for key in dict.fromkeys(keys) for arg in ("-c", f"{key}=")], env
+
+
 def git_metadata(roots, limit: int = 4000) -> str:
     """HEAD, branch/status and diff stat of each selected repository, read by the app itself.
 
@@ -288,10 +307,14 @@ def git_metadata(roots, limit: int = 4000) -> str:
     no ~/.gitconfig), so provenance comes from here instead of widening that sandbox."""
     blocks = []
     for root in roots:
+        base, env = untrusted_git(root)
+
         def git(*args):
+            if not base:
+                return "(git unavailable: repository config unreadable)"
             try:
-                run = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
-                                     timeout=5, check=False, stdin=subprocess.DEVNULL)
+                run = subprocess.run([*base, *args], capture_output=True, text=True,
+                                     timeout=5, check=False, stdin=subprocess.DEVNULL, env=env)
             except (OSError, subprocess.TimeoutExpired) as error:
                 return f"(git unavailable: {error})"
             return (run.stdout if run.returncode == 0 else f"(git failed: {run.stderr.strip()[:200]})").strip()[:limit]
