@@ -1,5 +1,5 @@
 // Real browser against actual UI files, synthetic API only; never a live call.
-const { chromium } = require('playwright');
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');  // as the other release UI scripts
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -16,7 +16,7 @@ const assert = require('assert/strict');
   });
   const server = http.createServer((req, res) => {
     if (req.url === '/api/state') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify(state())); }
-    if (req.url === '/api/archive') return res.end(JSON.stringify({ok:true,meetings:[{meeting_id:'second',title:'Second',started_at:new Date().toISOString(),transcript_count:1,journal_count:0,frame_count:0}]}));
+    if (req.url.split('?')[0] === '/api/archive') return res.end(JSON.stringify({ok:true,meetings:[{meeting_id:'second',title:'Second',started_at:new Date().toISOString(),transcript_count:1,journal_count:0,frame_count:0}]}));
     if (req.url === '/api/archive/second') return res.end(JSON.stringify({ok:true,meeting:{meeting_id:'second',title:'Second',started_at:new Date().toISOString(),duration_seconds:300,explicit_boundary:true,audio_range:{start_seconds:300,end_seconds:600},transcript:state().transcript.segments,journal:[],frames:[],meeting_chat:[]}}));
     if (req.url === '/api/meeting/new') {
       let body = ''; req.on('data', data => body += data); req.on('end', () => {
@@ -29,8 +29,9 @@ const assert = require('assert/strict');
       }); return;
     }
     if (req.url.startsWith('/api/')) return res.end('{}');
-    const file = req.url === '/' ? 'index.html' : req.url.slice(1);
-    if (!['index.html','styles.css','app.js'].includes(file)) { res.statusCode=404; return res.end(); }
+    // Every page script index.html loads (updates.js, delivery.js, ...): app.js needs them (MEETONTRACK-85).
+    const file = req.url === '/' ? 'index.html' : path.basename(req.url);
+    if (!/\.(html|css|js)$/.test(file) || !fs.existsSync(path.join(__dirname,file))) { res.statusCode=404; return res.end(); }
     res.setHeader('Content-Type', file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html');
     res.end(fs.readFileSync(path.join(__dirname,file)));
   });
