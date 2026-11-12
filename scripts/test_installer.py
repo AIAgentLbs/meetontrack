@@ -290,10 +290,12 @@ exit 2
         import fcntl
         share = Path(self.env["MEETING_COPILOT_SHARE_ROOT"])
         share.mkdir()
-        self.script("sleep", "exit 0")
+        self.script("sleep", 'echo "$1" >> "$FIXTURE_ROOT/sleeps"')
         with open(share / ".install.lock", "a") as held:
             fcntl.flock(held, fcntl.LOCK_EX)  # a running installer
-            result = self.run_install()
+            # Two real probes against the held kernel lock, not 600 Python start-ups (MEETONTRACK-148).
+            result = self.run_install(MEETING_COPILOT_LOCK_TRIES="2")
+        self.assertEqual((self.root / "sleeps").read_text().split(), ["0.5", "0.5"])  # it waited between probes
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Another MeetOnTrack installation is running", result.stderr)
         self.assertFalse((Path(self.env["MEETING_COPILOT_APP_ROOT"]) / "Meeting Copilot Capture.app").exists())

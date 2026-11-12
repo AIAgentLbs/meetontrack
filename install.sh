@@ -137,7 +137,7 @@ release_version="$("$python" -I -B -c 'import json, sys; print(json.load(open(sy
 # file, outlives the helper that took it, and goes away with this script, also after a crash.
 mkdir -p "$SHARE"
 exec 9>>"$SHARE/.install.lock"
-for wait in {1..600}; do
+for ((wait = 0; wait < ${MEETING_COPILOT_LOCK_TRIES:-600}; wait++)); do  # 600 x 0.5 s; tests set fewer
   "$python" -I -B -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)' 2>/dev/null && { locked=true; break; }
   sleep 0.5
 done

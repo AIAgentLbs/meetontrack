@@ -26,13 +26,19 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      # Exact SDK, and so the bundled runtime, from windows/global.json (MEETONTRACK-111).
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          global-json-file: windows/global.json
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
       - uses: astral-sh/setup-uv@v6
+      - name: Workflow safety and update source checks (MEETONTRACK-110)
+        shell: pwsh
+        run: |
+          uv run --with pyyaml python -m unittest discover -v -s windows/tests -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { throw 'Windows source checks failed' }
       - name: Meeting report PDF with Chrome, then with Edge only (MEETONTRACK-120)
         shell: pwsh
         working-directory: copilot/web
@@ -55,21 +61,26 @@ jobs:
           } finally {
             foreach ($exe in $hidden) { Rename-Item (Join-Path (Split-Path $exe) 'chrome-hidden.exe') 'chrome.exe' -ErrorAction SilentlyContinue }
           }
+      # dotnet runs inside windows/: global.json applies from the working directory,
+      # otherwise a newer SDK preinstalled on the runner would win.
       - name: Recorder core and live regression tests
         shell: pwsh
+        working-directory: windows
         run: |
-          dotnet test windows/tests/Amanu.Core.Tests/Amanu.Core.Tests.csproj -c Release
+          dotnet --version
+          dotnet test tests/Amanu.Core.Tests/Amanu.Core.Tests.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Core tests failed' }
-          dotnet test windows/tests/Amanu.Live.Tests/Amanu.Live.Tests.csproj -c Release
+          dotnet test tests/Amanu.Live.Tests/Amanu.Live.Tests.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Live tests failed' }
       - name: Build branded native recorder
         shell: pwsh
+        working-directory: windows
         run: |
-          dotnet publish windows/src/Amanu.App/Amanu.App.csproj -c Release -r win-x64 --self-contained true -o managed
+          dotnet publish src/Amanu.App/Amanu.App.csproj -c Release -r win-x64 --self-contained true -o ../managed
           if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
-          $product = (Get-Item managed/MeetingCopilotCapture.exe).VersionInfo.ProductName
+          $product = (Get-Item ../managed/MeetingCopilotCapture.exe).VersionInfo.ProductName
           if ($product -ne 'MeetOnTrack Capture') { throw "Wrong product: $product" }
-          Compress-Archive managed/* managed.zip
+          Compress-Archive ../managed/* ../managed.zip
       - name: Compose package from this revision
         shell: pwsh
         env:
