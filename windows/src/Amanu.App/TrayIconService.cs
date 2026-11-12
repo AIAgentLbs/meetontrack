@@ -60,7 +60,6 @@ internal sealed class TrayIconService : IDisposable
         menu.Items.Add(new Separator());
         menu.Items.Add(Item(T("Settings…", "Настройки…"), () => App.ShowSettings(0)));
         menu.Items.Add(Item(T("Setup…", "Первая настройка…"), App.ShowSetup));
-        menu.Items.Add(Item(T("Check for updates…", "Проверить обновления…"), () => _ = App.CheckForUpdatesAsync()));
         menu.Items.Add(Item(T("About MeetOnTrack", "О программе MeetOnTrack"), App.ShowAbout));
         menu.Items.Add(new Separator());
         menu.Items.Add(Item(T("Quit MeetOnTrack", "Завершить MeetOnTrack"), () => _ = App.QuitAsync()));

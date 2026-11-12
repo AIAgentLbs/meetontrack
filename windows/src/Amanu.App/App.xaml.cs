@@ -217,28 +217,6 @@ public partial class App : System.Windows.Application
         ShowRecordings();
     }
 
-    public static async Task CheckForUpdatesAsync()
-    {
-        if (runtime is not { } current) return;
-        bool Busy() => current.State.IsRecording || current.IsProcessing;
-        var result = await UpdateService.CheckAsync(Busy, interactive: true, CancellationToken.None);
-        if (result.Outcome == UpdateOutcome.Ready && !Busy())
-        {
-            var answer = System.Windows.MessageBox.Show(result.Message + Environment.NewLine + Environment.NewLine
-                + T("Restart MeetOnTrack now to install it?", "Перезапустить MeetOnTrack и установить сейчас?"),
-                T("Update ready", "Обновление готово"), MessageBoxButton.YesNo, MessageBoxImage.Information);
-            if (answer == MessageBoxResult.Yes)
-            {
-                await TearDownAsync();
-                UpdateService.RestartIntoUpdate(() => false);
-            }
-            return;
-        }
-        if (result.Message.Length > 0)
-            System.Windows.MessageBox.Show(result.Message, "MeetOnTrack", MessageBoxButton.OK,
-                result.Outcome == UpdateOutcome.Failed ? MessageBoxImage.Warning : MessageBoxImage.Information);
-    }
-
     /// <summary>
     /// Stops a recording cleanly — its meta.json written, its session queued —
     /// and takes everything down, child processes included, before the process
