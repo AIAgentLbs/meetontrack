@@ -316,12 +316,21 @@ def settle(answer: str, knowledge: list[dict], fetch, web: bool) -> dict:
 
 
 def verify(row: dict, *, ai, knowledge, fetch) -> dict:
-    """One check: knowledge base first, the web only when the chosen AI can search it."""
+    """One check: knowledge base first, the web only when the chosen AI can search it.
+    Private excerpts (Gmail, Drive, context folders) never reach a web-enabled call: injected text could
+    make the model carry them out in a search or a cited URL (MEETONTRACK-128). So the knowledge base is
+    checked offline, and the web pass sees only the statement."""
     ticket = ai.resolve("fact_check")
     web, _ = ai.web_search(ticket.choice)
     excerpts = [{"id": f"kb{index}", **item} for index, item in enumerate(knowledge(row)[:8], 1)]
-    reply = ai.run("fact_check", verification_prompt(row, excerpts, web), ticket=ticket, web=web, timeout=180)
-    return {**settle(reply.text, excerpts, fetch, web), "model": reply.model, "web": web}
+    result, reply = {"status": "unclear", "note": "not_found"}, None
+    if excerpts or not web:
+        reply = ai.run("fact_check", verification_prompt(row, excerpts, False), ticket=ticket, web=False, timeout=180)
+        result = settle(reply.text, excerpts, fetch, False)
+    if web and result["status"] == "unclear":
+        reply = ai.run("fact_check", verification_prompt(row, [], True), ticket=ticket, web=True, timeout=180)
+        result = settle(reply.text, [], fetch, True)
+    return {**result, "model": reply.model, "web": web}
 
 
 class FactChecks:
