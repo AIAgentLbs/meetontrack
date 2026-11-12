@@ -19,9 +19,11 @@ enum Subprocess {
         var isCancelled: Bool { lock.withLock { cancelled } }
     }
 
-    /// `currentDirectory` nil runs the child in the private scratch folder.
+    /// `currentDirectory` nil runs the child in the private scratch folder;
+    /// `environment` nil inherits this process's.
     static func run(executable: String, arguments: [String], input: Data,
-                    timeout: TimeInterval, currentDirectory: URL? = nil) async throws -> Output {
+                    timeout: TimeInterval, currentDirectory: URL? = nil,
+                    environment: [String: String]? = nil) async throws -> Output {
         let cancellation = Cancellation()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -30,7 +32,7 @@ enum Subprocess {
                         continuation.resume(returning: try runSync(
                             executable: executable, arguments: arguments, input: input,
                             timeout: timeout, currentDirectory: currentDirectory,
-                            isCancelled: { cancellation.isCancelled }))
+                            environment: environment, isCancelled: { cancellation.isCancelled }))
                     } catch { continuation.resume(throwing: error) }
                 }
             }
@@ -39,6 +41,7 @@ enum Subprocess {
 
     static func runSync(executable: String, arguments: [String], input: Data = Data(),
                         timeout: TimeInterval, currentDirectory: URL? = nil,
+                        environment: [String: String]? = nil,
                         isCancelled: @Sendable () -> Bool = { false }) throws -> Output {
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("meetingcopilot-process-\(UUID().uuidString)", isDirectory: true)
@@ -73,6 +76,7 @@ enum Subprocess {
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.currentDirectoryURL = currentDirectory ?? scratch
+        if let environment { process.environment = environment }
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = stderr

@@ -20,12 +20,9 @@ struct AIChoice: Equatable {
 
     static let needsChoiceMessage = "needs choice: choose AI in Getting started"
 
-    /// Providers this app can run. Antigravity is known but refused: its
-    /// print mode reports `permission_mode: always-proceed`, so read-only and
-    /// no-tools cannot be enforced for a transcript.
-    static let runnable: Set<String> = ["codex", "claude", "ollama"]
-    static let antigravityRefusal =
-        "cannot enforce read-only/no-tools: permission_mode always-proceed"
+    /// Providers this app can run. Antigravity runs only under its own strict
+    /// settings in an app-owned home (LLMBackend.antigravity).
+    static let runnable: Set<String> = ["codex", "claude", "antigravity", "ollama"]
 
     static func resolve(in config: [String: Any]?) -> AIResolution {
         guard
@@ -37,7 +34,6 @@ struct AIChoice: Equatable {
             !provider.isEmpty, !model.isEmpty
         else { return .needsChoice }
 
-        if provider == "antigravity" { return .unavailable(antigravityRefusal) }
         guard runnable.contains(provider) else {
             return .unavailable("\(provider) is not a provider this app can run")
         }

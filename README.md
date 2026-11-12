@@ -48,8 +48,8 @@ and repository excerpts to the AI tool you chose for that task.
   affected: screenshots are analysed only when the model accepts images, and
   Git repository search needs Codex or Claude Code (Ollama cannot read
   repositories). Antigravity runs with its own strict settings (no files, no
-  commands): no repository search or screenshots, and the recorder cannot use
-  it yet for meeting summaries and speaker names.
+  commands): no repository search or screenshots. The Mac recorder uses it for
+  meeting summaries and speaker names; the Windows recorder does not yet.
   Recording and local transcription work without any AI tool;
 - captures meetings without adding a bot to Zoom or Google Meet;
 - updates a local near-live transcript with speaker separation where available;

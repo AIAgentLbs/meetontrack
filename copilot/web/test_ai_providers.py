@@ -348,8 +348,8 @@ class AntigravityTests(unittest.TestCase):
             service = AIService(path, env, adapters=[adapter])
             states = {purpose: service.status(purpose)["state"] for purpose in ai_providers.PURPOSES}
         self.assertEqual(states.pop("frame_relevance"), "unavailable")  # agy reads no files, so no screenshots
-        for purpose in ai_providers.RECORDER_TASKS:  # the Swift recorder cannot run agy yet
-            self.assertEqual(states.pop(purpose), "unavailable", purpose)
+        for purpose in ai_providers.RECORDER_TASKS:  # the Mac recorder runs agy (MEETONTRACK-106); Windows does not
+            self.assertEqual(states.pop(purpose), "unavailable" if ai_providers.WINDOWS else "ready", purpose)
         self.assertEqual(set(states.values()), {"ready"})
 
     def test_without_a_saved_sign_in_it_asks_for_one_without_running_agy(self):

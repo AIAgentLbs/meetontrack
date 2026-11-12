@@ -84,16 +84,112 @@ struct AIChoiceTests {
         }
     }
 
-    @Test("Antigravity is refused")
-    func antigravityRefused() {
-        let agy: [String: Any] = ["provider": "antigravity", "model": "m", "effort": "", "speed": ""]
-        #expect(AIChoice.resolve(in: config(agy)) == .unavailable(
-            "cannot enforce read-only/no-tools: permission_mode always-proceed"))
-        // And it never reaches a process.
-        if case .ready = LLMBackend.resolve(
-            config: config(agy), tool: { _ in "/bin/echo" }) {
-            Issue.record("antigravity must not run")
+    /// A fake agy that also records the home it was given: its settings, the
+    /// sign-in link and the environment (MEETONTRACK-106).
+    private func fakeAgy(in dir: URL, log: URL, reply: String) throws -> URL {
+        let url = dir.appendingPathComponent("agy")
+        _ = try fakeCLI(at: url, log: log, reply: reply)
+        var script = try String(contentsOf: url, encoding: .utf8)
+        script = script.replacingOccurrences(of: "#!/bin/sh\n", with: """
+            #!/bin/sh
+            echo "$HOME" > "\(log.path).home"
+            cat "$HOME/.gemini/antigravity-cli/settings.json" > "\(log.path).settings"
+            readlink "$HOME/.gemini/antigravity-cli/antigravity-oauth-token" > "\(log.path).token"
+            env | cut -d= -f1 | sort > "\(log.path).env"
+            mkdir -p "$HOME/.gemini/antigravity-cli/conversations" && echo meeting > "$HOME/.gemini/antigravity-cli/conversations/c1.db"
+
+            """)
+        try Data(script.utf8).write(to: url)
+        return url
+    }
+
+    @Test("Antigravity runs isolated: app-owned strict home, exact argv, prompt on stdin, nothing left")
+    func antigravityArgv() async throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let person = dir.appendingPathComponent("person", isDirectory: true)
+        let token = person.appendingPathComponent(LLMBackend.antigravityToken)
+        try FileManager.default.createDirectory(
+            at: token.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"token":{}}"#.utf8).write(to: token)
+        // The person's own settings say always-proceed; they must not be read.
+        try Data(#"{"toolPermission":"always-proceed"}"#.utf8)
+            .write(to: token.deletingLastPathComponent().appendingPathComponent("settings.json"))
+        let log = dir.appendingPathComponent("log")
+        let agy = try fakeAgy(in: dir, log: log, reply: """
+            {"event":"step_update"}
+            {"event":"result","result":{"status":"SUCCESS","response":"  the answer  "}}
+            """)
+        let environment = ["HOME": person.path, "PATH": "/usr/bin:/bin",
+                           "GEMINI_API_KEY": "k", "agy_account": "o", "ANTIGRAVITY_PROJECT_ID": "p"]
+
+        let backend = try ready(LLMBackend.resolve(
+            config: config(["provider": "antigravity", "model": "fam", "effort": "hi", "speed": ""]),
+            tool: { $0 == "agy" ? agy.path : nil }, environment: environment))
+        let reply = try await backend.call("SYSTEM", "/plan PROMPT")
+        #expect(reply == LLMReply(text: "the answer", model: "fam"))
+
+        let ran = try recorded(log)
+        #expect(ran.args == ["--sandbox", "--disable-slash-commands", "--model", "fam-hi",
+                             "--input-format", "stream-json", "--output-format", "stream-json", "-p", ""])
+        let event = try JSONSerialization.jsonObject(with: Data(ran.stdin.utf8)) as? [String: Any]
+        #expect(sameJSON(event, ["event": "user", "message": ["content": "SYSTEM\n\n/plan PROMPT"]]))
+        #expect(ran.stdin.hasSuffix("\n"))
+        #expect(ran.emptyCwd, "the work folder must be fresh and empty")
+        func read(_ suffix: String) throws -> String {
+            try String(contentsOf: URL(fileURLWithPath: log.path + suffix), encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        let home = try read(".home")
+        #expect(home != person.path && home != ran.cwd)
+        #expect(sameJSON(try JSONSerialization.jsonObject(with: Data(try read(".settings").utf8)),
+                         ["toolPermission": "strict",
+                          "permissions": ["deny": ["command(*)", "read_url(*)"]]]))
+        #expect(try read(".token") == token.path)
+        let names = try read(".env").components(separatedBy: "\n")
+        #expect(names.contains("HOME") && names.contains("PATH"))
+        #expect(!names.contains { ["GEMINI_API_KEY", "agy_account", "ANTIGRAVITY_PROJECT_ID"].contains($0) })
+        #expect(!FileManager.default.fileExists(atPath: home), "the home, with agy's conversation, is removed")
+        #expect(!FileManager.default.fileExists(atPath: ran.cwd))
+        #expect(FileManager.default.fileExists(atPath: token.path), "the person's sign-in is kept")
+    }
+
+    @Test("Antigravity: a blocked action, a failure, no sign-in or a speed tier do not pass as an answer")
+    func antigravityFailures() async throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let person = dir.appendingPathComponent("person", isDirectory: true)
+        let choice: [String: Any] = ["provider": "antigravity", "model": "m", "effort": "", "speed": ""]
+        func backend(_ reply: String) throws -> LLMBackend {
+            let agy = try fakeAgy(in: dir, log: dir.appendingPathComponent("log"), reply: reply)
+            return try ready(LLMBackend.resolve(
+                config: config(choice), tool: { _ in agy.path }, environment: ["HOME": person.path]))
+        }
+
+        // No saved sign-in: agy would start one and wait, so it is not run.
+        let unsigned = try backend(#"{"event":"result","result":{"status":"SUCCESS","response":"x"}}"#)
+        await #expect(throws: LLMError.self) { try await unsigned.call("s", "p") }
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("log.args").path))
+
+        let token = person.appendingPathComponent(LLMBackend.antigravityToken)
+        try FileManager.default.createDirectory(
+            at: token.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: token)
+        do {
+            _ = try await backend(#"""
+                {"event":"result","result":{"status":"SUCCESS","response":"","denied_actions":[{"action":"write_file"}]}}
+                """#).call("s", "p")
+            Issue.record("a denied action is not an answer")
+        } catch let error as LLMError {
+            #expect(error.description.contains("blocked action (write_file)"))
+        }
+        let failed = try backend(#"{"event":"result","result":{"status":"ERROR","response":"x","error":"boom"}}"#)
+        await #expect(throws: LLMError.self) { try await failed.call("s", "p") }
+
+        var fast = choice
+        fast["speed"] = "standard"
+        #expect(LLMBackend.resolve(config: config(fast), tool: { _ in "/bin/echo" }).problem
+            == "antigravity offers no speed tier standard")
     }
 
     @Test("A needs-choice purpose says where to choose")

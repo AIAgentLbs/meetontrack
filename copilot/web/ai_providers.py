@@ -502,7 +502,7 @@ class AntigravityAdapter:
     agy 1.4.9 found no sign-in without it. Verified 2026-10-28: a write_file attempt was denied and
     nothing was written; read_file is denied too, so no repositories and no screenshots."""
     name, label, reads_files, web_search = "antigravity", "Antigravity", False, True
-    recorder = False  # the Swift recorder (summaries, speaker names) has no Antigravity backend yet
+    recorder = not WINDOWS  # the Mac recorder runs agy the same way (Summary/LLMBackend.swift); Windows does not
     sign_in_window = True  # no login subcommand: interactive agy shows its sign-in screen in a terminal
     TOKEN = Path(".gemini/antigravity-cli/antigravity-oauth-token")
     SUFFIX = re.compile(r"^(.*) \(([^()]+)\)$")
