@@ -52,6 +52,8 @@ actor OpenAITranscriptionEngine: TranscriptionEngine {
     }
 
     private static let endpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
+    /// The provider's own pricing page; the app shows no prices itself.
+    static let pricingURL = "https://developers.openai.com/api/docs/pricing"
     /// The API's own per-request ceiling. Not a guess: 25 MB is what the
     /// documentation states and what a larger file is refused with.
     static let defaultRequestLimit: Int64 = 25 * 1_048_576

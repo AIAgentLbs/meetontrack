@@ -445,7 +445,7 @@ enum STTCatalog {
         var engine = engineBase(
             id: "assemblyai", label: engineName("assemblyai"), kind: "cloud",
             available: hasKey, reason: hasKey ? "" : "no AssemblyAI API key",
-            needsKey: true, hasKey: hasKey, modelEntry: "free_text")
+            needsKey: true, hasKey: hasKey, modelEntry: "free_text", pricingURL: AssemblyAIEngine.pricingURL)
         engine["listing"] = [
             "source": "none",
             "error": "AssemblyAI publishes no model list endpoint; type the model id and press Check",
@@ -462,13 +462,14 @@ enum STTCatalog {
         guard let key = inputs.openAIKey else {
             var engine = engineBase(
                 id: "openai", label: engineName("openai"), kind: "cloud", available: false,
-                reason: "no OpenAI API key", needsKey: true, hasKey: false, modelEntry: "list")
+                reason: "no OpenAI API key", needsKey: true, hasKey: false, modelEntry: "list",
+                pricingURL: OpenAITranscriptionEngine.pricingURL)
             engine["listing"] = ["source": "GET https://api.openai.com/v1/models", "error": "no OpenAI API key"]
             return engine
         }
         var engine = engineBase(
             id: "openai", label: engineName("openai"), kind: "cloud", available: true, reason: "",
-            needsKey: true, hasKey: true, modelEntry: "list")
+            needsKey: true, hasKey: true, modelEntry: "list", pricingURL: OpenAITranscriptionEngine.pricingURL)
         let (found, error) = await inputs.fetch.openAIModels(key: key)
         var listed = found ?? []
         if let stored = storedModel(for: "openai", inputs), !listed.contains(where: { $0.id == stored }) {
@@ -491,13 +492,15 @@ enum STTCatalog {
 
     private static func engineBase(
         id: String, label: String, kind: String, available: Bool, reason: String,
-        needsKey: Bool, hasKey: Bool?, modelEntry: String
+        needsKey: Bool, hasKey: Bool?, modelEntry: String, pricingURL: String = ""
     ) -> [String: Any] {
         [
             "id": id, "label": label, "kind": kind,
             "available": available, "reason": reason,
             "needs_key": needsKey, "has_key": hasKey.map { $0 as Any } ?? NSNull(),
             "model_entry": modelEntry,
+            // Cloud engines link to the provider's pricing page; no prices here.
+            "pricing_url": pricingURL,
             "listing": ["source": "", "error": ""],
             "models": [[String: Any]](),
         ]

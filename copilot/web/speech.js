@@ -124,6 +124,14 @@
     try {await api("/api/stt/choice", {choice: {engine: draft.engine, model: draft.model, language: draft.language}}); message = ""; lastCheck = null; await load(false, true);}
     catch (error) {message = plainError(error); render();}
   }
+  // A cloud engine links to its provider's own pricing page; the app shows no prices.
+  function pricingLink(engine) {
+    const url = String(engine?.pricing_url || "");
+    if (!url.startsWith("https://")) return null;
+    const line = node("p"), link = node("a", word("Provider pricing", "Цены у провайдера"));
+    link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer"; line.append(link);
+    return line;
+  }
   function choiceBox() {
     const box = node("fieldset"); box.className = "ai-purpose"; box.append(node("legend", word("Speech model", "Модель распознавания")));
     if (!options) {box.append(node("p", loading ? word("Reading what the recorder offers…", "Читаю, что предлагает приложение записи…") : "")); return box;}
@@ -133,6 +141,7 @@
     box.append(picker(word("Engine", "Движок"), [["", word("Choose…", "Выберите…")], ...options.engines.map(item => [item.id, item.available ? item.label : `${item.label} (${item.reason})`, !selectable(item)])],
       selectable(engineOf(draft.engine) || {}) ? draft.engine : "", value => choose({engine: value, model: "", language: ""})));
     const engine = engineOf(draft.engine);
+    const pricing = pricingLink(engine); if (pricing) box.append(pricing);
     if (!engine || !selectable(engine)) return box;
     // A stored key the provider rejects (HTTP 401/403 on the listing) stays replaceable.
     const rejected = /\bHTTP 40[13]\b/.test(engine.listing?.error || "");

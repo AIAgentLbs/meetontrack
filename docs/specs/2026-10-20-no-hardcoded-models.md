@@ -294,6 +294,7 @@ from the facts below (`live`, `multilingual`, `offline`, `speakers`,
         "available": true, "reason": "",
         "needs_key": false, "has_key": null | true | false,
         "model_entry": "list|free_text",
+        "pricing_url": "https://..." | "",
         "listing": {"source": "...", "error": ""},
         "models": [{
           "id": "...", "label": "...", "family": "...",
@@ -312,6 +313,9 @@ from the facts below (`live`, `multilingual`, `offline`, `speakers`,
         "model_template": {...}
       }]
     }
+
+`pricing_url` is the provider's own pricing page for a cloud engine (empty for
+local engines); the app links to it and shows no prices itself.
 
 `model_template` appears only when `model_entry` is `free_text`: the facts
 (same keys as a model, `id` empty) that hold for any id the person types.
