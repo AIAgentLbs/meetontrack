@@ -1408,6 +1408,57 @@ ZOOM_CONTROL_LABELS = {
     "остановить видео", "участники", "чат", "демонстрация экрана", "запись",
     "реакции", "ещё", "еще", "выйти", "завершить",
 }
+ZOOM_OCR_SPEAKERS = {"visual-active-speaker", "zoom-floating-speaker"}
+
+
+def _label_fragment_of(short: str, full: str) -> bool:
+    """True when OCR `short` reads like `full` with word edges dropped
+    ("ат umar&Sol" from "Катя из Kumar&Solo"): every short word sits inside a
+    later full word, at least one is cut, and half the letters survive. Whole
+    words alone ("Anna" vs "Anna Smith") may be another person: no match."""
+    words, targets = short.casefold().split(), full.casefold().split()
+    if not words or len(targets) > 6 or any(char.isdigit() for char in full):
+        return False
+    letters = len("".join(words))
+    if letters < 4 or letters < len("".join(targets)) * 0.5:
+        return False
+    index, cut = 0, False
+    for word in words:
+        while index < len(targets) and word not in targets[index]:
+            index += 1
+        if index == len(targets):
+            return False
+        cut = cut or word != targets[index]
+        index += 1
+    return cut
+
+
+def snap_zoom_speakers(frames: list[dict]) -> list[dict]:
+    """MEETONTRACK-91: the highlighted Zoom tile's label is OCR'd worst (green
+    border, mixed Cyrillic/Latin). Replace a garbled speaker with the one full
+    label seen in the same meeting's other frames; never invent a name, and
+    never merge two labels that were visible at the same time."""
+    seen: dict[str, list[tuple[int, set[str]]]] = {}
+    for index, frame in enumerate(frames):
+        labels = {line.strip() for line in str(frame.get("visual_text", "")).splitlines()
+                  if 2 <= len(line.strip()) <= 42}
+        if frame.get("speaker"):
+            labels.add(str(frame["speaker"]).strip())
+        seen.setdefault(str(frame.get("meeting_id", "")), []).append((index, labels))
+    for index, frame in enumerate(frames):
+        speaker = str(frame.get("speaker") or "").strip()
+        if not speaker or frame.get("speaker_confidence") not in ZOOM_OCR_SPEAKERS:
+            continue
+        meeting = seen.get(str(frame.get("meeting_id", "")), [])
+        together = set().union(*(labels for _, labels in meeting if speaker in labels))
+        matches = {
+            label for other, labels in meeting if other != index
+            for label in labels
+            if label != speaker and label not in together and _label_fragment_of(speaker, label)
+        }
+        if len(matches) == 1:
+            frame["speaker"] = matches.pop()
+    return frames
 
 
 def image_libraries_problem() -> str:
@@ -1485,7 +1536,7 @@ class MeetingFrames:
         """Read-only shared frame records; archive annotation copies before edits."""
         self._reload()
         with self.lock:
-            return [routed_event(item) for item in self.items]
+            return snap_zoom_speakers([routed_event(item) for item in self.items])
 
     def snapshot(self, meeting_id: str = "") -> list[dict]:
         self._reload()
@@ -1500,7 +1551,7 @@ class MeetingFrames:
                     "window_title": item.get("window_title", ""),
                     "url": f"/api/frames/{item.get('id', '')}",
                 }
-                for item in map(routed_event, self.items)
+                for item in snap_zoom_speakers([routed_event(item) for item in self.items])
                 if not meeting_id or item.get("meeting_id") == meeting_id
             ]
         return list(reversed(items[-120:]))
@@ -1773,7 +1824,7 @@ class MeetingFrames:
         # Annotation must not mutate the raw, unchanged export held by TranscriptState.
         transcript = {**transcript, "segments": [dict(segment) for segment in transcript.get("segments", [])]}
         with self.lock:
-            frames = [routed_event(item) for item in self.items]
+            frames = snap_zoom_speakers([routed_event(item) for item in self.items])
         segments = transcript.get("segments", [])
         meeting_frames = [frame for frame in frames if frame.get("meeting_id") == transcript.get("meeting_id")]
         teams_name = teams_one_to_one_name(meeting_frames)
