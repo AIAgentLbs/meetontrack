@@ -55,10 +55,20 @@ try {
     $launcher=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'windows\meeting-copilot.ps1'),[ref]$null,[ref]$null)
     . ([scriptblock]::Create($launcher.Find({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Type' -and $n.Extent.Text -match 'EnumWindows'},$true).Extent.Text))
     if([MeetOnTrack.Win]::Find("No such window $([guid]::NewGuid())") -ne [IntPtr]::Zero){throw 'Assistant window lookup matched a missing window'}
+    # MEETONTRACK-131: a busy first port falls back to the recorded one while it is free, not to a new random port.
+    foreach($name in 'Test-PortFree','Select-ServerPort'){
+        . ([scriptblock]::Create($launcher.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true).Extent.Text))}
+    $held=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0); $held.Start(); $busy=$held.LocalEndpoint.Port
+    $probe=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0); $probe.Start(); $recordedPort=$probe.LocalEndpoint.Port; $probe.Stop()
+    try {
+        if((Select-ServerPort @($busy,$recordedPort)) -ne $recordedPort){throw 'A free recorded port was not reused'}
+        $other=Select-ServerPort @($busy)
+        if(-not $other -or $other -eq $busy){throw 'No free port chosen when every candidate is busy'}
+    } finally {$held.Stop()}
     $rejected=$false
     try { & $Installer -PackagePath "$temp\package.zip" -ExpectedSha256 ('0'*64) -InstallRoot "$temp\bad" -UserRoot "$temp\user" -SkipModels -NoLaunch -NoShortcuts } catch {$rejected=$true}
     if(-not $rejected -or (Test-Path "$temp\bad\current.json")){throw 'Bad checksum was accepted'}
-    Write-Output 'Windows installer tests: 12 passed (install, preserve settings, remove retired setting/state, stop previous server only, keep other jobs and capture, same stop rule in launcher, remove stale login entry, assistant window lookup, reject checksum)'
+    Write-Output 'Windows installer tests: 13 passed (install, preserve settings, remove retired setting/state, stop previous server only, keep other jobs and capture, same stop rule in launcher, remove stale login entry, assistant window lookup, recorded port reused, reject checksum)'
 } finally {
     foreach($process in $stand.Values){if(-not $process.HasExited){Stop-Process -Id $process.Id -Force; $process.WaitForExit(5000) | Out-Null}}
     Remove-Item -LiteralPath $temp -Recurse -Force

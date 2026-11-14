@@ -50,18 +50,23 @@ TIMEOUT_SENTINEL = "__MEETING_COPILOT_TIMEOUT__"
 @lru_cache(maxsize=None)
 def untrusted_git(repo: Path) -> tuple[tuple[str, ...], dict]:
     """argv prefix and env for git in a repository whose .git/config is not ours (MEETONTRACK-129):
-    its fsmonitor, hooks, external diff and filter/diff/merge driver commands are blanked on the
-    command line, which wins over repository config. Same rule as untrusted_git in copilot/web/server.py."""
+    its fsmonitor, hooks, external diff and filter/diff/merge driver commands (any non-global scope,
+    config.worktree included) are blanked on the command line, which wins over repository config, and
+    submodules are never entered. Same rule as untrusted_git in copilot/web/server.py."""
     env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
     base = ["git", "-C", str(repo), "--no-optional-locks", "--no-pager", "-c", "core.fsmonitor=false",
-            "-c", "core.hooksPath=/dev/null", "-c", "diff.external="]
+            "-c", "core.hooksPath=/dev/null", "-c", "diff.external=", "-c", "submodule.recurse=false",
+            "-c", "diff.ignoreSubmodules=all", "-c", "status.submoduleSummary=false"]
     try:
-        keys = subprocess.run([*base, "config", "--local", "--includes", "--name-only", "--get-regexp",
-                               r"^(filter|diff|merge)\..+\.(clean|smudge|process|command|textconv|driver)$"],
-                              capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS, check=False,
-                              stdin=subprocess.DEVNULL, env=env).stdout.split()
+        run = subprocess.run([*base, "config", "--show-scope", "--includes", "--name-only", "--get-regexp",
+                              r"^(filter|diff|merge)\..+\.(clean|smudge|process|command|textconv|driver)$"],
+                             capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS, check=False,
+                             stdin=subprocess.DEVNULL, env=env)
     except (OSError, subprocess.TimeoutExpired):
         return (), env  # drivers unknown: callers run no git there at all
+    if run.returncode not in (0, 1):  # 1 = no driver; anything else (old git): drivers unknown
+        return (), env
+    keys = [key for scope, _, key in (line.partition("\t") for line in run.stdout.splitlines()) if scope != "global"]
     return tuple(base + [arg for key in dict.fromkeys(keys) for arg in ("-c", f"{key}=")]), env
 
 
@@ -90,7 +95,7 @@ def working_tree_status(repo: Path) -> tuple[str, list[str]]:
         return "unknown_timeout", [f"repository config read exceeded {GIT_TIMEOUT_SECONDS} seconds"]
     try:
         unstaged = subprocess.run(
-            [*base, "diff", "--quiet", "--"],
+            [*base, "diff", "--quiet", "--ignore-submodules=all", "--"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=env,
@@ -98,7 +103,7 @@ def working_tree_status(repo: Path) -> tuple[str, list[str]]:
             check=False,
         )
         staged = subprocess.run(
-            [*base, "diff", "--cached", "--quiet", "--"],
+            [*base, "diff", "--cached", "--quiet", "--ignore-submodules=all", "--"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=env,

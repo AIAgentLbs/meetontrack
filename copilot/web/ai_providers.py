@@ -1084,7 +1084,7 @@ class _TerminalSignIn:
     def wait(self, timeout):
         """Exit code 0 once the started command has ended; TimeoutExpired while it runs or starts."""
         end = time.monotonic() + timeout
-        while not (self.seen and self._running() is None):
+        while self._running() is not None or not self.seen:  # _running() first: it sets `seen`
             if time.monotonic() >= end:
                 raise subprocess.TimeoutExpired(self.command, timeout)
             time.sleep(min(1, max(0, end - time.monotonic())))

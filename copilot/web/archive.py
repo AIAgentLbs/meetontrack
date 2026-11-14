@@ -199,7 +199,9 @@ class MeetingArchive:
         self.analysis_pending: Callable[[str], bool] = lambda meeting_id: False
         # meeting_id -> (meeting.json, report.json) versions already found up to date.
         self._history_checked: dict[str, tuple] = {}
-        self._final_wait_since: datetime | None = None
+        # Recorded at start, before any meeting is checked (MEETONTRACK-118): a lazy first use could
+        # come after a meeting already waited past the window and misread it as history.
+        self._final_wait_since = self.delivery_monitor.first_seen("final_wait_since")
         private_dir(self.archive_root, recover=True)
         private_dir(self.reports_root, recover=True)
 
@@ -793,8 +795,6 @@ class MeetingArchive:
     def _final_wait_from(self) -> datetime:
         """Meetings that ended before this are history the final-transcript warning stays quiet
         about past the delivery window: those still inside it when MEETONTRACK-118 first ran."""
-        if self._final_wait_since is None:
-            self._final_wait_since = self.delivery_monitor.first_seen("final_wait_since")
         return self._final_wait_since - timedelta(days=self.delivery_retry_days)
 
     def _final_wait(self, snapshot: dict, ended: str, report: dict | None = None) -> dict | None:

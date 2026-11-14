@@ -26,26 +26,47 @@ class UntrustedRepositoryTests(unittest.TestCase):
         self.root = Path(temp.name)
         self.repo = self.root / "code" / "evil"
         self.repo.mkdir(parents=True)
-        git = lambda *args: subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True)
+        marker = self.root / "ran"
+        hostile = lambda key: f"touch {marker}-{key}; cat"
+        sub = self.root / "sub"  # a submodule whose own config defines a clean filter
+        sub.mkdir()
+        self.init(sub, "s.txt filter=subevil\n", ("s.txt",))
+        self.repo_git = git = lambda *args: subprocess.run(["git", "-C", str(self.repo), *args],
+                                                           check=True, capture_output=True)
+        self.init(self.repo, "a.txt filter=evil\nb.txt filter=Proc diff=tc\nc.txt filter=wt\n",
+                  ("a.txt", "b.txt", "c.txt"))
+        git("-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "sub")
+        git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "sub")
+        for key in ("core.fsmonitor", "filter.evil.clean", "filter.Proc.process", "diff.external", "diff.tc.textconv"):
+            git("config", key, hostile(key))
+        git("config", "core.repositoryformatversion", "1")  # config.worktree is read only with this extension
+        git("config", "extensions.worktreeConfig", "true")
+        git("config", "--worktree", "filter.wt.clean", hostile("filter.wt.clean"))
+        subprocess.run(["git", "-C", str(self.repo / "sub"), "config", "filter.subevil.clean",
+                        hostile("filter.subevil.clean")], check=True, capture_output=True)
+        for name in ("a.txt", "b.txt", "c.txt", "sub/s.txt"):
+            (self.repo / name).write_text("CHANGED!\n")  # same size: status must run the clean filter
+        self.marker = marker
+
+    @staticmethod
+    def init(repo, attributes, names):
+        git = lambda *args: subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
         git("init", "-q")
-        (self.repo / ".gitattributes").write_text("a.txt filter=evil\nb.txt filter=Proc diff=tc\n")
-        for name in ("a.txt", "b.txt"):
-            (self.repo / name).write_text("original\n")
+        (repo / ".gitattributes").write_text(attributes)
+        for name in names:
+            (repo / name).write_text("original\n")
         git("add", ".")
         git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "init")
-        marker = self.root / "ran"
-        for key in ("core.fsmonitor", "filter.evil.clean", "filter.Proc.process", "diff.external", "diff.tc.textconv"):
-            git("config", key, f"touch {marker}-{key}; cat")
-        for name in ("a.txt", "b.txt"):
-            (self.repo / name).write_text("changed\n")
-        self.marker = marker
 
     def ran(self):
         return sorted(path.name for path in self.root.iterdir() if path.name.startswith("ran-"))
 
     def test_the_unguarded_repository_does_run_its_commands(self):
         subprocess.run(["git", "-C", str(self.repo), "status", "--porcelain"], capture_output=True)
-        self.assertTrue(self.ran())  # the fixture is really hostile
+        subprocess.run(["git", "-C", str(self.repo), "-c", "core.fsmonitor=false", "diff", "--stat"], capture_output=True)
+        ran = self.ran()  # the fixture is really hostile, including config.worktree and the submodule
+        self.assertIn("ran-filter.wt.clean", ran)
+        self.assertIn("ran-filter.subevil.clean", ran)
 
     def test_server_git_metadata_runs_none_of_them(self):
         text = server.git_metadata([self.repo])

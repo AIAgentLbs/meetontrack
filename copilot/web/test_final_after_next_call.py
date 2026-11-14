@@ -692,5 +692,21 @@ class LateFinalTranscriptTests(unittest.TestCase):
         self.assertIsNone(self.archive.detail("FIRST-CALL")["final_wait"])
         self.assertFalse(self.flagged())
 
+
+class InstallationCutoffTests(unittest.TestCase):
+    def test_the_cutoff_is_recorded_when_the_archive_starts(self):
+        """Not when the first waiting meeting is checked: by then it may have waited past the
+        window and be misread as history, its warning and delivery lost (MEETONTRACK-118)."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "config").mkdir()
+            (root / "config" / "delivery-health.json").write_text(json.dumps({"sequence": 3}))
+            before = datetime.now(timezone.utc).replace(microsecond=0)
+            MeetingArchive(root / "recordings", root / "archive", root / "reports", root / "config")
+            stored = json.loads((root / "config" / "delivery-health.json").read_text())
+            self.assertGreaterEqual(datetime.fromisoformat(stored["final_wait_since"]), before)
+            self.assertEqual(stored["sequence"], 3)  # other keys kept
+
+
 if __name__ == "__main__":
     unittest.main()

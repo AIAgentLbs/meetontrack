@@ -46,6 +46,24 @@ public sealed class EgressTests
     }
 
     [Fact]
+    public void An_old_naming_backend_none_still_keeps_naming_off()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new AppSettingsStore(Path.Combine(directory.Path, "config.json"), directory.Path);
+        File.WriteAllText(store.ConfigPath, """
+            {"summary": {"enabled": true, "backend": "auto"}, "speaker_names": {"backend": "none"}}
+            """);
+        Assert.False(store.Load().Settings.SpeakerNames.Enabled);
+        Assert.Null(MeetingEgress.Route(EgressPurpose.SpeakerNames, store.Load().Settings));
+
+        // An explicit choice made since wins over the old backend.
+        File.WriteAllText(store.ConfigPath, """
+            {"summary": {"enabled": true, "backend": "auto"}, "speaker_names": {"backend": "none", "enabled": true}}
+            """);
+        Assert.True(store.Load().Settings.SpeakerNames.Enabled);
+    }
+
+    [Fact]
     public void Speakers_read_as_you_and_others()
     {
         using (Localized.Use(InterfaceLanguage.English))

@@ -87,6 +87,12 @@ public sealed class AppSettingsStore(string configPath, string homeDirectory)
         }
         if (string.IsNullOrWhiteSpace(settings.RecordingsDirectory))
             settings.RecordingsDirectory = AppSettings.DefaultRecordingsDirectory(homeDirectory);
+        // MEETONTRACK-83: speaker_names.backend is no longer read, but "none" there turned naming off;
+        // a file from before that, without a speaker_names.enabled of its own, keeps naming off.
+        if (SettingsDocument.Get(document, "speaker_names.enabled") is null
+            && SettingsDocument.Get(document, "speaker_names.backend") is JsonValue legacy
+            && legacy.GetValueKind() == JsonValueKind.String && legacy.GetValue<string>() == "none")
+            settings.SpeakerNames.Enabled = false;
         return new(settings, problems);
     }
 

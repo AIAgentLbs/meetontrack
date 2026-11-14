@@ -49,6 +49,14 @@ function Test-PortFree([int]$Port){
     $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,$Port)
     try {$listener.Start(); return $true} catch {return $false} finally {$listener.Stop()}
 }
+# The first free candidate (43121, then the port recorded last time, which an open assistant window
+# still points at), else any free port: a busy 43121 does not move the service on every restart.
+function Select-ServerPort([int[]]$Candidates){
+    $port=$Candidates | Where-Object {Test-PortFree $_} | Select-Object -First 1
+    if($port){return $port}
+    $free=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0); $free.Start(); $port=$free.LocalEndpoint.Port; $free.Stop()
+    return $port
+}
 # MEETONTRACK-131, as on the Mac (MEETONTRACK-130): the port is 43121 unless another program holds it;
 # that program is left alone and the service runs on a free port, recorded in server-port for the tray,
 # the installer and this launcher. A stale record is harmless: only a service answering as this version counts.
@@ -92,11 +100,8 @@ if(-not(Get-Process MeetingCopilotCapture -ErrorAction SilentlyContinue)){
 $port=$ports | Where-Object {Test-Ready $_} | Select-Object -First 1
 $ready=[bool]$port
 if(-not $ready){
-    $port=43121
-    if(-not(Test-PortFree $port)){
-        $free=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0); $free.Start(); $port=$free.LocalEndpoint.Port; $free.Stop()
-        Write-Host "MeetOnTrack: port 43121 is held by another program; using $port"
-    }
+    $port=Select-ServerPort $ports
+    if($port -ne 43121){Write-Host "MeetOnTrack: port 43121 is held by another program; using $port"}
     Start-Process -FilePath $pythonw -ArgumentList @('-X','utf8',"`"$server`"",'--no-open','--port',$port) -WorkingDirectory $root
     for($i=0;$i -lt 40 -and -not $ready;$i++){Start-Sleep -Milliseconds 250; $ready=Test-Ready $port}
 }
@@ -133,7 +138,9 @@ public static IntPtr Find(string title) {
 }
 '@
     $title='MeetOnTrack by aiagentlbs.com'
-    $window=[MeetOnTrack.Win]::Find($title)
+    # A window opened on the port recorded last time points at a stopped service when the port changed:
+    # a new window then, on the new address.
+    $window=if($recorded -gt 0 -and $port -ne $recorded){[IntPtr]::Zero}else{[MeetOnTrack.Win]::Find($title)}
     if($window -ne [IntPtr]::Zero){
         if([MeetOnTrack.Win]::IsIconic($window)){[void][MeetOnTrack.Win]::ShowWindow($window,9)}  # activation leaves a minimized window minimized
         [void](New-Object -ComObject WScript.Shell).AppActivate($title)

@@ -1146,6 +1146,16 @@ class SignInTests(unittest.TestCase):
                 for process in started:
                     process.kill()
 
+    @unittest.skipUnless(sys.platform == "darwin", "macOS Terminal sign-in")
+    def test_a_terminal_sign_in_that_exited_is_noticed_at_once(self):
+        """MEETONTRACK-108: an agy that already exited is not shown as signing in until the deadline."""
+        with tempfile.TemporaryDirectory() as tmp:
+            terminal = ai_providers._TerminalSignIn(["/usr/bin/true"], Path(tmp) / "quick")
+            subprocess.run(["/bin/sh", str(terminal.script)], check=True)  # Terminal ran it; it ended
+            started = time.monotonic()
+            self.assertEqual(terminal.wait(5), 0)
+            self.assertLess(time.monotonic() - started, 3)
+
     def test_a_sign_in_window_left_open_succeeds_once_signed_in(self):
         adapter = FakeAdapter("unavailable")
         adapter.sign_in_command, adapter.sign_in_window = lambda: ["/x/fake"], True

@@ -14,7 +14,7 @@ class RetryTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         root=Path(self.temp.name)
         self.archive=MeetingArchive(root/"recordings",root/"archive",root/"reports",root/"config")
-        self.archive.config_root.mkdir()
+        self.archive.config_root.mkdir(exist_ok=True)
         (self.archive.config_root/"delivery.json").write_text(json.dumps({"email_enabled":True,"email_to":"a@example.com"}))
         directory=self.archive.reports_root/"call-1"
         directory.mkdir()
