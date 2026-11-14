@@ -15,7 +15,7 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
 2026-10-21: public 0.1.12 Mac/Windows pre-releases (one AI choice, Mac speech choice):
 [0.1.12 distribution acceptance](releases/2026-10-21-0.1.12-distribution.md).
 
-- [ ] MEETONTRACK-1: `scripts/check-note-ui.cjs` fails at 0.1.11 and identically at the 0.1.10
+- [x] MEETONTRACK-1 (done and verified, closed 2026-11-14): `scripts/check-note-ui.cjs` fails at 0.1.11 and identically at the 0.1.10
   source (`ae27f2b`): `#note-help` shows `--:--` where the test expects the
   fixture's elapsed time `02:44`. Decide whether the hint must render the call
   time before the first state poll (product fix) or the test must wait for it
@@ -24,6 +24,25 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
   state poll failed silently without `updates.js`), keeps the main screen up
   with recording audio, and drops the removed `#analysis-help` checks. Passes;
   close after release.
+- [ ] [MEETONTRACK-154](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-154/): 0.1.31 review leftovers (P2, Codex round 2):
+  Windows legacy `speaker_names.backend="none"` comes back after enabling naming and saving
+  (`AppSettingsStore.cs` ~92) and its migration is case-sensitive (~93); a stale assistant window
+  is reused by title after a port change (`meeting-copilot.ps1` ~143, `AmanuRuntime.cs` ~545);
+  `untrusted_git` blanks worktree-level git-lfs commands while `filter.lfs.required` stays, so
+  status on a touched LFS file fails (server.py ~306 and both refresh-repos.py). Details in Plane.
+- [ ] [MEETONTRACK-127](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-127/): Local API has no per-install token. Design in Plane: 0600
+  `~/.config/meeting-copilot/api-token`, `X-MeetOnTrack-Token` on `/api/*`, `/?t=` swapped for an
+  HttpOnly SameSite=Strict cookie; callers LocalServer.swift, AmanuRuntime.cs,
+  copilot/bin/meeting-copilot, meeting-copilot.ps1. Needs an adversarial review.
+- [x] [MEETONTRACK-151](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-151/) (shipped in v0.1.31, closed 2026-11-14): speech-to-text
+  failures show a readable reason instead of a generic error (`TranscriptionFailure` is LocalizedError).
+- [x] [MEETONTRACK-152](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-152/) (shipped in v0.1.31, closed 2026-11-14): tests no longer reach
+  the keychain (`delivery_settings.py` in-memory store under unittest/pytest).
+- [x] [MEETONTRACK-153](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-153/) (shipped in v0.1.31, closed 2026-11-14): Ollama summary chunking
+  counts CJK tokens (`LLMBackend` measure, `Summarizer.produce`).
+- [x] MEETONTRACK-128, MEETONTRACK-129 (shipped in v0.1.31, closed 2026-11-14): fact-check sends
+  private excerpts only to a no-web call; repository reading disables repo-defined git filters,
+  fsmonitor and submodule inspection.
 - [ ] [MEETONTRACK-150](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-150/): Call QA. Score
   every call against a per-team script-stage checklist (passed/missed/weak with quote and
   timestamp), daily per-manager summary, structured promise tracking (owner, due, status; today
@@ -34,11 +53,11 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
   new note (`twenty_crm.deliver`); (b) read context for a person without `companyId` lists only the
   person; add person-linked deals (`pointOfContactId`) and person notes (`TwentyContext._collect`);
   (c) paging past 60 records is verified only on fakes; confirm on the first real call (62 companies).
-- [ ] [MEETONTRACK-148](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-148/): installer test
+- [x] [MEETONTRACK-148](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-148/) (shipped in v0.1.31, closed 2026-11-14): installer test
   `test_one_install_at_a_time` times out at 30 s on Homebrew Python 3.15 or under load: with `sleep`
   mocked it starts Python up to ~600 times, so it measures interpreter start-up. Seen in the 0.1.30
   release (app repo and website). Patch the lock probe in the test so it does not spawn Python per loop.
-- [ ] MEETONTRACK-85: `copilot/web/test_meeting_boundary_ui.cjs` times out
+- [x] MEETONTRACK-85 (done and verified, closed 2026-11-14): `copilot/web/test_meeting_boundary_ui.cjs` times out
   (`locator.waitFor` 3 s, line 45) at 0.1.12 and identically at 0.1.11 (`effb7a2`).
   Not in the release script set. Find whether the fixture or the UI changed,
   fix it, then add it to the release checks.
@@ -58,13 +77,13 @@ hashes, Pages removed, and the Windows installer relocated to
   `50e7448`); `windows-candidate.yml` builds, packages and accepts it from here
   ([run 41826469696](https://github.com/AIAgentLbs/meetontrack/actions/runs/41826469696));
   `meetontrack-recorder` archived with a pointer. `capture/` remains the Mac source.
-- [ ] MEETONTRACK-110: `windows/tests/test_workflow_safety.py:7` targets the upstream
+- [x] MEETONTRACK-110 (done and verified, closed 2026-11-14): `windows/tests/test_workflow_safety.py:7` targets the upstream
   `windows-beta.yml`, which was not moved; both tests fail. Rewrite them for
   `windows-candidate.yml` and run them there, or delete them.
-- [ ] MEETONTRACK-111: Pin the .NET SDK (`windows/global.json`). With `10.0.x` the
+- [x] MEETONTRACK-111 (done and verified, closed 2026-11-14): Pin the .NET SDK (`windows/global.json`). With `10.0.x` the
   rebuilt recorder bundles runtime 10.0.14 instead of 0.1.18's 10.0.13: same files,
   different bytes, so a rebuild of one commit is not reproducible.
-- [ ] MEETONTRACK-112: `windows/BETA.md:94` links to a hardware checklist that exists
+- [x] MEETONTRACK-112 (done and verified, closed 2026-11-14): `windows/BETA.md:94` links to a hardware checklist that exists
   only upstream; link gsamat/amanu's copy or our own.
 - [ ] MEETONTRACK-113: Windows counterpart of MEETONTRACK-109: the recorder runs the
   local service itself and shows the UI in its own window.
@@ -73,7 +92,7 @@ hashes, Pages removed, and the Windows installer relocated to
   Start the service in its own process group and signal the group on stop.
   Fixed on main 2026-11-04; closes on release. (`server.py` leads its group and terminates it on shutdown; the app
   kills the group after stop, a hang or a crash; tests in `test_parent_watch.py`, `LocalServerTests`.)
-- [ ] MEETONTRACK-115: `copilot/web/test_ai_providers.py` has 5 failures and 2 errors
+- [x] MEETONTRACK-115 (done and verified, closed 2026-11-14): `copilot/web/test_ai_providers.py` has 5 failures and 2 errors
   under the bundled Python 3.12 runtime (also on baseline). Fix them and run the web
   suite with the packaged runtime in the candidate check.
 - [x] MEETONTRACK-116 (shipped in v0.1.21, Mac, closed 2026-11-04): `LocalServer.swift` adopts any server on port 43121 that
@@ -104,7 +123,7 @@ hashes, Pages removed, and the Windows installer relocated to
   (`python3 web/server.py`, any folder name) was not recognised, so the app could run a second server beside it.
   `LocalServer.isAssistantServer` now resolves the script against the listener's working directory and accepts
   a `web/server.py` with `ai_providers.py` beside it. Fixed on main 2026-11-08; closes on release with 130.
-- [ ] MEETONTRACK-131: Windows still binds the assistant to port 43121 only: another program on it stops the
+- [x] MEETONTRACK-131 (shipped in v0.1.31, closed 2026-11-14): Windows still binds the assistant to port 43121 only: another program on it stops the
   web assistant (`scripts/windows/meeting-copilot.ps1`), and the tray/settings links and operator deploy scripts
   (`scripts/deploy-*.py`) assume 43121. Resolve it like the Mac (`LocalServer.swift`, MEETONTRACK-130): stop a stale
   own service, leave a foreign program alone and use a free port recorded in `server-port`. Split out of 130 at the
@@ -149,7 +168,7 @@ hashes, Pages removed, and the Windows installer relocated to
   started, all five Codex call sites routed through the layer, model ids removed
   from Python/JS/HTML and the Windows launcher message. Spec:
   `docs/specs/2026-10-20-no-hardcoded-models.md`.
-- [ ] MEETONTRACK-4: Release 0.1.11 with phase 1 (packaging, both platforms).
+- [x] MEETONTRACK-4 (obsolete, superseded by later releases, closed 2026-11-12): Release 0.1.11 with phase 1 (packaging, both platforms).
 - [x] Review round 2 (2026-10-20): file boundary enforced (Claude Code
   `--restricted` + `--add-dir` per selected root, Read/Grep/Glob only, screenshot
   read from a folder holding only a copy; Codex permissions profile via
@@ -186,7 +205,7 @@ hashes, Pages removed, and the Windows installer relocated to
   under the temp dir when cwd is there; reads outside the roots are denied. Our
   workdir lives in `~/.cache/meeting-copilot/ai-workdir`, so not reachable today.
   Re-verify on every new Codex version with `codex sandbox -P`.
-- [ ] MEETONTRACK-6: The Claude Code boundary relies on `--restricted` (Claude Code 2.1.304).
+- [x] MEETONTRACK-6 (shipped in v0.1.31, closed 2026-11-14): The Claude Code boundary relies on `--restricted` (Claude Code 2.1.304).
   Add a version check or a Check AI escape probe so an older CLI without it is
   reported unavailable rather than run unrestricted.
 - [x] Review round 3 (2026-10-20): Setup summary cards and the legacy summary/
@@ -225,7 +244,7 @@ hashes, Pages removed, and the Windows installer relocated to
   speech through Groq's hosted Whisper API next to the AssemblyAI/OpenAI engines, and AI tasks
   through a Groq key with the API-key providers of MEETONTRACK-7. Models are read from Groq's
   models endpoint, never hardcoded. The UI says what is sent to Groq.
-- [ ] MEETONTRACK-8: Ollama context sizing counts one character as at least one token
+- [x] MEETONTRACK-8 (shipped in v0.1.31, closed 2026-11-14): Ollama context sizing counts one character as at least one token
   (`LLMBackend.ollamaInputLimit`, Python `OllamaAdapter.fit`; images are not
   counted) and keeps a fixed 4096-token reply allowance.
   Use the tokenizer (or `prompt_eval_count`) if CJK transcripts get cut or long
@@ -251,18 +270,18 @@ hashes, Pages removed, and the Windows installer relocated to
   recorder must reject unknown arguments instead of launching the GUI: in
   `windows/src/Amanu.App/App.xaml.cs` `Main` only `record <x>` and `--live-worker`
   are handled, so any other arguments start the full WPF app (found 2026-10-21).
-- [ ] MEETONTRACK-80: Windows recorder config.json save drops other writers' keys; fix in
+- [x] MEETONTRACK-80 (shipped in v0.1.31, closed 2026-11-14): Windows recorder config.json save drops other writers' keys; fix in
   `windows/` (read-modify-write under config.json.lock).
-- [ ] MEETONTRACK-81: Windows in-app updates do nothing: releases carry no Velopack update files.
+- [x] MEETONTRACK-81 (shipped in v0.1.31, closed 2026-11-14): Windows in-app updates do nothing: releases carry no Velopack update files.
 - [ ] MEETONTRACK-82: Windows recorder hardcodes AI/speech providers and models (file:line list in tracker).
-- [ ] MEETONTRACK-83: Windows recorder labels speakers Me/Participant 1; use You/Others, drop speaker_names.backend.
+- [x] MEETONTRACK-83 (shipped in v0.1.31, closed 2026-11-14): Windows recorder labels speakers Me/Participant 1; use You/Others, drop speaker_names.backend.
 - [x] MEETONTRACK-84 (shipped; closed in Plane 2026-11-04): Windows AI check and questions fail with AI_FAILED, [WinError 5] Access is denied
   in the archive folder (0.1.11, owner check 2026-10-21); reproduce on 0.1.12 and fix.
   Fixed in main c65a93b (an elevated mkdir(0o700) left owner-only ACLs); ships in the next Windows build.
-- [ ] MEETONTRACK-91: Zoom tile names mixing Cyrillic and Latin are misread by OCR ("Катя из Kumar&Solo" -> "ат umar&Sol" on 2026-10-22) and the garbled name reaches the transcript; re-OCR the highlighted label crop at higher scale with ru+en and snap to the full label seen in other frames (capture zoom-frame-inspector, copilot/web/server.py _speaker_from_frame).
+- [x] MEETONTRACK-91 (shipped in v0.1.31, closed 2026-11-14): Zoom tile names mixing Cyrillic and Latin are misread by OCR ("Катя из Kumar&Solo" -> "ат umar&Sol" on 2026-10-22) and the garbled name reaches the transcript; re-OCR the highlighted label crop at higher scale with ru+en and snap to the full label seen in other frames (capture zoom-frame-inspector, copilot/web/server.py _speaker_from_frame).
 - [x] MEETONTRACK-92 (shipped; closed in Plane 2026-11-04): An unreadable or undated report status said "Не читается состояние отчета. Проверьте локальный архив" with no action.
   Fixed in release/0.1.15 (`archive.py` `repair_report_states`): rebuilt from the report folder, or one "create the report again" button; close after release.
-- [ ] MEETONTRACK-93: 0.1.15 review leftovers (P2): a repaired report whose PDF is older than the 3-day window and was never
+- [x] MEETONTRACK-93 (shipped in v0.1.31, closed 2026-11-14): 0.1.15 review leftovers (P2): a repaired report whose PDF is older than the 3-day window and was never
   tracked is skipped as historical, so no Send again is offered (`archive.py` `repair_report_states`, exempt `state_repaired_at`);
   a resend still sending after the 5-minute poll shows "Could not send" (`app.js` `resendReport`, show "may not have arrived").
 - [x] MEETONTRACK-99 (shipped; closed in Plane 2026-11-04): Rebuilt reports of old meetings showed old delivery failures as new problems (0.1.16, 9AE490BB:
@@ -366,7 +385,7 @@ hashes, Pages removed, and the Windows installer relocated to
   died, `Dispose` rethrew from `drain.Wait` before closing the file, and the stop went on to queue the session with
   the writer still open until the app quit. The drain now survives any write error, `Dispose` always closes the file,
   and `DisposeCaptureAsync` disposes every track whatever failed before it (`TrackWriterTests`).
-- [ ] MEETONTRACK-118: a final transcript that never arrives stops being flagged after the 3-day delivery window
+- [x] MEETONTRACK-118 (shipped in v0.1.31, closed 2026-11-14): a final transcript that never arrives stops being flagged after the 3-day delivery window
   (`archive.py` `_final_wait`, `delivery_health`), and a late final makes the report on request only.
 - [ ] MEETONTRACK-89: Mac call-audio capture fades to silence during Chrome calls (39 of 53 min lost on 2026-10-21);
   watchdog fix ee2e6cf limits it; live A/B against an output-clocked aggregate on the next real call.
@@ -385,12 +404,12 @@ hashes, Pages removed, and the Windows installer relocated to
   Done on branch worktree-agent-a427cf01f1e72ae19; open until merged and released.
 - [x] MEETONTRACK-97 (shipped; closed in Plane 2026-11-04): Call overview status counters are filter toggles saved as `call_overview_statuses` in the
   shared config.json. Done on branch worktree-agent-a427cf01f1e72ae19; open until merged and released.
-- [ ] MEETONTRACK-70: LocalVQE echo-cancellation model (`liblocalvqe`, echo removal before
+- [x] MEETONTRACK-70 (done and verified, closed 2026-11-14): LocalVQE echo-cancellation model (`liblocalvqe`, echo removal before
   transcription) is still a fixed model; offer it through discovery like the speech
   models or record why it is an adapter constant.
 - [ ] MEETONTRACK-71: transcribe.cpp (whisper.cpp family) as a second local Mac adapter in
   `stt-options`, so local choices are not FluidAudio-only.
-- [ ] MEETONTRACK-72: Cloud speech pricing: no prices in the UI; link each cloud engine to the
+- [x] MEETONTRACK-72 (shipped in v0.1.31, closed 2026-11-14): Cloud speech pricing: no prices in the UI; link each cloud engine to the
   provider's own pricing page (`source_url`-style field in `stt-options`).
 - [ ] MEETONTRACK-73: Speech engines offered by FluidAudio but not yet adapted: Sortformer speaker
   models, `StreamingModelVariant` (Parakeet EOU) streaming, Parakeet int4 encoder
@@ -403,22 +422,22 @@ hashes, Pages removed, and the Windows installer relocated to
 - [ ] MEETONTRACK-75: Verify against the real services once: AssemblyAI `speech_models` +
   `speech_model_used` and OpenAI transcription models through `stt-check` with a
   real key (not exercised in tests).
-- [ ] MEETONTRACK-76: Live transcription follows a speech choice changed during a recording
+- [x] MEETONTRACK-76 (shipped in v0.1.31, closed 2026-11-14): Live transcription follows a speech choice changed during a recording
   (codex 2026-10-21, P2): `MeetingCopilot.resumeAfterConfigChange` resumes only
   final transcription; `LiveTranscriptionCoordinator` resolves the choice at
   recording start or a toggle, and its watchdog does not retry `unavailable`.
   Restart the enabled live pipeline when the choice or its readiness changes.
-- [ ] MEETONTRACK-77: Parakeet live backpressure (codex 2026-10-21, P2):
+- [x] MEETONTRACK-77 (shipped in v0.1.31, closed 2026-11-14): Parakeet live backpressure (codex 2026-10-21, P2):
   `ParakeetLiveRecognizer.process` only enqueues into FluidAudio's unbounded
   `streamAudio` queue, so the coordinator's backlog limit and stalled-decoder
   recovery never see a slow decoder. Await decoding or bound the queue and
   report real progress (`LiveRecognizer.swift`, `ponytail:` comment).
-- [ ] MEETONTRACK-78: Replace a rejected cloud API key (codex 2026-10-21, P2): `speech.js`
+- [x] MEETONTRACK-78 (shipped in v0.1.31, closed 2026-11-14): Replace a rejected cloud API key (codex 2026-10-21, P2): `speech.js`
   hides the key field once a key file exists (`has_key: true`), so a mistyped
   key that the provider rejects (OpenAI 401 listing error) cannot be replaced.
   Keep the field when the listing reports an authentication error, or validate
   the key on save.
-- [ ] MEETONTRACK-79: Keep typed API key during polling (codex 2026-10-21, P2): while a download
+- [x] MEETONTRACK-79 (shipped in v0.1.31, closed 2026-11-14): Keep typed API key during polling (codex 2026-10-21, P2): while a download
   or re-transcription runs, `speech.js` `refreshState()` rebuilds the whole
   choice form every 1.5 s and drops the key being typed. Update progress
   separately or keep the mounted form.
@@ -453,7 +472,7 @@ hashes, Pages removed, and the Windows installer relocated to
 - MEETONTRACK-15: Add explicitly opt-in, reviewable account-wide summary preferences separately
   from one-meeting correction requests. Current correction instructions apply
   only to the selected meeting; never silently promote them to a global rule.
-- MEETONTRACK-16: Migrate legacy report branding to MeetOnTrack without changing automatic report
+- [x] MEETONTRACK-16 (shipped in v0.1.16, closed 2026-11-12): Migrate legacy report branding to MeetOnTrack without changing automatic report
   delivery signatures or resending previously delivered reports. Existing PDF/HTML
   exports retain their original branding until an intentional migration/rebuild.
 - [x] MEETONTRACK-95 (shipped; closed in Plane 2026-11-04): Links and services: one card per URL (SERVICE and LINK merged, OCR
@@ -498,10 +517,10 @@ hashes, Pages removed, and the Windows installer relocated to
   `done` records saved before aa861a7 carry no transcript signature, so a later transcript
   change does not reoffer the rebuild. Pass the recording predicate through `start()`;
   treat a missing signature as stale once a current one is available.
-- [ ] MEETONTRACK-106: The Mac recorder still refuses Antigravity
+- [x] MEETONTRACK-106 (shipped in v0.1.31, closed 2026-11-14): The Mac recorder still refuses Antigravity
   (`capture/.../Summary/AIChoice.swift`), so summaries and speaker names are unavailable
   with that choice. Add a Swift backend with the same isolation; check the Windows recorder.
-- [ ] MEETONTRACK-108: On macOS the Antigravity sign-in runs as `open -a Terminal agy`;
+- [x] MEETONTRACK-108 (shipped in v0.1.31, closed 2026-11-14): On macOS the Antigravity sign-in runs as `open -a Terminal agy`;
   `SignIns` tracks `open`, so an abandoned sign-in leaves agy waiting in Terminal
   (`AntigravityAdapter.sign_in_command`, `ai_providers.py`). Launch agy through a wrapper that
   records its own PID and stop only that PID after the window; never touch other Terminal sessions.
@@ -535,14 +554,14 @@ hashes, Pages removed, and the Windows installer relocated to
   erroneous live version: supersede unsupported generated items with provenance,
   preserve manual notes/status edits and retain an audit trail. Do not blindly
   delete the journal or infer that refreshing the transcript fixes old analysis.
-- MEETONTRACK-21: Repair or document the local CLT 6.3.2 test-toolchain discovery failure
+- [x] MEETONTRACK-21 (documented in capture/README.md, closed 2026-11-14): Repair or document the local CLT 6.3.2 test-toolchain discovery failure
   (`cmath`, Testing framework and TestingInterop paths). The language acceptance
   script provides explicit process-local paths; do not change the system SDK
   or install another toolchain as part of an active-call repair.
 
 ## Existing UI accessibility warnings
 
-- MEETONTRACK-22: Verify the existing muted-text contrast and dialog content padding in
+- [x] MEETONTRACK-22 (shipped in v0.1.31, closed 2026-11-14): Verify the existing muted-text contrast and dialog content padding in
   `copilot/web/styles.css` with actual light/dark UI screenshots and computed
   styles. The Impeccable scan during removal of AI chat reset flagged these
   unrelated areas; they were not changed in that scoped task. Adjust verified
@@ -754,22 +773,22 @@ stored in this repository. Verify the public installed package as well as source
 
 ## AI provider layer: Codex review round 5 leftovers (2026-10-20, P2)
 
-- [ ] MEETONTRACK-50: Ollama live chat pins the whole first prompt (transcript, question,
+- [x] MEETONTRACK-50 (shipped in v0.1.31, closed 2026-11-14): Ollama live chat pins the whole first prompt (transcript, question,
   excerpts) as the system message, so trimming cannot reclaim it and valid
   continuations are rejected on small contexts (`copilot/web/ai_providers.py`
   ~603). Split immutable session rules from meeting content; let old
   snapshots be trimmed.
-- [ ] MEETONTRACK-51: `live_translation.py` ~84: a status change to `needs_choice` /
+- [x] MEETONTRACK-51 (shipped in v0.1.31, closed 2026-11-14): `live_translation.py` ~84: a status change to `needs_choice` /
   `unavailable` does not bump `revision`, so `AnnotationCache.snapshot()`
   keeps serving the old empty `translation_state`. Bump revision on status
   change.
-- [ ] MEETONTRACK-52: `live_translation.py` ~77: an English/Russian/undetected segment clears
+- [x] MEETONTRACK-52 (shipped in v0.1.31, closed 2026-11-14): `live_translation.py` ~77: an English/Russian/undetected segment clears
   `needs_choice` while foreign segments still wait for a translation choice.
   Keep the status while unresolved jobs need a choice.
 
 ## Live translation: no-op "EN:" lines on Russian speech (found 2026-10-21)
 
-- [ ] MEETONTRACK-64: Short Russian phrases are misdetected by `detect-speech-language` as
+- [x] MEETONTRACK-64 (shipped in v0.1.31, closed 2026-11-14): Short Russian phrases are misdetected by `detect-speech-language` as
   `bg`/`kk` with confidence 1.0, so `live_translation.py` `_work` sends them for
   translation; the prompt says "keep Russian words as Russian", the model returns
   the Russian text unchanged, and the segment gets `translation_en` equal to its
