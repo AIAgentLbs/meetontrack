@@ -64,8 +64,9 @@ conversation and connected-source excerpts are sent to the chosen AI service. Ca
 and local transcription work independently of the AI account.
 Git repository search works only with Codex or Claude Code; Ollama cannot read
 repositories. Antigravity runs with its own strict settings (no files, no
-commands), so it cannot read repositories or screenshots either, and the
-recorder cannot use it yet for meeting summaries and speaker names.
+commands), so it cannot read repositories or screenshots either. The Mac
+recorder can use it for meeting summaries and speaker names; the Windows
+recorder cannot yet.
 
 Connect local folders in Context sources; Git is optional. Current local formats
 are UTF-8 text, Markdown, CSV and source code. Google context is optional and
