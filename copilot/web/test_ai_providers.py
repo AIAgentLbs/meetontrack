@@ -113,7 +113,7 @@ def fake_cli(directory, name, source, **values):
     # A shebang cannot hold the packaged interpreter's path ("Meeting Copilot Capture.app" has
     # spaces), so a sh launcher runs the source with it (MEETONTRACK-115).
     path.with_suffix(".py").write_text(source)
-    path.write_text(f'#!/bin/sh\nexec {shlex.quote(PY)} {shlex.quote(str(path.with_suffix(".py")))} "$@"\n')
+    path.write_text(f'#!/bin/sh\nexec {shlex.quote(PY)} -B {shlex.quote(str(path.with_suffix(".py")))} "$@"\n')
     path.chmod(0o755)
     return path
 
