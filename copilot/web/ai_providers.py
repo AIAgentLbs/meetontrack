@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 import queue
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -44,6 +45,7 @@ RECORDER_TASKS = {"summary", "speaker_names"}  # run by the Swift recorder (Summ
 CHOICE_KEYS = ("provider", "model", "effort", "speed")
 STANDARD = "standard"  # an explicit "no speed tier" when a model offers tiers
 WINDOWS = os.name == "nt"
+MACOS = not WINDOWS and os.uname().sysname == "Darwin"
 DISCOVERY_TIMEOUT = 20
 OUTPUT_LIMIT = 8 << 20  # characters kept per stream; the rest is read and dropped
 LINE_LIMIT = 1 << 20
@@ -399,6 +401,7 @@ class ClaudeAdapter:
     name, label, reads_files, web_search = "claude", "Claude Code", True, True
     # --restricted confines file tools to the working directories (cwd and --add-dir).
     ISOLATED = ["--restricted", "--setting-sources", "", "--strict-mcp-config"]
+    RESTRICTED_SINCE = (2, 1, 304)  # the version --restricted was verified on; older ones are refused (MEETONTRACK-6)
     FAST_OPT_IN = {None, "", "sdk_opt_in_required"}  # opt-in is what --settings fastMode does
 
     def __init__(self, binary=None):
@@ -428,6 +431,15 @@ class ClaudeAdapter:
 
     def discover(self, env=None):
         def body(binary):
+            # The file boundary is --restricted: a Claude Code that may not honour it is never run.
+            run = _run([binary, "--version"], None, env, DISCOVERY_TIMEOUT)
+            found = re.search(r"\d+(?:\.\d+)+", run.stdout or "")
+            version = tuple(map(int, found.group().split("."))) if found and not run.returncode else ()
+            if version < self.RESTRICTED_SINCE:
+                need = ".".join(map(str, self.RESTRICTED_SINCE))
+                return _unavailable(self, f"Claude Code {found.group() if version else '(version unknown)'} is older "
+                                          f"than {need}, which MeetOnTrack needs to keep it to the selected folders. "
+                                          "Update Claude Code, then refresh.")
             run = _run([binary, "auth", "status", "--json"], None, env, DISCOVERY_TIMEOUT)
             try:
                 auth = json.loads(run.stdout or "{}")
@@ -514,9 +526,7 @@ class AntigravityAdapter:
         binary = self.binary()
         if not binary:
             return None
-        if WINDOWS:
-            return [str(binary)]  # started in its own console window (SignIns)
-        return ["/usr/bin/open", "-a", "Terminal", str(binary)] if os.uname().sysname == "Darwin" else None
+        return [str(binary)] if WINDOWS or MACOS else None  # started in its own window (SignIns)
 
     def identity(self, env=None):
         """Executable plus the signed-in account. Not the token file's stamp: agy rewrites it on
@@ -1033,6 +1043,47 @@ class AIService:
         return bool(cached and cached[2].get("needs_sign_in"))
 
 
+class _TerminalSignIn:
+    """macOS: a window sign-in in Terminal. `open` returns at once without a PID, so the command
+    runs through a wrapper that records its own PID and then becomes the command. Only that
+    recorded process is ever stopped, never Terminal or another session in it (MEETONTRACK-108)."""
+    def __init__(self, command, stem):
+        self.command, self.pidfile, self.script = command, stem.with_suffix(".pid"), stem.with_suffix(".command")
+        self.pidfile.unlink(missing_ok=True)
+        self.script.write_text(f"#!/bin/sh\necho $$ > {shlex.quote(str(self.pidfile))}\n"
+                               f"exec {shlex.join(command)}\n", encoding="utf-8")
+        self.script.chmod(0o700)
+        self.seen = False  # the PID was recorded: the command started
+
+    def _running(self):
+        """The recorded PID while it still runs the command (a reused PID is someone else's)."""
+        try:
+            pid = int(self.pidfile.read_text(encoding="utf-8"))
+            args = subprocess.run(["/bin/ps", "-p", str(pid), "-o", "args="], capture_output=True, text=True,
+                                  timeout=5).stdout
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return None
+        self.seen = True
+        return pid if self.command[0] in args else None
+
+    def wait(self, timeout):
+        """Exit code 0 once the started command has ended; TimeoutExpired while it runs or starts."""
+        end = time.monotonic() + timeout
+        while not (self.seen and self._running() is None):
+            if time.monotonic() >= end:
+                raise subprocess.TimeoutExpired(self.command, timeout)
+            time.sleep(min(1, max(0, end - time.monotonic())))
+        return 0
+
+    def stop(self, sig):
+        pid = self._running()
+        if pid:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+
+
 class SignIns:
     """Sign-in started from the app: one per provider at a time, detached (own session or process
     group), output to a log file. When it ends well, that provider's discovery is refreshed and
@@ -1082,11 +1133,18 @@ class SignIns:
             else {"start_new_session": True}
         private_dir(self.log_dir)
         with open(self.log_dir / f"sign-in-{adapter.name}.log", "wb") as log:  # the CLI's own output, no tokens
+            if MACOS and window:  # the person signs in inside a Terminal window
+                terminal = _TerminalSignIn(command, self.log_dir / f"sign-in-{adapter.name}")
+                subprocess.run(["/usr/bin/open", "-a", "Terminal", str(terminal.script)], stdin=subprocess.DEVNULL,
+                               stdout=log, stderr=subprocess.STDOUT, timeout=30, check=True)
+                return terminal
             return subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                                     cwd=_workdir(), env=self.service.env, **detached)
 
     @staticmethod
     def _stop(process, sig):
+        if isinstance(process, _TerminalSignIn):
+            return process.stop(sig)
         try:
             if WINDOWS:
                 process.kill()  # ponytail: the CLI only, not a browser helper it may have started
@@ -1129,6 +1187,8 @@ class SignIns:
                 break
         if code is None and not signed_in:
             self._stop(process, getattr(signal, "SIGKILL", None))
+        elif isinstance(process, _TerminalSignIn):
+            process.stop(signal.SIGTERM)  # signed in: the Terminal agy has done its job
         with self.lock:
             self.running.discard(adapter.name)
             self.processes.pop(adapter.name, None)

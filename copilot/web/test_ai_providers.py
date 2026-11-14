@@ -246,6 +246,19 @@ class ClaudeTests(unittest.TestCase):
         self.assertIsNone(one["image"])
         self.assertTrue(vague["problem"])
 
+    def test_a_claude_code_older_than_restricted_is_unavailable_and_never_started(self):
+        """MEETONTRACK-6: the file boundary is --restricted; an older CLI must not run unbounded."""
+        for version in ("2.1.303 (Claude Code)", "garbled"):
+            with tempfile.TemporaryDirectory() as tmp:
+                marker = Path(tmp) / "ran"
+                binary = fake_cli(tmp, "claude", FAKE_CLAUDE.replace(
+                    "args = sys.argv[1:]\n", f"args = sys.argv[1:]\nopen({str(marker)!r}, 'a').write(repr(args))\n"),
+                    **{"9.9.9 (Claude Code)": version})
+                found = ClaudeAdapter(lambda: binary).discover()
+                self.assertEqual(found["state"], "unavailable", found)
+                self.assertIn("Update Claude Code", found["reason"])
+                self.assertEqual(marker.read_text(), "['--version']")  # no sign-in check, no session
+
     def run_call(self, choice, **options):
         stream = "\n".join(json.dumps(x) for x in (
             {"type": "system", "subtype": "init", "model": "reported-model", "session_id": "s1"},
@@ -1007,9 +1020,8 @@ class RejectedSignInTests(unittest.TestCase):
         self.assertEqual(CodexAdapter(lambda: "/x/codex").sign_in_command(), ["/x/codex", "login"])
         self.assertEqual(ClaudeAdapter(lambda: "/x/claude").sign_in_command(), ["/x/claude", "auth", "login"])
         self.assertIsNone(CodexAdapter(lambda: None).sign_in_command())
-        if sys.platform == "darwin":
-            self.assertEqual(AntigravityAdapter(lambda: "/x/agy").sign_in_command(),
-                             ["/usr/bin/open", "-a", "Terminal", "/x/agy"])
+        if sys.platform == "darwin":  # SignIns runs it in a Terminal window
+            self.assertEqual(AntigravityAdapter(lambda: "/x/agy").sign_in_command(), ["/x/agy"])
 
 
 class SignInTests(unittest.TestCase):
@@ -1069,6 +1081,44 @@ class SignInTests(unittest.TestCase):
                 sign_ins.stop_all()  # a finished sign-in is forgotten
                 killpg.assert_not_called()
 
+    @unittest.skipUnless(sys.platform == "darwin", "macOS Terminal sign-in")
+    def test_an_abandoned_terminal_sign_in_stops_only_its_own_process(self):
+        """MEETONTRACK-108: `open -a Terminal` gives no PID; the wrapper records agy's own PID, and
+        only that process is stopped when the window ends. Terminal is simulated by running the script."""
+        adapter, real_run, started = FakeAdapter("unavailable"), subprocess.run, []
+
+        def run(argv, **options):  # `open -a Terminal script` runs the script in a new window
+            if argv[0] != "/usr/bin/open":
+                return real_run(argv, **options)
+            self.assertEqual(argv[:3], ["/usr/bin/open", "-a", "Terminal"])
+            started.append(subprocess.Popen(["/bin/sh", argv[3]]))
+            return subprocess.CompletedProcess(argv, 0)
+        with tempfile.TemporaryDirectory() as tmp:
+            agy = fake_cli(tmp, "agy", "import time\ntime.sleep(60)\n")
+            adapter.sign_in_command, adapter.sign_in_window = lambda: [str(agy)], True
+            bystander = subprocess.Popen(["/bin/sleep", "60"])  # another session in Terminal
+            sign_ins = ai_providers.SignIns(AIService(Path(tmp) / "c.json", {}, adapters=[adapter]), Path(tmp) / "logs")
+            sign_ins.POLL, sign_ins.WINDOW = 0.1, 3
+            try:
+                with patch.object(ai_providers, "MACOS", True), patch.object(ai_providers.subprocess, "run", run):
+                    self.assertTrue(sign_ins.start("fake"))
+                    for _ in range(200):
+                        if not sign_ins.state()["running"]:
+                            break
+                        time.sleep(0.05)
+                    self.assertEqual(sign_ins.state()["failed"], {"fake": "timed out"})
+                    started[0].wait(10)  # agy (exec'd by the wrapper) was stopped
+                    self.assertIsNone(bystander.poll())
+                    # a recorded PID now used by another program is never stopped
+                    terminal = ai_providers._TerminalSignIn([str(agy)], Path(tmp) / "other")
+                    terminal.pidfile.write_text(str(bystander.pid))
+                    terminal.stop(ai_providers.signal.SIGKILL)
+                    self.assertIsNone(bystander.poll())
+            finally:
+                bystander.kill()
+                for process in started:
+                    process.kill()
+
     def test_a_sign_in_window_left_open_succeeds_once_signed_in(self):
         adapter = FakeAdapter("unavailable")
         adapter.sign_in_command, adapter.sign_in_window = lambda: ["/x/fake"], True
@@ -1077,7 +1127,8 @@ class SignInTests(unittest.TestCase):
             sign_ins = ai_providers.SignIns(AIService(Path(tmp) / "c.json", {}, adapters=[adapter]), tmp, done.append)
             sign_ins.POLL, sign_ins.WINDOW = 0.05, 10
             with patch.object(ai_providers.subprocess, "Popen", return_value=process), \
-                    patch.object(ai_providers.os, "killpg") as killpg:
+                    patch.object(ai_providers, "MACOS", False), \
+                    patch.object(ai_providers.os, "killpg") as killpg:  # a console window (Windows)
                 self.assertTrue(sign_ins.start("fake"))
                 time.sleep(0.2)
                 self.assertEqual(sign_ins.state()["running"], ["fake"])
