@@ -8,6 +8,13 @@ protocol EchoCancellationBackend: AnyObject {
     func process(microphone: [Float], reference: [Float]) throws -> [Float]
 }
 
+/// Adapter constant, not a model choice (MEETONTRACK-70; see "Echo cancellation" in
+/// docs/specs/2026-10-20-no-hardcoded-models.md). The weights ship inside the app,
+/// built and hash-checked by scripts/build-localvqe.sh, and must match the bundled
+/// liblocalvqe build and this adapter's frame handling. There is nothing to discover:
+/// the person controls only `offline_echo_cancellation` (on/off). Changing the model
+/// means changing the bundle, the SHA and `processorVersion` together, so cached
+/// echo-cleaned audio is redone.
 enum LocalVQEAssets {
     static let modelName = "localvqe-v1.4-aec-200K-f32.gguf"
     static let modelSHA256 = "b6e43138588a83bfe903ab5e143b4020b91c1e1629f5a575ac5855ff0003c731"

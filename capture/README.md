@@ -15,6 +15,32 @@ make app
 ```
 
 The application bundle is written to `.build/MeetingCopilotCapture.app`.
+
+### Command Line Tools 6.3.2 without Xcode (MEETONTRACK-21)
+
+With only the Command Line Tools selected (`xcode-select -p` prints
+`/Library/Developer/CommandLineTools`, Swift 6.3.2), `swift build --build-tests`
+and `swift test` fail before any test runs: FluidAudio's C++ wrapper stops at
+`fatal error: 'cmath' file not found`, and the test targets cannot find the
+`Testing` framework or, at run time, `lib_TestingInterop.dylib`. The toolchain
+does not add its own C++ headers and developer framework paths. Pass them for
+this one process instead of changing the system SDK or installing another
+toolchain:
+
+```sh
+CLT=/Library/Developer/CommandLineTools
+SDK="$(xcrun --show-sdk-path)"
+swift test \
+  -Xcxx -isystem -Xcxx "$SDK/usr/include/c++/v1" \
+  -Xswiftc -F -Xswiftc "$CLT/Library/Developer/Frameworks" \
+  -Xlinker "-F$CLT/Library/Developer/Frameworks" \
+  -Xlinker -rpath -Xlinker "$CLT/Library/Developer/Frameworks" \
+  -Xlinker -rpath -Xlinker "$CLT/Library/Developer/usr/lib"
+```
+
+`scripts/check-language-switching.sh` adds the same flags automatically when
+the Command Line Tools are selected. With full Xcode selected they are not
+needed.
 Microphone and Screen & System Audio Recording permissions are granted by the
 user in macOS System Settings.
 

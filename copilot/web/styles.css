@@ -7,13 +7,13 @@
   --line: #d6d3cc;
   --line-strong: #b9b5ac;
   --text: #20211f;
-  --muted: #6f716c;
-  --faint: #979990;
+  --muted: #656762;
+  --faint: #656760;
   --accent: #2c6958;
   --accent-strong: #194d40;
   --accent-soft: #dcebe5;
   --danger: #9b3b2e;
-  --warning: #9a6518;
+  --warning: #8c5c16;
   --radius: 12px;
   --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
@@ -69,7 +69,7 @@
     --line-strong: #555b55;
     --text: #edf0eb;
     --muted: #aeb4ad;
-    --faint: #7c847c;
+    --faint: #9fa59f;
     --accent: #78b9a5;
     --accent-strong: #9bcfbe;
     --accent-soft: #243e35;
@@ -309,7 +309,7 @@ body {
   margin-left: 8px;
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .archive-chat p,
@@ -402,7 +402,7 @@ input:focus-visible + span {
 
 .brand-company {
   color: var(--accent-strong);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.055em;
   text-transform: uppercase;
@@ -856,7 +856,7 @@ input:focus-visible + span {
 .frame-caption time {
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .frames-empty {
@@ -898,7 +898,7 @@ input:focus-visible + span {
 .speaker-dialog { width: min(850px, calc(100vw - 24px)); max-height: 90dvh; padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--surface-strong); }
 .speaker-dialog::backdrop { background: rgb(0 0 0 / 35%); }
 .speaker-dialog-shell { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; max-height: 88dvh; }
-.speaker-editor-body { overflow: auto; padding: 8px 20px 16px; }
+.speaker-editor-body { overflow: auto; padding: 8px 22px 16px; }
 .speaker-editor-body h3 { margin: 16px 0 10px; font-size: 15px; }
 .speaker-name-row, .speaker-assignment-controls { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .speaker-name-row span { min-width: 120px; font-size: 12px; }
@@ -908,7 +908,7 @@ input:focus-visible + span {
 .speaker-edit-utterance { display: grid; grid-template-columns: 20px 125px minmax(0, 1fr); gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; cursor: pointer; }
 .speaker-edit-utterance input { margin: 3px 0 0; accent-color: var(--accent); }
 .speaker-edit-utterance strong { font-size: 11px; font-weight: 650; }
-.speaker-edit-utterance time { display: block; font-size: 10px; color: var(--muted); }
+.speaker-edit-utterance time { display: block; font-size: 11px; color: var(--muted); }
 .speaker-edit-utterance span { line-height: 1.35; }
 .speaker-edit-utterance:has(input:checked) { background: var(--accent-soft); }
 @media (max-width: 600px) {
@@ -947,7 +947,7 @@ input:focus-visible + span {
   content: "EN";
   display: inline-block;
   margin-right: 8px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.08em;
   color: var(--accent-strong);
@@ -963,7 +963,7 @@ input:focus-visible + span {
   margin-top: 2px;
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .empty-state,
@@ -1050,7 +1050,7 @@ input:focus-visible + span {
   border-radius: 9px;
   background: var(--surface-muted);
   color: var(--faint);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   text-align: center;
 }
@@ -1241,7 +1241,7 @@ input:focus-visible + span {
 
 .journal-kind {
   color: var(--accent-strong);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.055em;
 }
@@ -1249,7 +1249,7 @@ input:focus-visible + span {
 .journal-card-header time,
 .journal-meeting {
   color: var(--faint);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .journal-timing {
@@ -1266,7 +1266,7 @@ input:focus-visible + span {
   color: var(--accent-strong);
   cursor: pointer;
   font: inherit;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -1457,7 +1457,7 @@ input:focus-visible + span {
 .project-group-title {
   margin: 14px 0 7px;
   color: var(--faint);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -1502,7 +1502,7 @@ input:focus-visible + span {
   top: 12px;
   right: 12px;
   color: var(--accent-strong);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -1577,7 +1577,7 @@ input:focus-visible + span {
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 94%, var(--accent) 6%);
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1621,7 +1621,7 @@ input:focus-visible + span {
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -1643,7 +1643,7 @@ input:focus-visible + span {
   overflow: hidden;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1777,7 +1777,7 @@ textarea::placeholder {
   min-height: 15px;
   margin-top: 6px;
   color: var(--faint);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .composer-help.error {

@@ -450,6 +450,30 @@ live-capable choice the recording runs without a live transcript and shows why.
 - Provenance: `transcript.json` `engine`, `model` (AssemblyAI: the provider's
   `speech_model_used`) and `language` that actually ran.
 
+### Echo cancellation (MEETONTRACK-70)
+
+The LocalVQE echo canceller (`liblocalvqe` plus
+`localvqe-v1.4-aec-200K-f32.gguf`, removing the far end's echo from the
+microphone before final transcription) is an adapter constant, like the
+LS-EEND thresholds above, not a model choice, and is not offered through
+discovery:
+
+- It is a bundled, hash-pinned asset, not something a provider or the person
+  installs. `capture/scripts/build-localvqe.sh` fetches one pinned revision and
+  checks its SHA-256, `make app` copies it into the app, and
+  `LocalVQEAssets` (`capture/Sources/meetingcopilot/Audio/EchoCanceller.swift`)
+  refuses a file whose hash differs. There is no list to discover.
+- The weights are tied to the bundled library build (with its approved patches)
+  and to the adapter's sample rate and frame size. A different model is a code
+  change: new bundle, SHA and `processorVersion`. The version and SHA are part
+  of the echo-cleaned audio cache key and are recorded in the session state
+  (`audio_echo_cancellation.processor`, `model_sha256`).
+- The person's choice is whether to use it at all: `offline_echo_cancellation`
+  (on by default).
+
+Offering echo models through discovery becomes relevant only if a second echo
+engine is added; that is a new adapter, not a setting.
+
 ### Open questions for the owner
 
 - Existing cloud installs without `transcription.language`: the migration
