@@ -16,14 +16,16 @@ ITEM="${MEETONTRACK_SIGNING_VAULT_ITEM:-MeetOnTrack macOS self-signed code signi
 BW_SAFE="${BW_SAFE:-$HOME/.local/bin/bw-safe}"
 work="$(mktemp -d "${TMPDIR:-/tmp}/meetontrack-signing.XXXXXX")"
 keychain="$work/signing.keychain-db"
+trap 'rm -rf "$work"' EXIT
+security list-keychains -d user > "$work/search-list"  # fails before any secret is fetched
 saved_list=()
 while IFS= read -r line; do
   line="${line#"${line%%[![:space:]]*}"}"; line="${line%\"}"; line="${line#\"}"
   [[ -n "$line" ]] && saved_list+=("$line")
-done < <(security list-keychains -d user)
+done < "$work/search-list"
 cleanup() {
-  security list-keychains -d user -s "${saved_list[@]}" || true
   security delete-keychain "$keychain" 2>/dev/null || true
+  security list-keychains -d user -s ${saved_list[@]+"${saved_list[@]}"} || true
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -55,7 +57,7 @@ security import "$work/once.p12" -k "$keychain" -f pkcs12 -P "$once" -T /usr/bin
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$once" "$keychain" >/dev/null
 rm -f "$work/once.p12"
 # codesign finds an identity only in a keychain on the search list.
-security list-keychains -d user -s "${saved_list[@]}" "$keychain"
+security list-keychains -d user -s ${saved_list[@]+"${saved_list[@]}"} "$keychain"
 security find-identity -p codesigning "$keychain" | grep -q "$sign_id" \
   || { echo "Signing identity $sign_id missing after import" >&2; exit 1; }
 MEETONTRACK_SIGN_ID="$sign_id" MEETONTRACK_SIGN_KEYCHAIN="$keychain" "$@"
