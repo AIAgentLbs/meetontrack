@@ -148,6 +148,11 @@ hashes, Pages removed, and the Windows installer relocated to
   notarized DMG is out of scope: no Apple Developer account for now (owner
   2026-11-04), revisit when users complain about installation.
 
+- [ ] MEETONTRACK-156: the native Mac app never showed an available update (only a header button in the assistant
+  window). Fixed on main (1a669bc): menu bar item "Version X available - Install", one banner per version, and an
+  Install button in Settings next to the offer; ships with the next Mac release. Open P3 (Codex): an older failed
+  server job can hide a local failed install of a newer version (`ReleaseOffer.swift:30`), menu stays "available".
+
 - [ ] MEETONTRACK-155: macOS asks for "Screen & System Audio Recording" again after every update. The app is
   signed ad-hoc (`scripts/assemble-arm64-app.sh:30`), so its designated requirement is the cdhash and TCC treats each
   build as a new app. Sign with one stable self-signed identity from Vault so the requirement is identifier plus
