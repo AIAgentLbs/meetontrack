@@ -39,14 +39,22 @@ struct ReleaseOfferTests {
 
     @Test("A failed install reads as failed with a retry of the release on offer")
     func failed() {
-        let failed = ReleaseOffer(updates: updates(install: ["version": "0.9.0", "state": "failed"]))
+        let failed = ReleaseOffer(updates: updates(install: ["version": "0.9.1", "state": "failed"]))
         #expect(failed == ReleaseOffer(version: "0.9.1", kind: .failed))
         #expect(failed?.isActionable == true)
         #expect(failed?.shouldNotify(lastNotified: nil) == false)
         #expect(ReleaseOffer(updates: updates(notify: false, install: ["version": "0.9.1", "state": "failed"])) == nil)
         // The app's own failed request, like installError in updates.js; a server job wins over it.
-        #expect(ReleaseOffer(updates: updates(), installFailed: true)?.kind == .failed)
-        #expect(ReleaseOffer(updates: updates(install: ["version": "0.9.1", "state": "running"]), installFailed: true)?.kind == .running)
+        #expect(ReleaseOffer(updates: updates(), installFailed: "0.9.1")?.kind == .failed)
+        #expect(ReleaseOffer(updates: updates(install: ["version": "0.9.1", "state": "running"]), installFailed: "0.9.1")?.kind == .running)
+    }
+
+    @Test("A failure of an older version leaves a newer release a fresh offer with its banner")
+    func failedOlder() {
+        let newer = ReleaseOffer(updates: updates(install: ["version": "0.9.0", "state": "failed"]))
+        #expect(newer == ReleaseOffer(version: "0.9.1", kind: .available))
+        #expect(newer?.shouldNotify(lastNotified: "0.9.0") == true)
+        #expect(ReleaseOffer(updates: updates(), installFailed: "0.9.0")?.kind == .available)
     }
 
     @Test("A banner installs only its own version while it is still on offer")

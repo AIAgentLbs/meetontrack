@@ -11,8 +11,9 @@ struct ReleaseOffer: Equatable {
 
     /// Nil when nothing is to be shown: no trusted offer the person still wants
     /// to hear about (`notify` covers the switch and dismissal), and no install under way.
-    /// `installFailed` is this app's own failed install request, like `installError` in `updates.js`.
-    init?(updates: [String: Any], installFailed: Bool = false) {
+    /// `installFailed` is the version of this app's own failed install request, like `installError`
+    /// in `updates.js`. A failure counts only for the version attempted: a newer release is a fresh offer.
+    init?(updates: [String: Any], installFailed: String? = nil) {
         let latest = updates["latest"] as? [String: Any]
         let latestVersion = latest?["version"] as? String
         let job = updates["install"] as? [String: Any]
@@ -26,7 +27,8 @@ struct ReleaseOffer: Equatable {
               Self.isTrusted(latest?["url"] as? String) else { return nil }
         // A retry installs the release on offer now, as the page's Retry does.
         version = latestVersion
-        kind = state == "failed" || (job == nil && installFailed) ? .failed : .available
+        let failedVersion = state == "failed" ? job?["version"] as? String : job == nil ? installFailed : nil
+        kind = failedVersion == latestVersion ? .failed : .available
     }
 
     init(version: String, kind: Kind) {
@@ -81,7 +83,7 @@ final class ReleaseNotice {
     private let show: (ReleaseOffer?) -> Void
     private var timer: Timer?
     private var lastPoll = Date.distantPast
-    private var installFailed = false
+    private var installFailed: String?
     private(set) var offer: ReleaseOffer?
 
     init(server: LocalServer = .shared, show: @escaping (ReleaseOffer?) -> Void) {
@@ -117,13 +119,13 @@ final class ReleaseNotice {
     /// The menu item lands here; no confirmation (fewest clicks).
     func install() {
         guard let offer, offer.isActionable, server.isReady else { return }
-        installFailed = false
+        installFailed = nil
         Task {
             if let updates = await request(post: ["version": offer.version]) {
                 apply(updates)
             } else {
                 // Shown as failed; a re-poll replaces a stale version with the current one.
-                installFailed = true
+                installFailed = offer.version
                 refresh()
             }
         }
