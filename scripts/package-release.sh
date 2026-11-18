@@ -30,6 +30,8 @@ uv pip install --python "$payload/python/bin/python3" --break-system-packages \
 "$payload/python/bin/python3" -I -B -c 'import numpy, PIL.Image'
 cp -R "$ROOT/copilot/web" "$payload/web"
 python3 "$ROOT/scripts/vendor-delivery.py" "$payload/web/_vendor"
+# Some wheels (pyasn1 0.6.5, oauthlib) unpack 0600; ship the usual modes.
+chmod -R go+rX "$payload/web/_vendor"
 mkdir -p "$payload/bin"
 cp "$ROOT/copilot/bin/meeting-copilot" "$payload/bin/meeting-copilot"
 swiftc "$ROOT/copilot/bin/ZoomWindowFinder.swift" -o "$payload/bin/zoom-window-finder"
