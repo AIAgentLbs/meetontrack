@@ -10,6 +10,13 @@ VERSION="${MEETING_COPILOT_VERSION:-0.1.31}"
 BUILD="${MEETING_COPILOT_BUILD:-$(git -C "$ROOT" rev-list --count HEAD)}"
 SPARKLE="$(find "$BUILD_ROOT/artifacts/sparkle" -type d -name Sparkle.framework -path '*macos-arm64_x86_64*' | head -1)"
 [[ -x "$BIN" ]] || { echo "Run swift build -c release first" >&2; exit 1; }
+REQUIREMENT="$CAPTURE/Packaging/designated-requirement.txt"
+# A stable signature keeps the privacy grants across updates (MEETONTRACK-155).
+[[ -n "${MEETONTRACK_SIGN_ID:-}" && -n "${MEETONTRACK_SIGN_KEYCHAIN:-}" ]] \
+  || { echo "Run through scripts/with-signing-identity.sh" >&2; exit 1; }
+grep -qi "H\"$MEETONTRACK_SIGN_ID\"" "$REQUIREMENT" \
+  || { echo "Identity $MEETONTRACK_SIGN_ID is not the one in $REQUIREMENT" >&2; exit 1; }
+sign() { codesign --force --sign "$MEETONTRACK_SIGN_ID" --keychain "$MEETONTRACK_SIGN_KEYCHAIN" --timestamp=none "$@"; }
 [[ -d "$DONOR" ]] || { echo "A LocalVQE runtime donor app is required" >&2; exit 1; }
 make -C "$CAPTURE" icon
 rm -rf "$APP"
@@ -26,7 +33,15 @@ cp "$DONOR/Contents/Resources/LocalVQE-verification.json" "$APP/Contents/Resourc
 cp -R "$DONOR/Contents/Resources/Licenses/." "$APP/Contents/Resources/Licenses/"
 cp -R "$SPARKLE" "$APP/Contents/Frameworks/"
 rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
-find "$APP/Contents/Frameworks" -type f -perm +111 -exec codesign --force --sign - --timestamp=none {} \; 2>/dev/null || true
-codesign --force --deep --sign - --identifier com.aiagentlbs.meetingcopilot.capture --entitlements "$CAPTURE/Packaging/MeetingCopilot.entitlements" --timestamp=none "$APP"
-codesign --verify --strict --verbose=2 "$APP"
+# Innermost first: signing a container after its contents keeps both seals valid.
+for nested in "$APP/Contents/Frameworks/liblocalvqe.dylib" \
+  "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate" \
+  "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app" \
+  "$APP/Contents/Frameworks/Sparkle.framework"; do
+  sign "$nested"
+done
+sign --identifier com.aiagentlbs.meetingcopilot.capture --requirements "$REQUIREMENT" \
+  --entitlements "$CAPTURE/Packaging/MeetingCopilot.entitlements" "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
+codesign --verify -R "$REQUIREMENT" "$APP"
 echo "$APP"

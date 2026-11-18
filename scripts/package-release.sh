@@ -7,6 +7,10 @@ PYTHON_RUNTIME="${MEETING_COPILOT_PYTHON_RUNTIME:-}"
 [[ -d "$APP" ]] || { echo "Missing app: $APP" >&2; exit 1; }
 [[ -x "$PYTHON_RUNTIME/bin/python3" ]] || { echo 'Set MEETING_COPILOT_PYTHON_RUNTIME to a clean relocatable arm64 Python 3.12+ distribution (numpy 2.5.4 wheels)' >&2; exit 1; }
 "$PYTHON_RUNTIME/bin/python3" -I -c 'import platform, sys; assert platform.machine() == "arm64" and sys.version_info >= (3, 12)'
+REQUIREMENT="$ROOT/capture/Packaging/designated-requirement.txt"
+[[ -n "${MEETONTRACK_SIGN_ID:-}" && -n "${MEETONTRACK_SIGN_KEYCHAIN:-}" ]] \
+  || { echo "Run through scripts/with-signing-identity.sh (MEETONTRACK-155)" >&2; exit 1; }
+sign() { codesign --force --sign "$MEETONTRACK_SIGN_ID" --keychain "$MEETONTRACK_SIGN_KEYCHAIN" --timestamp=none "$@"; }
 stage="$(mktemp -d "${TMPDIR:-/tmp}/meeting-copilot-release.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 bundle="$stage/Meeting Copilot Capture.app"
@@ -32,15 +36,16 @@ swiftc "$ROOT/copilot/bin/ZoomWindowFinder.swift" -o "$payload/bin/zoom-window-f
 swiftc "$ROOT/copilot/bin/ZoomFrameInspector.swift" -o "$payload/bin/zoom-frame-inspector"
 swiftc "$ROOT/copilot/bin/DetectSpeechLanguage.swift" -o "$payload/bin/detect-speech-language"
 for helper in zoom-window-finder zoom-frame-inspector detect-speech-language; do
-  codesign --force --sign - --timestamp=none "$payload/bin/$helper"
+  sign "$payload/bin/$helper"
 done
 cp -R "$ROOT/copilot/config" "$payload/config"
 find "$stage" -name '__pycache__' -type d -prune -exec rm -rf {} +
 # Adding the payload changed the bundle: seal it again (nested code keeps its
-# own signatures). Same identity and entitlements as assemble-arm64-app.sh.
-codesign --force --sign - --identifier com.aiagentlbs.meetingcopilot.capture \
-  --entitlements "$ROOT/capture/Packaging/MeetingCopilot.entitlements" --timestamp=none "$bundle"
+# own signatures). Same identity, requirement and entitlements as assemble-arm64-app.sh.
+sign --identifier com.aiagentlbs.meetingcopilot.capture --requirements "$REQUIREMENT" \
+  --entitlements "$ROOT/capture/Packaging/MeetingCopilot.entitlements" "$bundle"
 codesign --verify --strict --verbose=2 "$bundle"
+codesign --verify -R "$REQUIREMENT" "$bundle"
 python3 - "$stage" "$(git -C "$ROOT" rev-parse HEAD)" <<'PY'
 import hashlib, json, os, pathlib, plistlib, sys
 root = pathlib.Path(sys.argv[1])

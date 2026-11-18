@@ -36,6 +36,18 @@ class ReleaseBrandingTests(unittest.TestCase):
                       'A fresh clone must regenerate the brand, regardless of tracked icon timestamps')
         self.assertTrue((ROOT / 'capture/THIRD-PARTY-NOTICES.md').is_file())
 
+    def test_release_signature_is_stable(self):
+        # An ad-hoc signature makes the designated requirement the cdhash, and
+        # macOS forgets the privacy grants on every update (MEETONTRACK-155).
+        requirement = (ROOT / 'capture/Packaging/designated-requirement.txt').read_text()
+        self.assertRegex(requirement, r'^designated => identifier "com\.aiagentlbs\.meetingcopilot\.capture" '
+                                      r'and certificate leaf = H"[0-9a-f]{40}"\n$')
+        for name in ('assemble-arm64-app.sh', 'package-release.sh'):
+            script = (ROOT / 'scripts' / name).read_text()
+            with self.subTest(script=name):
+                self.assertNotRegex(script, r'--sign\s+-(\s|$)')
+                self.assertIn('--requirements "$REQUIREMENT"', script)
+
     def test_all_mac_icon_paths_share_the_product_mark(self):
         generator = (ROOT / 'capture/Packaging/GenerateMeetingCopilotIcon.swift').read_text()
         renderer = (ROOT / 'capture/Sources/meetingcopilot/UI/BrandIcon.swift').read_text()

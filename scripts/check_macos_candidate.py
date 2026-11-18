@@ -66,6 +66,7 @@ def main():
             assert (share / data).read_text() == 'synthetic-' + data
         assert [path.name for path in app.parent.iterdir()] == [app.name]
         subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)
+        check_designated_requirement(app)
         payload = app / 'Contents/Resources/payload'
         runtime = payload / 'python/bin/python3'
         for helper in ('zoom-window-finder', 'zoom-frame-inspector', 'detect-speech-language'):
@@ -88,10 +89,23 @@ def main():
         print(json.dumps({'version': manifest['version'], 'source_revision': manifest['source_revision'],
                           'sha256': digest, 'manifest_files': len(manifest['sha256']),
                           'upgrade_from_0_1_20_layout': 'passed', 'reinstall_preserves_data': 'passed',
-                          'signatures': 'ad-hoc valid', 'bundled_server': served,
+                          'signatures': 'valid, stable designated requirement', 'bundled_server': served,
                           'hardware_test': 'not performed'}, indent=2))
     finally:
         fixture.doCleanups()
+
+
+REQUIREMENT = Path(__file__).resolve().parent.parent / 'capture/Packaging/designated-requirement.txt'
+
+
+def check_designated_requirement(app):
+    """Privacy grants survive an update only if the requirement is not the cdhash (MEETONTRACK-155)."""
+    expected = REQUIREMENT.read_text().strip()
+    assert 'certificate leaf = H"' in expected and 'cdhash' not in expected, expected
+    shown = subprocess.run(['codesign', '-d', '-r-', str(app)], capture_output=True, text=True, check=True)
+    lines = [line for line in (shown.stdout + shown.stderr).splitlines() if line.startswith('designated =>')]
+    assert lines == [expected], f'designated requirement {lines!r}, expected {expected!r}'
+    subprocess.run(['codesign', '--verify', '-R', str(REQUIREMENT), str(app)], check=True)
 
 
 def smoke_server(runtime, web, home, version, config, port=43987):
