@@ -148,6 +148,12 @@ hashes, Pages removed, and the Windows installer relocated to
   notarized DMG is out of scope: no Apple Developer account for now (owner
   2026-11-04), revisit when users complain about installation.
 
+- [ ] MEETONTRACK-155: macOS asks for "Screen & System Audio Recording" again after every update. The app is
+  signed ad-hoc (`scripts/assemble-arm64-app.sh:30`), so its designated requirement is the cdhash and TCC treats each
+  build as a new app. Sign with one stable self-signed identity from Vault so the requirement is identifier plus
+  certificate and survives updates; check it in `check_macos_candidate.py`. Workaround: remove the app in Privacy &
+  Security > Screen & System Audio Recording and allow once.
+
 ## One settings store and vocabulary across Mac, Windows and web (owner rule 2026-10-20)
 
 - [ ] MEETONTRACK-3: All components already share `~/.config/meeting-copilot/config.json`, but
