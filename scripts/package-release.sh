@@ -45,7 +45,7 @@ find "$stage" -name '__pycache__' -type d -prune -exec rm -rf {} +
 sign --identifier com.aiagentlbs.meetingcopilot.capture --requirements "$REQUIREMENT" \
   --entitlements "$ROOT/capture/Packaging/MeetingCopilot.entitlements" "$bundle"
 codesign --verify --strict --verbose=2 "$bundle"
-codesign --verify -R "$REQUIREMENT" "$bundle"
+codesign --verify -R "=$(sed -e 's/^designated => //' "$REQUIREMENT")" "$bundle"
 python3 - "$stage" "$(git -C "$ROOT" rev-parse HEAD)" <<'PY'
 import hashlib, json, os, pathlib, plistlib, sys
 root = pathlib.Path(sys.argv[1])

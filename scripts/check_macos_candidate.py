@@ -105,7 +105,7 @@ def check_designated_requirement(app):
     shown = subprocess.run(['codesign', '-d', '-r-', str(app)], capture_output=True, text=True, check=True)
     lines = [line for line in (shown.stdout + shown.stderr).splitlines() if line.startswith('designated =>')]
     assert lines == [expected], f'designated requirement {lines!r}, expected {expected!r}'
-    subprocess.run(['codesign', '--verify', '-R', str(REQUIREMENT), str(app)], check=True)
+    subprocess.run(['codesign', '--verify', '-R', '=' + expected.removeprefix('designated => '), str(app)], check=True)
 
 
 def smoke_server(runtime, web, home, version, config, port=43987):

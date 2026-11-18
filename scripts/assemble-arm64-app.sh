@@ -43,5 +43,5 @@ done
 sign --identifier com.aiagentlbs.meetingcopilot.capture --requirements "$REQUIREMENT" \
   --entitlements "$CAPTURE/Packaging/MeetingCopilot.entitlements" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
-codesign --verify -R "$REQUIREMENT" "$APP"
+codesign --verify -R "=$(sed -e 's/^designated => //' "$REQUIREMENT")" "$APP"
 echo "$APP"
