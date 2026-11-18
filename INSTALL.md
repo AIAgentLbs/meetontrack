@@ -12,7 +12,7 @@ included in the package. No compiler, SDK or separate Python is required.
 curl -fsSL https://meetontrack.com/install.sh | bash
 ```
 
-The command installs the checksum-pinned v0.1.31 archive. Read
+The command installs the checksum-pinned v0.1.32 archive. Read
 [install.sh](install.sh) before running it if desired. An existing installation
 must finish its call and quit Capture first. The installer checks again before
 replacement and puts the previous version back if replacing the files fails.
@@ -34,8 +34,10 @@ replacement and puts the previous version back if replacing the files fails.
 5. Make a short test call and check both sides in the transcript before relying
    on a long meeting. Speaker names can need correction.
 
-The package is a technical beta, ad-hoc signed and not Apple-notarized. If macOS
-blocks it, review the exact app in Privacy & Security. Keep Gatekeeper enabled.
+The package is a technical beta, signed with a self-signed MeetOnTrack
+certificate (not an Apple Developer ID) and not Apple-notarized. From 0.1.32
+macOS keeps its Screen & System Audio Recording permission across updates. If
+macOS blocks it, review the exact app in Privacy & Security. Keep Gatekeeper enabled.
 Google Chrome, Microsoft Edge or Chromium makes the PDF report; without one, the report is sent as an HTML file.
 
 ## Windows
