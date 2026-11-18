@@ -2032,3 +2032,5 @@ textarea::placeholder {
 .copilot-pane > .delivery-notice { grid-row: 1; }
 .copilot-pane > .copilot-content { grid-row: 2; }
 .copilot-pane > .composer-wrap { grid-row: 3; }
+#updates-install-settings { background: var(--accent-strong); color: var(--surface-strong); padding: 8px 14px; border: 0; border-radius: 6px; cursor: pointer; margin-block: 4px 8px; }
+#updates-manual summary { cursor: pointer; margin-block: 8px; }

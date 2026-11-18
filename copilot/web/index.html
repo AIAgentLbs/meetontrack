@@ -167,19 +167,21 @@
           <label><input type="checkbox" id="updates-enabled" data-saves-at-once /><span id="updates-enabled-label"></span></label>
           <p id="updates-status" role="status"></p>
           <button class="quiet-button" type="button" id="updates-check"></button>
-          <div id="updates-manual" hidden>
-            <p id="updates-command-help"></p>
-            <pre id="updates-command" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
-            <button class="quiet-button" type="button" id="updates-copy"></button>
-            <p id="updates-copy-status" role="status"></p>
-          </div>
           <div id="updates-release" hidden>
             <h4 id="updates-version"></h4>
+            <button class="primary-button" type="button" id="updates-install-settings" hidden></button>
             <pre id="updates-notes"></pre>
             <p id="updates-safe-install"></p>
             <a id="updates-link" target="_blank" rel="noopener noreferrer"></a>
             <button class="quiet-button" type="button" id="updates-dismiss"></button>
           </div>
+          <details id="updates-manual" hidden>
+            <summary id="updates-manual-summary"></summary>
+            <p id="updates-command-help"></p>
+            <pre id="updates-command" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
+            <button class="quiet-button" type="button" id="updates-copy"></button>
+            <p id="updates-copy-status" role="status"></p>
+          </details>
         </section>
       </div>
     </section>

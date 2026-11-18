@@ -30,6 +30,8 @@ vm.runInNewContext(fs.readFileSync('copilot/web/updates.js', 'utf8'), context);
   render({version: '0.1.9', platform: 'macos', enabled: true, notify: true,
     latest: {version: '0.1.10', url: 'https://github.com/AIAgentLbs/meetontrack/releases/tag/v0.1.10', notes: '<script>bad()</script>'}});
   assert.equal(get('updates-notice').hidden, false);
+  assert.equal(get('updates-install-settings').hidden, false, 'Settings offers the Install button next to the release');
+  assert.equal(get('updates-install-settings').textContent, 'Install');
   assert.equal(get('updates-notes').textContent, '<script>bad()</script>');
   document.documentElement.lang = 'ru';
   render({platform: 'windows'});

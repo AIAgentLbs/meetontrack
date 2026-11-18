@@ -15,7 +15,7 @@
       running: "Updating to version {version}…", failed: "Could not update. The current version keeps working.",
       stable: "Stable channel", beta: "Beta channel", saveError: "Could not save the setting. Please try again."
       , commandHelp: "If the Install button does not work: finish your call, quit Capture, then run this in {shell}. It installs the version currently published on the website, which may lag the release notice. Check the installed version afterwards.",
-      copyCommand: "Copy update command", copied: "Command copied. Run it after your call.", copyFailed: "Could not copy. Select and copy the command above."
+      manualSummary: "Update from Terminal instead", copyCommand: "Copy update command", copied: "Command copied. Run it after your call.", copyFailed: "Could not copy. Select and copy the command above."
     },
     ru: {
       heading: "Обновления MeetOnTrack", help: "Проверяет опубликованные релизы при запуске и каждые 15 минут при наличии интернета. Содержимое встреч и статистика использования не отправляются.",
@@ -30,7 +30,7 @@
       running: "Обновляю до версии {version}…", failed: "Не удалось обновить. Текущая версия продолжает работать.",
       stable: "Стабильные версии", beta: "Бета-версии", saveError: "Не удалось сохранить настройку. Попробуйте еще раз."
       , commandHelp: "Если кнопка «Установить» не сработала: завершите звонок, закройте Capture и выполните команду в {shell}. Она устанавливает версию, опубликованную на сайте; та может отставать от уведомления о релизе. После установки проверьте версию.",
-      copyCommand: "Скопировать команду обновления", copied: "Команда скопирована. Выполните ее после звонка.", copyFailed: "Не удалось скопировать. Выделите и скопируйте команду выше."
+      manualSummary: "Обновить через Терминал", copyCommand: "Скопировать команду обновления", copied: "Команда скопирована. Выполните ее после звонка.", copyFailed: "Не удалось скопировать. Выделите и скопируйте команду выше."
     }
   };
   let state = {}, actionError = false, installError = false;
@@ -44,6 +44,7 @@
       : "curl -fsSL https://meetontrack.com/install.sh | bash";
     find("updates-command-help").textContent = text.commandHelp.replace("{shell}", data.platform === "windows" ? "PowerShell" : "Terminal");
     find("updates-copy").textContent = text.copyCommand;
+    find("updates-manual-summary").textContent = text.manualSummary.replace("Terminal", data.platform === "windows" ? "PowerShell" : "Terminal").replace("Терминал", data.platform === "windows" ? "PowerShell" : "Терминал");
     for (const [id, key] of Object.entries({"updates-heading": "heading", "updates-help": "help", "updates-enabled-label": "enabled", "updates-safe-install": "safe", "updates-link": "link", "updates-dismiss": "dismiss"})) find(id).textContent = text[key];
     find("updates-enabled").checked = data.enabled !== false;
     find("updates-check").disabled = Boolean(data.checking || !data.version);
@@ -62,6 +63,9 @@
       : text[job.state].replace("{version}", job.version);
     find("updates-install").hidden = find("updates-notice").hidden || !supported || !trusted || (job && job.state !== "failed");
     find("updates-install").textContent = text[job?.state === "failed" ? "retry" : "install"];
+    // Settings shows the same button next to the offer: the header strip may be out of view.
+    find("updates-install-settings").hidden = Boolean(find("updates-install").hidden);
+    find("updates-install-settings").textContent = find("updates-install").textContent;
     if (latest && trusted) {
       const label = text.available.replace("{version}", latest.version);
       find("updates-version").textContent = label;
@@ -88,12 +92,14 @@
     find("updates-settings").focus();
     find("updates-settings").scrollIntoView({block: "nearest"});
   });
-  find("updates-install").addEventListener("click", async () => {
+  const install = async () => {
     installError = false;
     await action("/api/updates/install", {version: state.latest?.version});
     installError = actionError;
     render();
-  });
+  };
+  find("updates-install").addEventListener("click", install);
+  find("updates-install-settings").addEventListener("click", install);
   find("updates-check").addEventListener("click", () => void action("/api/updates/check", {}));
   find("updates-enabled").addEventListener("change", event => void action("/api/updates/settings", {enabled: event.target.checked}));
   find("updates-dismiss").addEventListener("click", () => void action("/api/updates/settings", {dismiss: state.latest?.version}));
