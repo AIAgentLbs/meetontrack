@@ -29,6 +29,7 @@ cleanup() {
   rm -rf "$work"
 }
 trap cleanup EXIT
+build_umask="$(umask)"
 umask 077
 "$BW_SAFE" -- get item "$ITEM" > "$work/item.json"
 python3 - "$work" <<'PY'
@@ -60,4 +61,6 @@ rm -f "$work/once.p12"
 security list-keychains -d user -s ${saved_list[@]+"${saved_list[@]}"} "$keychain"
 security find-identity -p codesigning "$keychain" | grep -q "$sign_id" \
   || { echo "Signing identity $sign_id missing after import" >&2; exit 1; }
+# The build itself keeps the caller's umask; 077 is only for the key material.
+umask "$build_umask"
 MEETONTRACK_SIGN_ID="$sign_id" MEETONTRACK_SIGN_KEYCHAIN="$keychain" "$@"
