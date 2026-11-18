@@ -148,16 +148,18 @@ hashes, Pages removed, and the Windows installer relocated to
   notarized DMG is out of scope: no Apple Developer account for now (owner
   2026-11-04), revisit when users complain about installation.
 
-- [ ] MEETONTRACK-156: the native Mac app never showed an available update (only a header button in the assistant
-  window). Fixed on main (1a669bc): menu bar item "Version X available - Install", one banner per version, and an
-  Install button in Settings next to the offer; ships with the next Mac release. Open P3 (Codex): an older failed
-  server job can hide a local failed install of a newer version (`ReleaseOffer.swift:30`), menu stays "available".
+- [x] [MEETONTRACK-156](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-156/) (shipped in v0.1.32, closed 2026-11-18): the native Mac
+  app shows an available update: menu bar item "Version X available - Install", one banner per version, and an Install
+  button in Settings next to the offer (Mac and Windows). Its open Codex P3 moved to MEETONTRACK-157.
+- [ ] [MEETONTRACK-157](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-157/): an older failed server install job can hide a local
+  failed install of a newer version in the Mac menu bar notice (`ReleaseOffer.swift` ~30), so the menu stays
+  "available" instead of Try again. Let a server job count only for the offered version; add a ReleaseOfferTests case.
 
-- [ ] MEETONTRACK-155: macOS asks for "Screen & System Audio Recording" again after every update. The app is
-  signed ad-hoc (`scripts/assemble-arm64-app.sh:30`), so its designated requirement is the cdhash and TCC treats each
-  build as a new app. Sign with one stable self-signed identity from Vault so the requirement is identifier plus
-  certificate and survives updates; check it in `check_macos_candidate.py`. Workaround: remove the app in Privacy &
-  Security > Screen & System Audio Recording and allow once.
+- [x] [MEETONTRACK-155](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-155/) (shipped in v0.1.32, closed 2026-11-18): macOS asked
+  for Screen & System Audio Recording after every update because the app was signed ad hoc (designated requirement =
+  cdhash). Release builds now sign with one self-signed certificate from Vault through `scripts/with-signing-identity.sh`;
+  the requirement (`capture/Packaging/designated-requirement.txt`) is identifier plus certificate leaf and is checked by
+  `check_macos_candidate.py`. Persistence across two signed versions on a real Mac is still to be observed.
 
 ## One settings store and vocabulary across Mac, Windows and web (owner rule 2026-10-20)
 
