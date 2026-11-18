@@ -112,6 +112,7 @@ internal sealed class StatusWindow : Window
 
         foreach (var (text, action) in new (string, Action)[]
         {
+            (T("Open MeetOnTrack assistant", "Открыть помощник MeetOnTrack"), AmanuRuntime.OpenAssistant),
             (T("Import…", "Импортировать…"), () => _ = App.ImportAsync(this)),
             (T("Open recordings folder", "Открыть папку записей"), () => { AmanuRuntime.Open(runtime.Settings.RecordingsDirectory); }),
             (T("Manage recordings…", "Управление записями…"), App.ShowRecordings),
