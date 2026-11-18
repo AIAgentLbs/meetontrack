@@ -15,7 +15,7 @@ set -euo pipefail
 # One signing build at a time per user: each run snapshots and restores the
 # shared keychain search list, so two at once would drop each other's keychain.
 if [[ -z "${MEETONTRACK_SIGNING_LOCKED:-}" ]]; then
-  MEETONTRACK_SIGNING_LOCKED=1 exec /usr/bin/lockf -k "${TMPDIR:-/tmp}/meetontrack-signing-$(id -u).lock" "$0" "$@"
+  MEETONTRACK_SIGNING_LOCKED=1 exec /usr/bin/lockf -k "/tmp/meetontrack-signing-$(id -u).lock" "$0" "$@"
 fi
 ITEM="${MEETONTRACK_SIGNING_VAULT_ITEM:-MeetOnTrack macOS self-signed code signing}"
 BW_SAFE="${BW_SAFE:-$HOME/.local/bin/bw-safe}"
@@ -29,11 +29,12 @@ while IFS= read -r line; do
   [[ -n "$line" ]] && saved_list+=("$line")
 done < "$work/search-list"
 cleanup() {
-  local status=$? attempt
+  local status=$? attempt current
   security delete-keychain "$keychain" 2>/dev/null || true
   for attempt in 1 2 3; do
     if security list-keychains -d user -s ${saved_list[@]+"${saved_list[@]}"} \
-      && [[ "$(security list-keychains -d user)" == "$(cat "$work/search-list")" ]]; then
+      && current="$(security list-keychains -d user)" \
+      && [[ "$current" == "$(cat "$work/search-list")" ]]; then
       rm -rf "$work"
       exit "$status"
     fi
