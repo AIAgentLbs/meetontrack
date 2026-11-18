@@ -12,6 +12,11 @@
 # Usage: scripts/with-signing-identity.sh scripts/assemble-arm64-app.sh
 set -euo pipefail
 [[ $# -gt 0 ]] || { echo "usage: $0 command [args...]" >&2; exit 2; }
+# One signing build at a time per user: each run snapshots and restores the
+# shared keychain search list, so two at once would drop each other's keychain.
+if [[ -z "${MEETONTRACK_SIGNING_LOCKED:-}" ]]; then
+  MEETONTRACK_SIGNING_LOCKED=1 exec /usr/bin/lockf -k "${TMPDIR:-/tmp}/meetontrack-signing-$(id -u).lock" "$0" "$@"
+fi
 ITEM="${MEETONTRACK_SIGNING_VAULT_ITEM:-MeetOnTrack macOS self-signed code signing}"
 BW_SAFE="${BW_SAFE:-$HOME/.local/bin/bw-safe}"
 work="$(mktemp -d "${TMPDIR:-/tmp}/meetontrack-signing.XXXXXX")"
@@ -24,9 +29,20 @@ while IFS= read -r line; do
   [[ -n "$line" ]] && saved_list+=("$line")
 done < "$work/search-list"
 cleanup() {
+  local status=$? attempt
   security delete-keychain "$keychain" 2>/dev/null || true
-  security list-keychains -d user -s ${saved_list[@]+"${saved_list[@]}"} || true
-  rm -rf "$work"
+  for attempt in 1 2 3; do
+    if security list-keychains -d user -s ${saved_list[@]+"${saved_list[@]}"} \
+      && [[ "$(security list-keychains -d user)" == "$(cat "$work/search-list")" ]]; then
+      rm -rf "$work"
+      exit "$status"
+    fi
+    sleep 1
+  done
+  # Keep only the (non-secret) snapshot so the list can be put back by hand.
+  find "$work" -mindepth 1 ! -name search-list -exec rm -rf {} +
+  echo "Could not restore the keychain search list; the original is in $work/search-list" >&2
+  exit 1
 }
 trap cleanup EXIT
 build_umask="$(umask)"
