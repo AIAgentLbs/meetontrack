@@ -461,6 +461,8 @@ final class AppController {
     private lazy var updates = AppUpdates(
         gate: UpdateGate(isRecording: { [weak self] in self?.isRecording == true })
     )
+    /// The assistant server's release offer, in the menu and one banner per version.
+    private lazy var releaseNotice = ReleaseNotice { [weak self] in self?.menuBar.updateRelease($0) }
     private let transcription = TranscriptionCoordinator()
     private let liveTranscription = LiveTranscriptionCoordinator()
     private let liveTranscriptExporter = LiveTranscriptExporter()
@@ -532,6 +534,7 @@ final class AppController {
         menuBar.onShowSettings = { [weak self] in self?.showSettings() }
         menuBar.onShowSetup = { [weak self] in self?.showSetup() }
         menuBar.onCheckForUpdates = { [weak self] in self?.updates.checkForUpdates() }
+        menuBar.onInstallRelease = { [weak self] in self?.releaseNotice.install() }
         menuBar.onShowAbout = { [weak self] in self?.showAbout() }
         menuBar.onQuit = { NSApp.terminate(nil) }
         menuBar.update(state: .idle, elapsed: nil)
@@ -549,6 +552,7 @@ final class AppController {
         // The assistant's web service is the app's own child now, started
         // before any window can ask for it and stopped when the app quits.
         LocalServer.shared.start()
+        releaseNotice.start()
         if Config.showWindowAtLaunch(), !SetupState.isPending {
             window.show()
             AssistantLink.open()
@@ -582,6 +586,8 @@ final class AppController {
             } else {
                 self?.showWindow()
             }
+        } onRelease: { [weak self] version in
+            self?.releaseNotice.installFromBanner(version: version)
         }
 
         awake = ProcessInfo.processInfo.beginActivity(

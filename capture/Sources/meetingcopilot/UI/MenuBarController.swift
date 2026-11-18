@@ -32,6 +32,8 @@ final class MenuBarController {
     private let autoRecordStatus: NSMenuItem
     private let updatesItem: NSMenuItem
     private let setupItem: NSMenuItem
+    private let releaseItem: NSMenuItem
+    private let releaseSeparator: NSMenuItem
 
     var onToggle: (() -> Void)?
     var onTogglePause: (() -> Void)?
@@ -43,6 +45,7 @@ final class MenuBarController {
     var onShowSettings: (() -> Void)?
     var onShowSetup: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
+    var onInstallRelease: (() -> Void)?
     var onShowAbout: (() -> Void)?
     var onQuit: (() -> Void)?
 
@@ -55,6 +58,14 @@ final class MenuBarController {
         // an item drawn from an attributed title loses the grey the system
         // gives a disabled one, and the state line is disabled.
         menu.font = NSFont.menuFont(ofSize: 0).tabularFigures
+
+        // On top while the assistant server offers a release or installs one (MEETONTRACK-156).
+        releaseItem = NSMenuItem(title: "", action: #selector(installReleaseClicked), keyEquivalent: "")
+        releaseItem.isHidden = true
+        menu.addItem(releaseItem)
+        releaseSeparator = .separator()
+        releaseSeparator.isHidden = true
+        menu.addItem(releaseSeparator)
 
         let assistant = NSMenuItem(title: localised("Open MeetOnTrack assistant", "Открыть помощник MeetOnTrack"), action: #selector(openAssistantClicked), keyEquivalent: "o")
         menu.addItem(assistant)
@@ -179,7 +190,7 @@ final class MenuBarController {
 
         for item in [
             toggleItem, pauseItem, autoRecordItem, showWindow, openFolder,
-            recordings, settings, setupItem, updatesItem, about, quit, assistant,
+            recordings, settings, setupItem, updatesItem, about, quit, assistant, releaseItem,
         ] {
             item.target = self
         }
@@ -225,6 +236,15 @@ final class MenuBarController {
     /// can be replaced by Sparkle, so only a real application bundle offers it.
     func updatesAvailable(_ available: Bool) {
         updatesItem.isHidden = !available
+    }
+
+    /// The release line on top: clickable while offered, a disabled status line while
+    /// the install is scheduled or running, gone when there is nothing to say.
+    func updateRelease(_ offer: ReleaseOffer?) {
+        releaseItem.title = offer?.title ?? ""
+        releaseItem.isEnabled = offer?.isActionable == true
+        releaseItem.isHidden = offer == nil
+        releaseSeparator.isHidden = offer == nil
     }
 
     /// Show or hide **Setup…**. The wizard is the first run, and once it has
@@ -323,6 +343,7 @@ final class MenuBarController {
     @objc private func openFolderClicked() { onOpenFolder?() }
     @objc private func showRecordingsClicked() { onShowRecordings?() }
     @objc private func checkForUpdatesClicked() { onCheckForUpdates?() }
+    @objc private func installReleaseClicked() { onInstallRelease?() }
     @objc private func showAboutClicked() { onShowAbout?() }
     @objc private func quitClicked() { onQuit?() }
 }

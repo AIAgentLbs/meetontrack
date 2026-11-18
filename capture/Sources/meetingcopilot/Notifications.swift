@@ -18,6 +18,8 @@ enum Notifications {
     static var usesNotificationCenter: Bool { Runtime.isBundled }
 
     private static let sessionKey = "com.aiagentlabs.meeting-copilot.session"
+    /// A release banner: clicking it installs, like the menu item (MEETONTRACK-156).
+    private static let releaseKey = "com.aiagentlabs.meeting-copilot.release"
 
     @MainActor
     private static var authorization: Task<Bool, Never>?
@@ -27,21 +29,23 @@ enum Notifications {
     /// Called once at startup so a click has somewhere to go. `onOpen` is
     /// handed the session folder when the banner named one.
     @MainActor
-    static func install(onOpen: @escaping @MainActor (URL?) -> Void) {
+    static func install(onOpen: @escaping @MainActor (URL?) -> Void,
+                        onRelease: @escaping @MainActor (String) -> Void = { _ in }) {
         guard usesNotificationCenter else { return }
-        let delegate = Delegate(onOpen: onOpen)
+        let delegate = Delegate(onOpen: onOpen, onRelease: onRelease)
         Self.delegate = delegate
         UNUserNotificationCenter.current().delegate = delegate
     }
 
     @MainActor
-    static func post(title: String, body: String, opening session: URL?) {
+    static func post(title: String, body: String, opening session: URL?, release: String? = nil) {
         guard usesNotificationCenter else { return }
 
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         if let session { content.userInfo = [sessionKey: session.path] }
+        if let release { content.userInfo = [releaseKey: release] }
 
         // Asked for once, lazily: a permission dialog on first launch, before
         // anything has happened, is a question about nothing.
@@ -67,9 +71,11 @@ enum Notifications {
     @MainActor
     private final class Delegate: NSObject, UNUserNotificationCenterDelegate {
         private let onOpen: @MainActor (URL?) -> Void
+        private let onRelease: @MainActor (String) -> Void
 
-        init(onOpen: @escaping @MainActor (URL?) -> Void) {
+        init(onOpen: @escaping @MainActor (URL?) -> Void, onRelease: @escaping @MainActor (String) -> Void) {
             self.onOpen = onOpen
+            self.onRelease = onRelease
         }
 
         /// Show the banner even when meetingcopilot is the active app: the recording it
@@ -86,9 +92,11 @@ enum Notifications {
             _ center: UNUserNotificationCenter,
             didReceive response: UNNotificationResponse
         ) async {
-            let folder = Notifications.session(
-                in: response.notification.request.content.userInfo)
+            let userInfo = response.notification.request.content.userInfo
+            let folder = Notifications.session(in: userInfo)
+            let release = userInfo[Notifications.releaseKey] as? String
             await MainActor.run {
+                if let release { return onRelease(release) }
                 NSApp.activate(ignoringOtherApps: true)
                 onOpen(folder)
             }
