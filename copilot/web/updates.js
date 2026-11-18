@@ -63,9 +63,13 @@
       : text[job.state].replace("{version}", job.version);
     find("updates-install").hidden = find("updates-notice").hidden || !supported || !trusted || (job && job.state !== "failed");
     find("updates-install").textContent = text[job?.state === "failed" ? "retry" : "install"];
-    // Settings shows the same button next to the offer: the header strip may be out of view.
-    find("updates-install-settings").hidden = Boolean(find("updates-install").hidden);
-    find("updates-install-settings").textContent = find("updates-install").textContent;
+    // Settings has its own button next to the offer (the header strip may be out of view, and a
+    // dismissed or muted notice must not remove manual installation); it also shows the job's progress.
+    const busy = Boolean(job && job.state !== "failed");
+    const settingsInstall = find("updates-install-settings");
+    settingsInstall.hidden = !(supported && trusted && (latest || busy));
+    settingsInstall.disabled = busy;
+    settingsInstall.textContent = busy ? text[job.state].replace("{version}", job.version) : text[job?.state === "failed" ? "retry" : "install"];
     if (latest && trusted) {
       const label = text.available.replace("{version}", latest.version);
       find("updates-version").textContent = label;
