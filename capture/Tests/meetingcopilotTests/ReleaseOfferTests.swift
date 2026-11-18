@@ -37,10 +37,31 @@ struct ReleaseOfferTests {
         #expect(running?.kind == .running)
     }
 
-    @Test("A failed install offers the release again")
+    @Test("A failed install reads as failed with a retry of the release on offer")
     func failed() {
-        #expect(ReleaseOffer(updates: updates(install: ["version": "0.9.1", "state": "failed"]))?.kind == .available)
+        let failed = ReleaseOffer(updates: updates(install: ["version": "0.9.0", "state": "failed"]))
+        #expect(failed == ReleaseOffer(version: "0.9.1", kind: .failed))
+        #expect(failed?.isActionable == true)
+        #expect(failed?.shouldNotify(lastNotified: nil) == false)
         #expect(ReleaseOffer(updates: updates(notify: false, install: ["version": "0.9.1", "state": "failed"])) == nil)
+        // The app's own failed request, like installError in updates.js; a server job wins over it.
+        #expect(ReleaseOffer(updates: updates(), installFailed: true)?.kind == .failed)
+        #expect(ReleaseOffer(updates: updates(install: ["version": "0.9.1", "state": "running"]), installFailed: true)?.kind == .running)
+    }
+
+    @Test("A banner installs only its own version while it is still on offer")
+    func banner() {
+        #expect(ReleaseOffer(version: "0.9.1", kind: .available).installs(bannerVersion: "0.9.1"))
+        #expect(!ReleaseOffer(version: "0.9.2", kind: .available).installs(bannerVersion: "0.9.1"))
+        #expect(!ReleaseOffer(version: "0.9.1", kind: .scheduled).installs(bannerVersion: "0.9.1"))
+    }
+
+    @Test("Polls every 20 s during an install, otherwise every 15 minutes")
+    func poll() {
+        #expect(ReleaseOffer.pollInterval(for: ReleaseOffer(version: "1", kind: .running)) == 20)
+        #expect(ReleaseOffer.pollInterval(for: ReleaseOffer(version: "1", kind: .scheduled)) == 20)
+        #expect(ReleaseOffer.pollInterval(for: ReleaseOffer(version: "1", kind: .failed)) == 900)
+        #expect(ReleaseOffer.pollInterval(for: nil) == 900)
     }
 
     @Test("One banner per new version, none for a job")
@@ -64,5 +85,8 @@ struct ReleaseOfferTests {
         #expect(ReleaseOffer(version: "1.2.3", kind: .available).title == "Доступна версия 1.2.3 - установить")
         #expect(ReleaseOffer(version: "1.2.3", kind: .scheduled).title == "Версия 1.2.3 установится после звонка")
         #expect(ReleaseOffer(version: "1.2.3", kind: .running).title == "Обновляю до версии 1.2.3…")
+        #expect(ReleaseOffer(version: "1.2.3", kind: .failed).title == "Не удалось обновить. Текущая версия продолжает работать. Повторить")
+        InterfaceLanguage.current = .english
+        #expect(ReleaseOffer(version: "1.2.3", kind: .failed).title == "Could not update. The current version keeps working. Try again")
     }
 }

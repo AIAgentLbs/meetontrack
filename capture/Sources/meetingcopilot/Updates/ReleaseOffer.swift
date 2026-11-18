@@ -4,27 +4,29 @@ import Foundation
 /// `/api/updates` (MEETONTRACK-156). The server checks GitHub; this only mirrors
 /// the web page's rule in `updates.js` for showing `updates-notice`.
 struct ReleaseOffer: Equatable {
-    enum Kind: Equatable { case available, scheduled, running }
+    enum Kind: Equatable { case available, scheduled, running, failed }
 
     let version: String
     let kind: Kind
 
     /// Nil when nothing is to be shown: no trusted offer the person still wants
     /// to hear about (`notify` covers the switch and dismissal), and no install under way.
-    init?(updates: [String: Any]) {
+    /// `installFailed` is this app's own failed install request, like `installError` in `updates.js`.
+    init?(updates: [String: Any], installFailed: Bool = false) {
         let latest = updates["latest"] as? [String: Any]
         let latestVersion = latest?["version"] as? String
         let job = updates["install"] as? [String: Any]
-        if let job, let version = job["version"] as? String,
-           let state = job["state"] as? String, state == "scheduled" || state == "running" {
+        let state = job?["state"] as? String
+        if let version = job?["version"] as? String, state == "scheduled" || state == "running" {
             self.version = version
             kind = state == "running" ? .running : .scheduled
             return
         }
         guard updates["notify"] as? Bool == true, let latestVersion,
               Self.isTrusted(latest?["url"] as? String) else { return nil }
+        // A retry installs the release on offer now, as the page's Retry does.
         version = latestVersion
-        kind = .available
+        kind = state == "failed" || (job == nil && installFailed) ? .failed : .available
     }
 
     init(version: String, kind: Kind) {
@@ -39,20 +41,32 @@ struct ReleaseOffer: Equatable {
                          options: .regularExpression) != nil
     }
 
-    /// Only an offer can be clicked; a scheduled or running install is a status line.
-    var isActionable: Bool { kind == .available }
+    /// An offer or a retry can be clicked; a scheduled or running install is a status line.
+    var isActionable: Bool { kind == .available || kind == .failed }
 
     var title: String {
         switch kind {
         case .available: localised("Version \(version) available - Install", "Доступна версия \(version) - установить")
         case .scheduled: localised("Version \(version) will be installed after the call", "Версия \(version) установится после звонка")
         case .running: localised("Updating to version \(version)…", "Обновляю до версии \(version)…")
+        case .failed: localised("Could not update. The current version keeps working. Try again",
+                                "Не удалось обновить. Текущая версия продолжает работать. Повторить")
         }
     }
 
     /// One banner per new version.
     func shouldNotify(lastNotified: String?) -> Bool {
         kind == .available && version != lastNotified
+    }
+
+    /// A banner installs only the version it announced, and only while it is still on offer.
+    func installs(bannerVersion: String) -> Bool {
+        isActionable && version == bannerVersion
+    }
+
+    /// While an install is under way the server is asked often, so its end shows promptly.
+    static func pollInterval(for offer: ReleaseOffer?) -> TimeInterval {
+        offer?.kind == .scheduled || offer?.kind == .running ? 20 : 15 * 60
     }
 }
 
@@ -66,6 +80,8 @@ final class ReleaseNotice {
     private let server: LocalServer
     private let show: (ReleaseOffer?) -> Void
     private var timer: Timer?
+    private var lastPoll = Date.distantPast
+    private var installFailed = false
     private(set) var offer: ReleaseOffer?
 
     init(server: LocalServer = .shared, show: @escaping (ReleaseOffer?) -> Void) {
@@ -77,27 +93,56 @@ final class ReleaseNotice {
         guard timer == nil else { return }
         server.onEveryReady { [weak self] in self?.refresh() }
         if server.isReady { refresh() }
-        let timer = Timer(timeInterval: 15 * 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
+        // Ticks often, polls when due: every 15 minutes, every 20 s during an install.
+        let timer = Timer(timeInterval: 20, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, Date().timeIntervalSince(self.lastPoll) >= ReleaseOffer.pollInterval(for: self.offer) - 1
+                else { return }
+                self.refresh()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
 
-    func refresh() {
+    func refresh(then next: (() -> Void)? = nil) {
         guard server.isReady else { return }
-        Task { apply(await request(post: nil)) }
+        lastPoll = Date()
+        Task {
+            apply(await request(post: nil))
+            next?()
+        }
     }
 
-    /// The menu item and the banner both land here; no confirmation (fewest clicks).
+    /// The menu item lands here; no confirmation (fewest clicks).
     func install() {
         guard let offer, offer.isActionable, server.isReady else { return }
-        Task { apply(await request(post: ["version": offer.version])) }
+        installFailed = false
+        Task {
+            if let updates = await request(post: ["version": offer.version]) {
+                apply(updates)
+            } else {
+                // Shown as failed; a re-poll replaces a stale version with the current one.
+                installFailed = true
+                refresh()
+            }
+        }
+    }
+
+    /// A banner click: waits for the server on a cold launch, then installs only
+    /// if the banner's version is still the one on offer; otherwise the menu is just refreshed.
+    func installFromBanner(version: String) {
+        server.whenReady { [weak self] in
+            self?.refresh { [weak self] in
+                guard let self, self.offer?.installs(bannerVersion: version) == true else { return }
+                self.install()
+            }
+        }
     }
 
     private func apply(_ updates: [String: Any]?) {
         guard let updates else { return }  // server busy or restarting: keep what is shown
-        offer = ReleaseOffer(updates: updates)
+        offer = ReleaseOffer(updates: updates, installFailed: installFailed)
         show(offer)
         let defaults = UserDefaults.standard
         guard let offer, offer.shouldNotify(lastNotified: defaults.string(forKey: Self.notifiedKey)) else { return }
@@ -106,7 +151,7 @@ final class ReleaseNotice {
             title: offer.title,
             body: localised("Click to install. During a call it waits until the call ends.",
                             "Нажмите, чтобы установить. Во время звонка установка дождется его окончания."),
-            opening: nil, release: true)
+            opening: nil, release: offer.version)
     }
 
     /// GET `/api/updates`, or POST `/api/updates/install` with the page's own Origin,

@@ -30,7 +30,7 @@ enum Notifications {
     /// handed the session folder when the banner named one.
     @MainActor
     static func install(onOpen: @escaping @MainActor (URL?) -> Void,
-                        onRelease: @escaping @MainActor () -> Void = {}) {
+                        onRelease: @escaping @MainActor (String) -> Void = { _ in }) {
         guard usesNotificationCenter else { return }
         let delegate = Delegate(onOpen: onOpen, onRelease: onRelease)
         Self.delegate = delegate
@@ -38,14 +38,14 @@ enum Notifications {
     }
 
     @MainActor
-    static func post(title: String, body: String, opening session: URL?, release: Bool = false) {
+    static func post(title: String, body: String, opening session: URL?, release: String? = nil) {
         guard usesNotificationCenter else { return }
 
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         if let session { content.userInfo = [sessionKey: session.path] }
-        if release { content.userInfo = [releaseKey: true] }
+        if let release { content.userInfo = [releaseKey: release] }
 
         // Asked for once, lazily: a permission dialog on first launch, before
         // anything has happened, is a question about nothing.
@@ -71,9 +71,9 @@ enum Notifications {
     @MainActor
     private final class Delegate: NSObject, UNUserNotificationCenterDelegate {
         private let onOpen: @MainActor (URL?) -> Void
-        private let onRelease: @MainActor () -> Void
+        private let onRelease: @MainActor (String) -> Void
 
-        init(onOpen: @escaping @MainActor (URL?) -> Void, onRelease: @escaping @MainActor () -> Void) {
+        init(onOpen: @escaping @MainActor (URL?) -> Void, onRelease: @escaping @MainActor (String) -> Void) {
             self.onOpen = onOpen
             self.onRelease = onRelease
         }
@@ -94,9 +94,9 @@ enum Notifications {
         ) async {
             let userInfo = response.notification.request.content.userInfo
             let folder = Notifications.session(in: userInfo)
-            let release = userInfo[Notifications.releaseKey] as? Bool == true
+            let release = userInfo[Notifications.releaseKey] as? String
             await MainActor.run {
-                if release { return onRelease() }
+                if let release { return onRelease(release) }
                 NSApp.activate(ignoringOtherApps: true)
                 onOpen(folder)
             }

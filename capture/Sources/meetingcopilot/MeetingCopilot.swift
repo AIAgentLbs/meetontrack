@@ -586,8 +586,8 @@ final class AppController {
             } else {
                 self?.showWindow()
             }
-        } onRelease: { [weak self] in
-            self?.releaseNotice.install()
+        } onRelease: { [weak self] version in
+            self?.releaseNotice.installFromBanner(version: version)
         }
 
         awake = ProcessInfo.processInfo.beginActivity(
