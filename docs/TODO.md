@@ -24,17 +24,14 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
   state poll failed silently without `updates.js`), keeps the main screen up
   with recording audio, and drops the removed `#analysis-help` checks. Passes;
   close after release.
-- [ ] [MEETONTRACK-160](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-160/): `/api/state` took ~30 s
-  with ~6.8k stored frames (regression from MEETONTRACK-91, shipped in 0.1.31): Zoom speaker snapping
-  re-ran over every frame on each poll and hundreds of times per archive pass. Fixed in source
-  (`copilot/web/server.py`: snap once per meeting and speaker, current meeting only, cached
-  `archive_items`); ~0.07 s steady. Close after the release that ships it.
-- [ ] [MEETONTRACK-159](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-159/): call memo before and after
-  the call. Consultation `*-prep.md` files dated by frontmatter `date:` or their name become plans; the plan
-  payload carries the full memo (`memo_markdown`, `memo_url`, `talk_track_markdown`, `has_memo`);
-  `GET /api/agenda` lists today's and tomorrow's calendar meetings with matched memos; library detail
-  exposes `drive_links` and the bound plan's memo. Data layer and plain rendering done in source; the
-  visual rebuild of the three screens follows. Close after the release that ships it.
+- [x] [MEETONTRACK-160](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-160/) (shipped in v0.1.33, closed 2026-11-20):
+  `/api/state` took ~30 s with ~6.8k stored frames (regression from MEETONTRACK-91, shipped in 0.1.31). Zoom speaker
+  snapping now runs once per meeting and speaker, only for the current meeting on the poll path, with cached
+  `archive_items`. Packaged 0.1.33 server on 6,779 frames: 0.23-0.39 s (0.1.32: 18-25 s).
+- [x] [MEETONTRACK-159](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-159/) (shipped in v0.1.33, closed 2026-11-20): call memo
+  before and after the call: `*-prep.md` plans dated by `call_date:`, `date:` or name, full memo in the plan payload,
+  `GET /api/agenda`, library `drive_links` and bound memo, plain rendering. The visual rebuild of the three screens
+  was not part of this issue or release.
 - [ ] [MEETONTRACK-154](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-154/): 0.1.31 review leftovers (P2, Codex round 2):
   Windows legacy `speaker_names.backend="none"` comes back after enabling naming and saving
   (`AppSettingsStore.cs` ~92) and its migration is case-sensitive (~93); a stale assistant window
