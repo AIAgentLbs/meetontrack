@@ -122,6 +122,17 @@ Tomorrow
 - A recording that did not start says why and puts the action that fixes the
   cause first (for a missing microphone permission: open its settings), then
   Start recording.
+- A failure is caught before the call, not at it (author's call, after the
+  sixth critique): the microphone and call-audio permissions are checked as
+  soon as a call is on the agenda. A missing one is shown in the top bar with
+  the fixing action, naming the call it will cost. If recording still cannot
+  start at the call's time, the top bar says "Not recording" with the reason
+  and the app raises a system notification carrying the same fixing action,
+  because the person is in the video call by then, not on Home.
+- A failed memo is retried once by the app; the row says when. Beside Retry
+  there is "Check the AI in settings" for a cause Retry cannot fix.
+- The calendar link is labelled "Open the call link", so it is not read as
+  opening the app's own call view.
 - Accelerators on the next call's row: open the memo, join the call (the
   calendar link), do not record. Key labels show in windows of 1100 px and
   wider and are always listed in the menu.
@@ -177,7 +188,7 @@ Tomorrow
   "Recording" in every layout; the error colour stays reserved for problems
   (author's call: one reviewer read grey as "off", another objected to error
   red). The timer shows minutes and seconds. One vocabulary for audio everywhere: heard, not heard.
-- One vocabulary for the end of a call on every screen: the control is "End
+- One vocabulary for the end of a call on every screen: the control is "Stop
   recording", the state after it is "Recording stopped" with "Resume
   recording" for those 10 s; the After view says when the recording stopped.
   This replaces "End" and "Call ended - Undo" above (author's call, after the
@@ -189,8 +200,14 @@ Tomorrow
   at 400 px.
 - The source line under the hint shows its first line only; the rest opens
   on demand.
-- Quiet key hints on the ask field, "End recording" and Send. They are an aid
+- Quiet key hints on the ask field, "Stop recording" and Send. They are an aid
   for regular users, never the only way to reach a control.
+- The label above a hint carries its time, like the label over a heard
+  question, so an old hint is not read as current.
+- While the answer to a heard question is prepared, the line gives the usual
+  wait ("usually a few seconds").
+- A lost call-audio state puts "Choose the call's sound" first and "How to
+  fix" as a quiet link. "How to fix" has one look on every screen.
 
 ### After (MEETONTRACK-163)
 
@@ -232,6 +249,16 @@ Tomorrow
 - Editing pauses the send: the report goes 30 s after the last edit. A field
   the person edited is never overwritten by the rebuild. Both rules are
   stated in the send block, in one wording, not in a footnote.
+- Every state before sending has the same action row in the same place:
+  Send now, then the quiet Do not send. Send now sends what is on screen.
+- The recipients sentence says whose channels they are and that the other
+  side does not receive the report.
+- The board goes into the report as shown, and the heading says so. Each
+  board item has a quiet Remove; a removed item is left out of the report and
+  can be brought back from the line that replaces it.
+- A channel that failed is retried once by the app after a minute and says
+  so; Retry and the link to that channel's settings stay. The plain "sent"
+  state lists each channel with its time.
 - Column names are generic, so they read right for any call: "Ask the other
   side", "Asked of you", "Risks and objections", "Fact check". A differing
   statement names the speaker and the meeting on both sides.
