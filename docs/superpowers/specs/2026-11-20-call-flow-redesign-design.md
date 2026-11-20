@@ -138,8 +138,9 @@ Tomorrow
 
 - One current hint in 22-24 px type with one line saying where it comes from.
   Nothing else on the screen competes with it.
-- The hint is one clause of eight words or fewer, readable in under two
-  seconds while speaking. The reasoning and the quote go into the source
+- The hint is something to say or ask, not a fact to interpret ("Ask: why
+  X when your own estimate is Y?"), in one clause of eight words or fewer,
+  readable in under two seconds while speaking. The reasoning and the quote go into the source
   line. This is a rule for the AI prompt and is enforced on output: a longer
   hint is cut to its first clause (author's call, after the first critique
   measured a 20-word hint at 4-5 s).
@@ -163,16 +164,20 @@ Tomorrow
 - End sits at the far end of the top bar, away from the status marks. It
   stops the call at once and the bar shows "Call ended - Undo" for about
   10 s. No dialog.
-- The recording mark is neutral, never the error colour; the timer shows
-  minutes and seconds. One vocabulary for audio everywhere: heard, not heard.
+- The recording mark is a filled dot in the accent colour with the words
+  "Recording" in every layout; the error colour stays reserved for problems
+  (author's call: one reviewer read grey as "off", another objected to error
+  red). The timer shows minutes and seconds. One vocabulary for audio everywhere: heard, not heard.
 - One vocabulary for the end of a call on every screen: the control is "End
   recording", the state after it is "Recording stopped" with "Resume
   recording" for those 10 s; the After view says when the recording stopped.
   This replaces "End" and "Call ended - Undo" above (author's call, after the
   second critique found three wordings for one event).
 - Narrow window: at 480-600 px (the app beside a video call) the hint wraps
-  and stays the largest thing, the status marks stack or shorten, and the ask
-  field stays usable.
+  and stays the largest thing, the status marks stack or shorten, and the
+  dock is the ask field plus one "More" (past hints, transcript, board).
+  Home and After reflow to one column under about 700 px; nothing is clipped
+  at 400 px.
 - The source line under the hint shows its first line only; the rest opens
   on demand.
 - Quiet key hints on the ask field, "End recording" and Send. They are an aid
@@ -202,7 +207,8 @@ Tomorrow
   120 s after the end), so the screen shows a plain state, not a timer:
   "being prepared", "goes when the final transcript is ready", "sent".
   Edits made before sending are included; after sending, an edit offers Send
-  again. No confirmation dialog.
+  again, which updates the existing CRM note instead of adding a second one.
+  No confirmation dialog.
 - The control is worded "Do not send", with the line "goes only when you press
   Send". It stops every channel of that one report until the person presses
   Send. It is stored with the report, survives a restart, and never sends by
@@ -214,8 +220,9 @@ Tomorrow
 - Column names are generic, so they read right for any call: "Ask the other
   side", "Asked of you", "Risks and objections", "Fact check". A differing
   statement names the speaker and the meeting on both sides.
-- Fewer frames: recipients are one line, the summary and next steps are plain
-  editable text with one shared note, and board items are list rows separated
+- Fewer frames: recipients are one line inside the send block with Change
+  always present, the summary and next steps are frameless fields with one
+  shared note, no side stripes anywhere, and board items are list rows separated
   by hairlines, not cards.
 - "Against the memo" is not a separate list: nothing appears twice. One
   explaining line sits under the board heading ("what was said on the call,
