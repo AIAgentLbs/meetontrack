@@ -119,6 +119,12 @@ Tomorrow
 - The next call's row has a quiet "Do not record this call". Recording
   otherwise starts by itself.
 - A memo that could not be made says why in one line and offers Retry.
+- A recording that did not start says why and puts the action that fixes the
+  cause first (for a missing microphone permission: open its settings), then
+  Start recording.
+- Accelerators on the next call's row: open the memo, join the call (the
+  calendar link), do not record. Key labels show in windows of 1100 px and
+  wider and are always listed in the menu.
 - Empty states, each with one action at most: calendar not connected (Connect),
   calendar tool missing (how to get it), no meetings today or tomorrow.
 - Past meetings stay one click away (the existing library).
@@ -217,11 +223,15 @@ Tomorrow
   Send. It is stored with the report, survives a restart, and never sends by
   itself afterwards. Delivery retries skip a held report (author's call).
   States shown: waiting, held, sent per channel, edited after sending.
-- The automatic send waits while a summary or next-steps field has focus and
-  says so; it resumes when the field is left (author's call, after the
-  second critique: a report must not leave mid-edit). A field the person
-  edited is never overwritten by the rebuild that follows the final
-  transcript; the screen says so.
+- Nothing leaves that was not on screen first (author's call, after the
+  fifth critique). The summary shown right after the call is a draft; when
+  the rebuild from the final transcript lands, the refreshed summary is
+  marked as updated and stays visible for 30 s, then the report goes. Send
+  now and Do not send are both offered during that wait; it is a pause, not
+  a confirmation.
+- Editing pauses the send: the report goes 30 s after the last edit. A field
+  the person edited is never overwritten by the rebuild. Both rules are
+  stated in the send block, in one wording, not in a footnote.
 - Column names are generic, so they read right for any call: "Ask the other
   side", "Asked of you", "Risks and objections", "Fact check". A differing
   statement names the speaker and the meeting on both sides.
