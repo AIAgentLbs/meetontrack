@@ -118,6 +118,7 @@ Tomorrow
   the Sources settings.
 - The next call's row has a quiet "Do not record this call". Recording
   otherwise starts by itself.
+- A memo that could not be made says why in one line and offers Retry.
 - Empty states, each with one action at most: calendar not connected (Connect),
   calendar tool missing (how to get it), no meetings today or tomorrow.
 - Past meetings stay one click away (the existing library).
@@ -138,9 +139,11 @@ Tomorrow
 
 - One current hint in 22-24 px type with one line saying where it comes from.
   Nothing else on the screen competes with it.
-- The hint is something to say or ask, not a fact to interpret ("Ask: why
-  X when your own estimate is Y?"), in one clause of eight words or fewer,
-  readable in under two seconds while speaking. The reasoning and the quote go into the source
+- The hint is a line the person can read aloud as it stands ("Why X, if
+  your own estimate is Y?"), about eight words, readable in about two seconds
+  while speaking. A small label above it says who speaks: "Ask" over a hint,
+  "<name> asks" over a question put to the user, which is set in regular
+  weight so it is never mistaken for a hint. The reasoning and the quote go into the source
   line. This is a rule for the AI prompt and is enforced on output: a longer
   hint is cut to its first clause (author's call, after the first critique
   measured a 20-word hint at 4-5 s).
@@ -216,13 +219,16 @@ Tomorrow
   States shown: waiting, held, sent per channel, edited after sending.
 - The automatic send waits while a summary or next-steps field has focus and
   says so; it resumes when the field is left (author's call, after the
-  second critique: a report must not leave mid-edit).
+  second critique: a report must not leave mid-edit). A field the person
+  edited is never overwritten by the rebuild that follows the final
+  transcript; the screen says so.
 - Column names are generic, so they read right for any call: "Ask the other
   side", "Asked of you", "Risks and objections", "Fact check". A differing
   statement names the speaker and the meeting on both sides.
-- Fewer frames: recipients are one line inside the send block with Change
-  always present, the summary and next steps are frameless fields with one
-  shared note, no side stripes anywhere, and board items are list rows separated
+- Fewer frames: recipients are one sentence inside the send block with Change
+  always present, the summary and the next steps are two ordinary text fields
+  (same look as the ask field) with one shared note, no side stripes
+  anywhere, and board items are list rows separated
   by hairlines, not cards.
 - "Against the memo" is not a separate list: nothing appears twice. One
   explaining line sits under the board heading ("what was said on the call,
