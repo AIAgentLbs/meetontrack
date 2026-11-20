@@ -15,6 +15,16 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
 2026-10-21: public 0.1.12 Mac/Windows pre-releases (one AI choice, Mac speech choice):
 [0.1.12 distribution acceptance](releases/2026-10-21-0.1.12-distribution.md).
 
+- [ ] [MEETONTRACK-161](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-161/): Home screen: today's and tomorrow's calendar meetings, each with 2-3 lines of its memo and sources; honest empty states (calendar not connected, no meetings, memo not ready).
+  Design: [call flow redesign](superpowers/specs/2026-11-20-call-flow-redesign-design.md). Accepted at 30/40 or more on the Impeccable critique.
+- [ ] [MEETONTRACK-162](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-162/): Call screen: one feed with a single large hint, a heartbeat for both sides of the call, short-lived hints with a history drawer, a 'question heard' state, transcript behind a toggle, undo on ending the call.
+  Design: [call flow redesign](superpowers/specs/2026-11-20-call-flow-redesign-design.md). Accepted at 30/40 or more on the Impeccable critique.
+- [ ] [MEETONTRACK-163](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-163/): After-call screen: the four-column board with an editable summary and next steps, recipients shown per channel before sending, a check against the memo, calendar attendees written into the report.
+  Design: [call flow redesign](superpowers/specs/2026-11-20-call-flow-redesign-design.md). Accepted at 30/40 or more on the Impeccable critique.
+- [ ] [MEETONTRACK-164](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-164/): The app prepares the pre-call memo itself, ahead of time, for today's and tomorrow's meetings with external participants, with the chosen AI; a button only rebuilds it.
+  Design: [call flow redesign](superpowers/specs/2026-11-20-call-flow-redesign-design.md).
+- [ ] [MEETONTRACK-165](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-165/): Calm the app chrome: at most three top-bar controls plus a menu, panels as overlays, one call status, regrouped settings, tab order and border contrast fixed (five P1 findings of the 0.1.32 audit).
+  Design: [call flow redesign](superpowers/specs/2026-11-20-call-flow-redesign-design.md). Accepted at 30/40 or more on the Impeccable critique.
 - [x] MEETONTRACK-1 (done and verified, closed 2026-11-14): `scripts/check-note-ui.cjs` fails at 0.1.11 and identically at the 0.1.10
   source (`ae27f2b`): `#note-help` shows `--:--` where the test expects the
   fixture's elapsed time `02:44`. Decide whether the hint must render the call
