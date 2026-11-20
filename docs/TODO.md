@@ -24,6 +24,11 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
   state poll failed silently without `updates.js`), keeps the main screen up
   with recording audio, and drops the removed `#analysis-help` checks. Passes;
   close after release.
+- [ ] [MEETONTRACK-160](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-160/): `/api/state` took ~30 s
+  with ~6.8k stored frames (regression from MEETONTRACK-91, shipped in 0.1.31): Zoom speaker snapping
+  re-ran over every frame on each poll and hundreds of times per archive pass. Fixed in source
+  (`copilot/web/server.py`: snap once per meeting and speaker, current meeting only, cached
+  `archive_items`); ~0.07 s steady. Close after the release that ships it.
 - [ ] [MEETONTRACK-159](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-159/): call memo before and after
   the call. Consultation `*-prep.md` files dated by frontmatter `date:` or their name become plans; the plan
   payload carries the full memo (`memo_markdown`, `memo_url`, `talk_track_markdown`, `has_memo`);

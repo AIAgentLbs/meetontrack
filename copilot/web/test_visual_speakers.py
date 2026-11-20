@@ -146,6 +146,25 @@ class VisualSpeakerTests(unittest.TestCase):
         # Unrelated text never becomes a name.
         self.assertEqual(self.snapped("ат umar&Sol", ["Kickoff agenda 2026", "Share Screen"]), "ат umar&Sol")
 
+    # MEETONTRACK-160: /api/state snapped every frame of every meeting against every
+    # label on each 2.5 s poll (~30 s with 6.8k stored frames). Work must scale with
+    # distinct labels of the current meeting, not with frames squared.
+    def test_state_poll_snaps_only_current_meeting_once_per_label(self):
+        from unittest import mock
+        import server
+        garbled = {**frame("00:00", "ость ompany&C"), "visual_text": "ость ompany&C\nGuest One"}
+        full = {**frame("01:00", ""), "visual_text": "Гость из Company&Co\nGuest One"}
+        other = {**frame("02:00", "ость ompany&C"), "meeting_id": "old", "visual_text": "Гость из Company&Co"}
+        frames = MeetingFrames(Path(tempfile.mkdtemp()) / "frames.json")
+        frames.items = [dict(full) for _ in range(300)] + [dict(garbled) for _ in range(300)] \
+            + [dict(other) for _ in range(300)]
+        with mock.patch("server._label_fragment_of", wraps=server._label_fragment_of) as compare, \
+                mock.patch("server.snap_zoom_speakers", wraps=server.snap_zoom_speakers) as snap:
+            shown = frames.snapshot("m")
+        self.assertEqual(len(snap.call_args.args[0]), 600)
+        self.assertLessEqual(compare.call_count, 3)
+        self.assertEqual({item["speaker"] for item in shown}, {"Гость из Company&Co"})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1475,19 +1475,24 @@ def snap_zoom_speakers(frames: list[dict]) -> list[dict]:
         if frame.get("speaker"):
             labels.add(str(frame["speaker"]).strip())
         seen.setdefault(str(frame.get("meeting_id", "")), []).append((index, labels))
-    for index, frame in enumerate(frames):
+    # The answer depends only on (meeting, speaker): a frame's own labels contain its
+    # speaker, so they are always inside `together` and excluded anyway. Computing it
+    # once per pair instead of once per frame keeps the 2.5 s state poll fast
+    # (MEETONTRACK-160: 6.8k frames took ~5 s per call, ~30 s under server load).
+    snapped: dict[tuple[str, str], str] = {}
+    for frame in frames:
         speaker = str(frame.get("speaker") or "").strip()
         if not speaker or frame.get("speaker_confidence") not in ZOOM_OCR_SPEAKERS:
             continue
-        meeting = seen.get(str(frame.get("meeting_id", "")), [])
-        together = set().union(*(labels for _, labels in meeting if speaker in labels))
-        matches = {
-            label for other, labels in meeting if other != index
-            for label in labels
-            if label != speaker and label not in together and _label_fragment_of(speaker, label)
-        }
-        if len(matches) == 1:
-            frame["speaker"] = matches.pop()
+        key = (str(frame.get("meeting_id", "")), speaker)
+        if key not in snapped:
+            meeting = [labels for _, labels in seen.get(key[0], [])]
+            together = set().union(*(labels for labels in meeting if speaker in labels))
+            candidates = set().union(*meeting) - together
+            matches = {label for label in candidates if _label_fragment_of(speaker, label)}
+            snapped[key] = matches.pop() if len(matches) == 1 else ""
+        if snapped[key]:
+            frame["speaker"] = snapped[key]
     return frames
 
 
@@ -1517,6 +1522,7 @@ class MeetingFrames:
         self.last_success_at = ""
         self.last_error = ""
         self.last_discard_reason = ""
+        self._archive_cache: tuple[tuple, list[dict]] = ((), [])
         try:
             payload = json.loads(index_path.read_text(encoding="utf-8"))
             if isinstance(payload.get("items"), list):
@@ -1566,7 +1572,13 @@ class MeetingFrames:
         """Read-only shared frame records; archive annotation copies before edits."""
         self._reload()
         with self.lock:
-            return snap_zoom_speakers([routed_event(item) for item in self.items])
+            # One archive pass reads every meeting's detail, each asking for all frames
+            # (MEETONTRACK-160: hundreds of calls per pass). Reuse the routed, snapped list
+            # until the frames or the meeting boundaries change.
+            key = (id(self.items), len(self.items), self.index_mtime_ns, BOUNDARIES.revision)
+            if self._archive_cache[0] != key:
+                self._archive_cache = (key, snap_zoom_speakers([routed_event(item) for item in self.items]))
+            return list(self._archive_cache[1])
 
     def snapshot(self, meeting_id: str = "") -> list[dict]:
         self._reload()
@@ -1581,8 +1593,10 @@ class MeetingFrames:
                     "window_title": item.get("window_title", ""),
                     "url": f"/api/frames/{item.get('id', '')}",
                 }
-                for item in snap_zoom_speakers([routed_event(item) for item in self.items])
-                if not meeting_id or item.get("meeting_id") == meeting_id
+                for item in snap_zoom_speakers([
+                    event for event in map(routed_event, self.items)
+                    if not meeting_id or event.get("meeting_id") == meeting_id
+                ])
             ]
         return list(reversed(items[-120:]))
 
@@ -1854,9 +1868,13 @@ class MeetingFrames:
         # Annotation must not mutate the raw, unchanged export held by TranscriptState.
         transcript = {**transcript, "segments": [dict(segment) for segment in transcript.get("segments", [])]}
         with self.lock:
-            frames = snap_zoom_speakers([routed_event(item) for item in self.items])
+            # Snapping is per meeting, so only this meeting's frames need it.
+            frames = snap_zoom_speakers([
+                event for event in map(routed_event, self.items)
+                if event.get("meeting_id") == transcript.get("meeting_id")
+            ])
         segments = transcript.get("segments", [])
-        meeting_frames = [frame for frame in frames if frame.get("meeting_id") == transcript.get("meeting_id")]
+        meeting_frames = frames
         teams_name = teams_one_to_one_name(meeting_frames)
         acoustic_slots = {segment.get("voice_id") for segment in segments
                           if segment.get("source") == "system" and segment.get("voice_id")}
