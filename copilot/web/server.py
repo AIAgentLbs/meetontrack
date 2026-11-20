@@ -3014,6 +3014,9 @@ class Handler(BaseHTTPRequestHandler):
                     "delivery": ARCHIVE.delivery_health(),
                 }
             )
+        elif path == "/api/agenda":
+            # Today's and tomorrow's meetings with their memos; not part of the 2.5 s state poll.
+            self._json({"ok": True, **PLANS.agenda()})
         elif path == "/api/repositories":
             self._json({"ok": True, **REPOSITORIES.catalog()})
         elif path == "/api/projects":

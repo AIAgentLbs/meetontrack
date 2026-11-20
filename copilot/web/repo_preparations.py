@@ -14,6 +14,14 @@ from urllib.parse import urlsplit
 
 
 DATE_RE = re.compile(r"(?m)^call_date:\s*(\d{4}-\d{2}-\d{2})\s*$")
+# A consultation prep file (name ends with PREP_SUFFIX) may carry a plain frontmatter
+# `date:` or only the date its name starts with; any other note with `date:` is not a plan.
+PREP_SUFFIX = "-prep.md"
+FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\s*\n", re.S)
+PREP_DATE_RE = re.compile(r"(?m)^date:\s*[\"']?(\d{4}-\d{2}-\d{2})[\"']?\s*$")
+NAME_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-")
+CLIENT_RE = re.compile(r"(?m)^client:\s*[\"']?(.+?)[\"']?\s*$")
+MEMO_LIMIT = 60_000
 HEADING_RE = re.compile(r"(?m)^#\s+(.+?)\s*$")
 LINK_RE = re.compile(r"\[([^\]]{2,100})\]\((https://[^\s)]+)\)")
 NUMBERED_RE = re.compile(r"^\s*\d+[.)]\s+(.+)$")
@@ -48,6 +56,19 @@ def _safe_link(url: str) -> bool:
     return parsed.scheme == "https" and bool(parsed.netloc) and not parsed.username
 
 
+def _call_date(path: Path, markdown: str) -> tuple[str, bool] | None:
+    """(date, is consultation prep) or None. `call_date:` wins; `date:` counts only in a prep file."""
+    prep_file = path.name.endswith(PREP_SUFFIX)
+    dated = DATE_RE.search(markdown[:2000])
+    if dated:
+        return dated.group(1), prep_file
+    if not prep_file:
+        return None
+    frontmatter = FRONTMATTER_RE.match(markdown)
+    found = (PREP_DATE_RE.search(frontmatter.group(1)) if frontmatter else None) or NAME_DATE_RE.match(path.name)
+    return (found.group(1), True) if found else None
+
+
 def _item_id(kind: str, text: str) -> str:
     return f"repo-{kind}-{hashlib.sha256(text.casefold().encode()).hexdigest()[:12]}"
 
@@ -60,19 +81,22 @@ def parse_preparation(path: Path, *, repo_name: str = "") -> dict | None:
         markdown = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return None
-    dated = DATE_RE.search(markdown[:2000])
+    dated = _call_date(path, markdown)
     heading = HEADING_RE.search(markdown)
     if not dated or not heading:
         return None
+    call_date, prep_file = dated
     try:
-        date.fromisoformat(dated.group(1))
+        date.fromisoformat(call_date)
     except ValueError:
         return None
-    title = _clean(re.sub(r"^(?:Sales kit|Call prep|Подготовка)\s*:\s*", "", heading.group(1), flags=re.I), 180)
+    title = _clean(re.sub(
+        r"^(?:Sales kit|Call prep|Meeting prep|Prep[- ]?(?:мемо|memo)|Подготовка(?: к звонку)?)\s*:\s*",
+        "", heading.group(1), flags=re.I), 180)
     if not title:
         return None
-    questions_section = _section(markdown, "опросник", "вопросы к встрече", "questions")
-    if not questions_section:
+    questions_section = _section(markdown, "опросник", "вопросы к встрече", "вопросы на звонке", "questions")
+    if not questions_section and not prep_file:
         return None
 
     questions: list[str] = []
@@ -88,7 +112,7 @@ def parse_preparation(path: Path, *, repo_name: str = "") -> dict | None:
             if line.startswith("- ") and "?" in line
         ]
     questions = list(dict.fromkeys(item for item in questions if item))[:12]
-    if not questions:
+    if not questions and not prep_file:
         return None
 
     objections_section = _section(markdown, "возражения", "objections")
@@ -120,24 +144,34 @@ def parse_preparation(path: Path, *, repo_name: str = "") -> dict | None:
     memo = _section(markdown, "мемо перед встречей", "meeting memo", "краткое резюме")
     goal = re.search(r"(?m)^\*\*(?:Цель встречи|Meeting goal)\.\*\*\s*(.+)$", memo)
     intro = _clean(goal.group(1), 650) if goal else ""
-    aliases = [part.strip() for part in re.split(r"[/·—|]", title) if len(part.strip()) >= 3]
+    frontmatter = FRONTMATTER_RE.match(markdown)
+    if not memo.strip() and prep_file:
+        memo = markdown[frontmatter.end():] if frontmatter else markdown  # The prep file is the memo.
+    client = CLIENT_RE.search(frontmatter.group(1)) if frontmatter else None
+    aliases = [part.strip() for part in [
+        *re.split(r"[/·—|]", title), *([_clean(client.group(1), 120)] if client else []),
+    ] if len(part.strip()) >= 3]
     seen_urls: set[str] = set()
     links = []
     for label, url in LINK_RE.findall(markdown):
         if url in seen_urls or not _safe_link(url):
             continue
         lower = label.casefold()
-        if not any(word in lower for word in ("sales kit", "мемо", "телемост", "meet", "проект", "дашборд", "dashboard", "brief", "demo")):
+        if not any(word in lower for word in ("sales kit", "мемо", "memo", "телемост", "meet", "проект", "дашборд", "dashboard", "brief", "demo")):
             continue
         seen_urls.add(url)
         links.append({"label": _clean(label, 80), "url": url})
         if len(links) >= 10:
             break
 
-    digest = hashlib.sha256(f"{path.resolve()}:{dated.group(1)}".encode()).hexdigest()[:16]
+    memo_url = next((link["url"] for words in (("мемо", "memo"), ("brief",), ("sales kit",))
+                     for link in links if any(word in link["label"].casefold() for word in words)), "")
+    digest = hashlib.sha256(f"{path.resolve()}:{call_date}".encode()).hexdigest()[:16]
     return {
-        "id": f"repo-{digest}", "call_date": dated.group(1),
+        "id": f"repo-{digest}", "call_date": call_date,
         "title": title, "intro": intro, "title_aliases": aliases,
+        "memo_markdown": memo.strip()[:MEMO_LIMIT], "memo_url": memo_url,
+        "talk_track_markdown": _section(markdown, "шпаргалка ведущего", "talk track").strip()[:MEMO_LIMIT],
         "attendee_aliases": aliases, "links": links, "items": items,
         "source_label": f"{repo_name}/{path.name}" if repo_name else path.name,
         "source_path": str(path.resolve()),
@@ -189,10 +223,14 @@ class RepositoryPreparations:
         sections = [
             _section(markdown, "мемо перед встречей", "meeting memo"),
             _section(markdown, "шпаргалка ведущего", "talk track"),
-            _section(markdown, "опросник", "вопросы к встрече", "questions"),
+            _section(markdown, "опросник", "вопросы к встрече", "вопросы на звонке", "questions"),
             _section(markdown, "ответы на вопросы и возражения", "objections"),
             _section(markdown, "проверка перед встречей", "готовность", "preflight"),
         ]
+        if not sections[0].strip() and path.name.endswith(PREP_SUFFIX):
+            # A consultation prep file is the memo as a whole: the AI reads what the person sees.
+            frontmatter = FRONTMATTER_RE.match(markdown)
+            return (markdown[frontmatter.end():] if frontmatter else markdown).strip()[:max_chars]
         return "\n\n".join(section for section in sections if section)[:max_chars]
 
     def for_date(self, call_date: str) -> list[dict]:
@@ -210,16 +248,23 @@ class RepositoryPreparations:
             if cached and time.monotonic() - cached[0] < 120:
                 return list(cached[1])
         results = []
+        excluded = ["-g", "!node_modules/**", "-g", "!vendor/**"]
+        scans = (
+            (["rg", "-l", "-m", "1", "-g", "*.md", *excluded, f"^call_date:\\s*{call_date}\\s*$", "."], 40),
+            # Consultation prep files: frontmatter `date:` or only the date their name starts with.
+            (["rg", "-l", "-m", "1", "-g", f"*{PREP_SUFFIX}", *excluded,
+              f"^date:\\s*[\"']?{call_date}[\"']?\\s*$", "."], 20),
+            (["rg", "--files", "-g", f"{call_date}-*{PREP_SUFFIX}", *excluded, "."], 20),
+        )
         for name, root in self.active_roots():
-            try:
-                scan = subprocess.run(
-                    ["rg", "-l", "-m", "1", "-g", "*.md", "-g", "!node_modules/**",
-                     "-g", "!vendor/**", f"^call_date:\\s*{call_date}\\s*$", "."],
-                    cwd=root, capture_output=True, text=True, timeout=4, check=False,
-                )
-            except (OSError, subprocess.TimeoutExpired):
-                continue
-            for relative in scan.stdout.splitlines()[:40]:
+            found: list[str] = []
+            for command, limit in scans:
+                try:
+                    scan = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=4, check=False)
+                except (OSError, subprocess.TimeoutExpired):
+                    continue
+                found += scan.stdout.splitlines()[:limit]
+            for relative in dict.fromkeys(found):
                 path = (root / relative).resolve()
                 if not path.is_relative_to(root) or not path.is_file():
                     continue
@@ -228,5 +273,8 @@ class RepositoryPreparations:
                     results.append(plan)
         results = results[:30]
         with self._lock:
-            self._cache = {key: (time.monotonic(), results)}
+            # Several dates stay cached (the live call's day and the agenda's days).
+            self._cache = {k: v for k, v in self._cache.items()
+                           if k[1] == manifest_mtime and time.monotonic() - v[0] < 120}
+            self._cache[key] = (time.monotonic(), results)
         return list(results)

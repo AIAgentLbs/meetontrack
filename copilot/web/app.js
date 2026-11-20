@@ -147,6 +147,12 @@ const translations = {
     "view.chat": "Чат",
     "plan.tab": "Подготовка",
     "plan.links": "Материалы",
+    "plan.memo": "Мемо перед встречей",
+    "plan.talk_track": "Шпаргалка ведущего",
+    "plan.memo_open": "Открыть документ мемо",
+    "plan.agenda": "Встречи сегодня и завтра",
+    "plan.no_memo": "Нет мемо",
+    "plan.unscheduled": "Подготовка без события в календаре",
     "plan.question": "Вопросы",
     "plan.risk": "Риски",
     "plan.objection": "Возражения",
@@ -300,6 +306,8 @@ const translations = {
     "archive.generating": "Формирую отчет…",
     "archive.open_html": "Открыть HTML",
     "archive.open_pdf": "Открыть PDF",
+    "archive.drive_folder": "Папка на Google Диске",
+    "archive.drive_pdf": "PDF на Google Диске",
     "archive.drive_uploaded": "Загружено в Google Drive",
     "archive.drive_auth": "Google Drive требует повторной авторизации",
     "archive.mail_sent": "Копия отправлена по почте",
@@ -365,6 +373,12 @@ const translations = {
     "view.chat": "Chat",
     "plan.tab": "Preparation",
     "plan.links": "Materials",
+    "plan.memo": "Pre-call memo",
+    "plan.talk_track": "Talk track",
+    "plan.memo_open": "Open memo document",
+    "plan.agenda": "Meetings today and tomorrow",
+    "plan.no_memo": "No memo",
+    "plan.unscheduled": "Preparation without a calendar event",
     "plan.question": "Questions",
     "plan.risk": "Risks",
     "plan.objection": "Objections",
@@ -508,6 +522,8 @@ const translations = {
     "archive.generating": "Generating report…",
     "archive.open_html": "Open HTML",
     "archive.open_pdf": "Open PDF",
+    "archive.drive_folder": "Folder on Google Drive",
+    "archive.drive_pdf": "PDF on Google Drive",
     "archive.drive_uploaded": "Uploaded to Google Drive",
     "archive.drive_auth": "Google Drive needs reauthorization",
     "archive.mail_sent": "Email copy sent",
@@ -1912,15 +1928,97 @@ async function saveRepositorySelection() {
   }
 }
 
-function renderCallPlan(plan) {
-  currentCallPlan = plan;
-  elements.callPlanTab.hidden = !plan;
-  if (!plan) {
-    callPlanSignature = "";
-    elements.callPlan.replaceChildren();
-    selectedPlanMeetingId = "";
+// Markdown shown as plain text lines (textContent only, never parsed as HTML).
+function memoDetails(markdown, label) {
+  const details = document.createElement("details");
+  details.className = "call-plan-memo";
+  details.open = true;
+  details.append(textNode("summary", "", label));
+  for (const raw of String(markdown || "").split("\n")) {
+    const line = raw.trim()
+      .replace(/^#{1,6}\s+/, "").replace(/^[-*]\s+(?!\[)/, "• ")
+      .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, "$1 ($2)").replace(/\*\*|__|`/g, "");
+    if (line && line !== "---") details.append(textNode("p", "", line));
+  }
+  return details;
+}
+
+function externalLink(label, url) {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.textContent = label;
+  return anchor;
+}
+
+function memoNodes(plan) {
+  const nodes = [];
+  if (plan.memo_url) nodes.push(externalLink(t("plan.memo_open"), plan.memo_url));
+  if (plan.memo_markdown) nodes.push(memoDetails(plan.memo_markdown, t("plan.memo")));
+  if (plan.talk_track_markdown) nodes.push(memoDetails(plan.talk_track_markdown, t("plan.talk_track")));
+  return nodes;
+}
+
+// Before a call the Preparation tab lists today's and tomorrow's meetings with their memos.
+let agenda = null;
+let agendaSignature = "";
+async function refreshAgenda() {
+  try {
+    agenda = await getJSON("/api/agenda");
+  } catch {
     return;
   }
+  if (agendaMode) renderCallPlan(currentCallPlan, true);
+}
+
+function renderAgenda() {
+  const meetings = agenda?.meetings || [];
+  const unscheduled = agenda?.unscheduled_plans || [];
+  elements.callPlanTab.hidden = !meetings.length && !unscheduled.length;
+  elements.callPlanCount.textContent = String(meetings.length + unscheduled.length);
+  const signature = `${uiLanguage}:${JSON.stringify(agenda)}`;
+  if (signature === agendaSignature) return;
+  agendaSignature = signature;
+  const fragment = document.createDocumentFragment();
+  fragment.append(textNode("h3", "call-plan-title", t("plan.agenda")));
+  const planNodes = (plan) => {
+    const block = document.createElement("div");
+    block.append(textNode("p", "call-plan-source", plan.title), ...memoNodes(plan));
+    return block;
+  };
+  for (const meeting of meetings) {
+    const card = document.createElement("article");
+    const start = new Date(meeting.start);
+    const when = start.toLocaleString(uiLanguage === "en" ? "en-GB" : "ru-RU",
+      { weekday: "short", hour: "2-digit", minute: "2-digit" });
+    card.append(textNode("h4", "call-plan-section-title", `${when} · ${meeting.title}`));
+    const people = (meeting.attendees || []).filter((person) => !person.self).map((person) => person.name || person.email);
+    if (people.length) card.append(textNode("p", "", people.join(", ")));
+    if (!meeting.plans.length) card.append(textNode("p", "call-plan-tentative", t("plan.no_memo")));
+    for (const plan of meeting.plans) card.append(planNodes(plan));
+    fragment.append(card);
+  }
+  if (unscheduled.length) {
+    fragment.append(textNode("h4", "call-plan-section-title", t("plan.unscheduled")));
+    for (const plan of unscheduled) fragment.append(planNodes(plan));
+  }
+  elements.callPlan.replaceChildren(fragment);
+}
+
+// showAgenda: between calls the last call's plan stays for the board, the tab shows the agenda.
+let agendaMode = true;
+function renderCallPlan(plan, showAgenda = false) {
+  currentCallPlan = plan;
+  agendaMode = !plan || showAgenda;
+  elements.callPlanTab.hidden = !plan;
+  if (agendaMode) {
+    callPlanSignature = "";
+    selectedPlanMeetingId = "";
+    renderAgenda();
+    return;
+  }
+  agendaSignature = "";
   selectedPlanMeetingId = plan.meeting_id;
   elements.callPlanCount.textContent = String(plan.items.filter((item) => item.status !== "resolved").length);
   const signature = `${uiLanguage}:${JSON.stringify(plan)}`;
@@ -1932,6 +2030,7 @@ function renderCallPlan(plan) {
     if (plan.match === "calendar") fragment.append(textNode("p", "call-plan-tentative", t("plan.calendar")));
     if (plan.source_label) fragment.append(textNode("p", "call-plan-source", t("plan.source", { source: plan.source_label })));
     if (plan.intro) fragment.append(textNode("p", "call-plan-intro", plan.intro));
+    fragment.append(...memoNodes(plan));
     const score = document.createElement("div");
     score.className = "call-plan-score";
     score.append(textNode("strong", "", t("plan.score", plan.score)));
@@ -2691,6 +2790,8 @@ function renderArchiveDetail(meeting) {
       reportActions.append(link);
     }
   }
+  if (meeting.drive_links?.folder_url) reportActions.append(externalLink(t("archive.drive_folder"), meeting.drive_links.folder_url));
+  if (meeting.drive_links?.pdf_url) reportActions.append(externalLink(t("archive.drive_pdf"), meeting.drive_links.pdf_url));
   const generate = document.createElement("button");
   generate.type = "button";
   generate.className = "send-button";
@@ -2753,6 +2854,7 @@ function renderArchiveDetail(meeting) {
   if (meeting.call_plan) {
     const map = document.createElement("div");
     map.className = "archive-call-plan";
+    map.append(...memoNodes(meeting.call_plan));
     for (const link of meeting.call_plan.links || []) {
       const anchor = document.createElement("a");
       anchor.href = link.url;
@@ -3034,7 +3136,8 @@ async function state() {
     renderFrames(data.frames || []);
     renderFrameStatus(data.frame_capture || {});
     renderMessages(data.copilot, data.journal || []);
-    renderCallPlan(data.call_plan || null);
+    // Between calls the last call's plan gives way to the agenda of upcoming meetings.
+    renderCallPlan(data.call_plan || null, data.transcript?.status === "finished");
     renderJournal(data.journal || []);
     renderFactChecks(data.fact_checks);
     renderCallBoard(data.call_plan || null, data.journal || []);
@@ -3535,6 +3638,8 @@ document.querySelector("#google-search-form").addEventListener("submit", async e
 
 applyLanguage();
 void state();
+void refreshAgenda();
+setInterval(() => void refreshAgenda(), 60000);
 // Freshness must expire even when a request never returns. An old response
 // cannot keep either a recording claim or a recovery action alive indefinitely.
 setInterval(() => {

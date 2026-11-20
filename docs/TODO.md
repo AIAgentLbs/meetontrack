@@ -24,6 +24,12 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
   state poll failed silently without `updates.js`), keeps the main screen up
   with recording audio, and drops the removed `#analysis-help` checks. Passes;
   close after release.
+- [ ] [MEETONTRACK-159](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-159/): call memo before and after
+  the call. Consultation `*-prep.md` files dated by frontmatter `date:` or their name become plans; the plan
+  payload carries the full memo (`memo_markdown`, `memo_url`, `talk_track_markdown`, `has_memo`);
+  `GET /api/agenda` lists today's and tomorrow's calendar meetings with matched memos; library detail
+  exposes `drive_links` and the bound plan's memo. Data layer and plain rendering done in source; the
+  visual rebuild of the three screens follows. Close after the release that ships it.
 - [ ] [MEETONTRACK-154](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-154/): 0.1.31 review leftovers (P2, Codex round 2):
   Windows legacy `speaker_names.backend="none"` comes back after enabling naming and saving
   (`AppSettingsStore.cs` ~92) and its migration is case-sensitive (~93); a stale assistant window

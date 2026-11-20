@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import threading
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -17,6 +17,7 @@ from private_dirs import private_dir
 KINDS = {"question", "risk", "objection"}
 STATUSES = {"open", "resolved", "clarify"}
 UPDATE_RE = re.compile(r"(?m)^PLAN_UPDATE\s*[:—-]\s*(\{[^\n]*\})\s*$")
+MEMO_LIMIT = 60_000
 
 
 def _normal(value: str) -> str:
@@ -26,6 +27,26 @@ def _normal(value: str) -> str:
 def _safe_link(value: str) -> bool:
     parsed = urlsplit(value)
     return parsed.scheme == "https" and bool(parsed.netloc) and not parsed.username
+
+
+def _links(plan: dict) -> list[dict]:
+    return [
+        {"label": str(link.get("label") or "Материал")[:100], "url": link["url"]}
+        for link in plan.get("links", []) if isinstance(link, dict)
+        and isinstance(link.get("url"), str) and _safe_link(link["url"])
+    ][:30]
+
+
+def _memo(plan: dict) -> dict:
+    """The memo the person reads: full Markdown text and the memo document link."""
+    memo_url = str(plan.get("memo_url") or "")
+    memo_url = memo_url if _safe_link(memo_url) else ""
+    memo_markdown = str(plan.get("memo_markdown") or "")[:MEMO_LIMIT]
+    return {
+        "memo_markdown": memo_markdown, "memo_url": memo_url,
+        "talk_track_markdown": str(plan.get("talk_track_markdown") or "")[:MEMO_LIMIT],
+        "has_memo": bool(memo_markdown or memo_url),
+    }
 
 
 class CallPlans:
@@ -65,6 +86,8 @@ class CallPlans:
                     ) if part)
                     plan["source_label"] = prepared["source_label"]
                     plan["meeting_link"] = prepared.get("meeting_link", "")
+                    for field in ("memo_markdown", "talk_track_markdown", "memo_url"):
+                        plan[field] = plan.get(field) or prepared.get(field, "")
                     explicit_items = plan.get("items", [])
                     plan["items"] = prepared["items"] + (
                         [item for item in explicit_items if isinstance(item, dict)]
@@ -195,31 +218,92 @@ class CallPlans:
                 continue
             if not event_start - timedelta(minutes=15) <= started <= event_end + timedelta(minutes=20):
                 continue
-            event_title = _normal(str(event.get("title") or ""))
-            event_link = str(event.get("link") or "").rstrip("/")
-            for plan in plans:
-                if plan in matches:
-                    continue
-                scheduled = plan.get("starts_at") or plan.get("call_date")
-                try:
-                    scheduled_at = datetime.fromisoformat(str(scheduled))
-                    scheduled_day = scheduled_at.astimezone().date() if scheduled_at.tzinfo else scheduled_at.date()
-                    if scheduled_day != started.astimezone().date():
-                        continue
-                except (TypeError, ValueError):
-                    continue
-                aliases = [
-                    alias for field in ("title_aliases", "attendee_aliases")
-                    for alias in (plan.get(field) if isinstance(plan.get(field), list) else [])
-                ]
-                name_hit = any(
-                    len(alias_normal := _normal(str(alias))) >= 4 and alias_normal in event_title
-                    for alias in aliases
-                )
-                planned_link = str(plan.get("meeting_link") or "").rstrip("/")
-                if name_hit or (event_link and planned_link and event_link == planned_link):
-                    matches.append(plan)
+            matches += [plan for plan in plans
+                        if plan not in matches and self._event_matches(plan, event, started.astimezone().date())]
         return matches
+
+    @staticmethod
+    def _event_matches(plan: dict, event: dict, day: date) -> bool:
+        """A plan for this day whose alias is in the event title or attendee names, or whose link is the event's."""
+        if CallPlans._scheduled_day(plan) != day:
+            return False
+        event_title = _normal(" ".join([str(event.get("title") or ""), *(
+            str(person.get("name") or "") for person in event.get("attendees") or [] if isinstance(person, dict)
+        )]))
+        event_link = str(event.get("link") or "").rstrip("/")
+        aliases = [
+            alias for field in ("title_aliases", "attendee_aliases")
+            for alias in (plan.get(field) if isinstance(plan.get(field), list) else [])
+        ]
+        name_hit = any(
+            len(alias_normal := _normal(str(alias))) >= 4 and alias_normal in event_title
+            for alias in aliases
+        )
+        planned_link = str(plan.get("meeting_link") or "").rstrip("/")
+        return name_hit or bool(event_link and planned_link and event_link == planned_link)
+
+    def agenda(self, now: datetime | None = None) -> dict:
+        """Today's and tomorrow's calendar meetings, each with its matched plans (none = no memo).
+
+        Works with no live call; calendar reads and repository scans are cached by their owners.
+        """
+        now = now or datetime.now().astimezone()
+        meetings, unscheduled, seen = [], [], set()
+        for day in (now.date(), now.date() + timedelta(days=1)):
+            noon = datetime.combine(day, time(12)).astimezone().isoformat()
+            plans = [plan for plan in self._plans({"started_at": noon}) if self._valid(plan)]
+            matched: set[str] = set()
+            for event in (self.calendar.for_day(day) if self.calendar else []):
+                try:
+                    started, ended = datetime.fromisoformat(event["start"]), datetime.fromisoformat(event["end"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if (event["start"], event.get("title")) in seen:
+                    continue  # An event spanning midnight comes back for both days.
+                seen.add((event["start"], event.get("title")))
+                hits = [plan for plan in plans if self._event_matches(plan, event, day)
+                        and self._near_scheduled_time(plan, started)]
+                matched.update(plan["id"] for plan in hits)  # An ended event still owns its plan.
+                if ended < now:
+                    continue
+                meetings.append({
+                    "_sort": started,
+                    "start": event["start"], "end": event["end"],
+                    "title": str(event.get("title") or ""), "link": str(event.get("link") or ""),
+                    "attendees": list(event.get("attendees") or []),
+                    "plans": [self._summary(plan) for plan in hits],
+                })
+            unscheduled += [self._summary(plan) for plan in plans
+                            if plan["id"] not in matched and self._scheduled_day(plan) == day]
+        return {"calendar": bool(self.calendar and self.calendar.available()),
+                "meetings": [{k: v for k, v in item.items() if k != "_sort"}
+                             for item in sorted(meetings, key=lambda item: item["_sort"])],
+                "unscheduled_plans": unscheduled}
+
+    @staticmethod
+    def _near_scheduled_time(plan: dict, event_start: datetime) -> bool:
+        """A plan with an explicit start time belongs only to an event within 2 h of it."""
+        if not plan.get("starts_at"):
+            return True
+        try:
+            expected = datetime.fromisoformat(str(plan["starts_at"]))
+            return expected.tzinfo is not None and abs((event_start - expected).total_seconds()) <= 2 * 3600
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _scheduled_day(plan: dict) -> date | None:
+        try:
+            scheduled_at = datetime.fromisoformat(str(plan.get("starts_at") or plan.get("call_date")))
+        except (TypeError, ValueError):
+            return None
+        return scheduled_at.astimezone().date() if scheduled_at.tzinfo else scheduled_at.date()
+
+    @staticmethod
+    def _summary(plan: dict) -> dict:
+        return {"id": plan["id"], "title": str(plan.get("title") or "")[:200],
+                "source_label": str(plan.get("source_label") or "")[:200],
+                "links": _links(plan), **_memo(plan)}
 
     def _plan_for(self, transcript: dict, state: dict) -> dict | None:
         meeting_id = str(transcript.get("meeting_id") or "")
@@ -268,11 +352,7 @@ class CallPlans:
                     "updated_at": item_state.get("updated_at", ""),
                     "source": item_state.get("source", ""),
                 })
-            links = [
-                {"label": str(link.get("label") or "Материал")[:100], "url": link["url"]}
-                for link in plan.get("links", []) if isinstance(link, dict)
-                and isinstance(link.get("url"), str) and _safe_link(link["url"])
-            ][:30]
+            links = _links(plan)
             by_kind = {
                 kind: {
                     "resolved": sum(item["kind"] == kind and item["status"] == "resolved" for item in items),
@@ -287,7 +367,7 @@ class CallPlans:
                 "title": str(plan.get("title") or "Подготовка")[:200],
                 "intro": str(plan.get("intro") or "")[:1500],
                 "source_label": str(plan.get("source_label") or "")[:200],
-                "links": links, "items": items,
+                "links": links, "items": items, **_memo(plan),
                 "score": {
                     "resolved": sum(item["status"] == "resolved" for item in items),
                     "clarify": sum(item["status"] == "clarify" for item in items),

@@ -171,6 +171,114 @@ call_date: 2026-09-29
         unrelated = {**generic, "meeting_id": "unrelated", "started_at": "2026-09-29T09:20:00Z"}
         self.assertIsNone(plans.snapshot(unrelated))
 
+    def _repo(self, files):
+        repo = self.root / "selected-repo"
+        (repo / "consultations").mkdir(parents=True)
+        for name, text in files.items():
+            (repo / name).write_text(text, encoding="utf-8")
+        active = self.root / "active-repos.json"
+        active.write_text(json.dumps({"repositories": [{"name": "sales", "path": str(repo)}]}), encoding="utf-8")
+        return active
+
+    def test_consultation_prep_file_with_plain_date_is_a_plan_with_full_memo(self):
+        active = self._repo({
+            "consultations/2026-09-29-sample-prep.md": (
+                "---\ndate: 2026-09-29\nclient: Sample Co\n---\n# Prep-мемо: Sprint request (Sample Co)\n\n"
+                "[Мемо PDF](https://drive.example.com/memo)\n\n## 1. Кто они\nSample context line.\n\n"
+                "## 4. Вопросы на звонке\n1. What is the main goal?\n"),
+            # Name dated only, no frontmatter: still a prep file.
+            "consultations/2026-09-29-other-prep.md": "# Prep-мемо: Other request\n## 1. Кто они\nText.\n",
+            # A plain note with `date:` is not a plan.
+            "consultations/2026-09-29-notes.md": "---\ndate: 2026-09-29\n---\n# Notes\n## Questions\n1. Why?\n",
+        })
+        found = {plan["source_label"]: plan for plan in RepositoryPreparations(active).for_date("2026-09-29")}
+        self.assertEqual(set(found), {"sales/2026-09-29-sample-prep.md", "sales/2026-09-29-other-prep.md"})
+        plan = found["sales/2026-09-29-sample-prep.md"]
+        self.assertEqual(plan["title"], "Sprint request (Sample Co)")
+        self.assertIn("Sample Co", plan["title_aliases"])  # From `client:`, not from the parentheses.
+        context = RepositoryPreparations(active).context_from_active_file(plan["source_path"])
+        self.assertIn("Sample context line.", context)
+        self.assertIn("Sample context line.", plan["memo_markdown"])
+        self.assertIn("## 4. Вопросы на звонке", plan["memo_markdown"])
+        self.assertEqual(plan["memo_url"], "https://drive.example.com/memo")
+        self.assertEqual([item["kind"] for item in plan["items"]], ["question"])
+        self.assertEqual(found["sales/2026-09-29-other-prep.md"]["items"], [])
+
+    def test_sales_kit_memo_section_reaches_the_live_plan(self):
+        active = self._repo({"PREP.md": (
+            "---\ncall_date: 2026-09-29\n---\n# Sales kit: Acme / Alex Sample\n"
+            "[Brief](https://example.com/brief)\n"
+            "## Мемо перед встречей\n**Цель встречи.** Agree next step.\nSecond memo line.\n"
+            "## Опросник\n1. Who checks documents?\n")})
+        plans = CallPlans(self.root / "absent.json", self.state, active)
+        result = plans.snapshot(self.meeting)
+        self.assertIn("Second memo line.", result["memo_markdown"])
+        self.assertEqual(result["memo_url"], "https://example.com/brief")
+        self.assertTrue(result["has_memo"])
+
+    def test_agenda_lists_upcoming_meetings_with_matched_memo(self):
+        active = self._repo({"PREP.md": (
+            "---\ncall_date: 2026-09-29\n---\n# Sales kit: Acme / Alex Sample\n"
+            "## Мемо перед встречей\nMemo body.\n## Опросник\n1. Who checks documents?\n")})
+
+        class FakeCalendar:
+            def available(self):
+                return True
+
+            def for_day(self, day):
+                if str(day) != "2026-09-29":
+                    return []
+                return [
+                    {"title": "Earlier call", "start": "2026-09-29T07:00:00+02:00",
+                     "end": "2026-09-29T07:30:00+02:00", "link": "", "attendees": []},
+                    {"title": "Weekly sync", "start": "2026-09-29T11:00:00+02:00",
+                     "end": "2026-09-29T11:30:00+02:00", "link": "",
+                     "attendees": [{"email": "a@example.com", "name": "Alex Sample", "self": False}]},
+                    {"title": "Internal", "start": "2026-09-29T12:00:00+02:00",
+                     "end": "2026-09-29T12:30:00+02:00", "link": "", "attendees": []},
+                ]
+
+        from datetime import datetime
+        plans = CallPlans(self.root / "absent.json", self.state, active, FakeCalendar())
+        result = plans.agenda(datetime.fromisoformat("2026-09-29T09:00:00+02:00"))
+        self.assertTrue(result["calendar"])
+        self.assertEqual([item["title"] for item in result["meetings"]], ["Weekly sync", "Internal"])
+        matched, unmatched = result["meetings"]
+        self.assertEqual(matched["attendees"][0]["name"], "Alex Sample")
+        self.assertEqual(len(matched["plans"]), 1)
+        self.assertTrue(matched["plans"][0]["has_memo"])
+        self.assertIn("Memo body.", matched["plans"][0]["memo_markdown"])
+        self.assertEqual(unmatched["plans"], [])
+        self.assertEqual(result["unscheduled_plans"], [])
+        self.assertFalse(self.state.exists())  # The agenda binds nothing to a meeting.
+
+    def test_agenda_orders_by_time_and_ended_event_keeps_its_plan(self):
+        active = self._repo({"PREP.md": (
+            "---\ncall_date: 2026-09-29\n---\n# Sales kit: Acme / Alex Sample\n"
+            "## Опросник\n1. Who checks documents?\n")})
+
+        class FakeCalendar:
+            def available(self):
+                return True
+
+            def for_day(self, day):
+                if str(day) != "2026-09-29":
+                    return []
+                return [
+                    {"title": "Acme review", "start": "2026-09-29T06:00:00+00:00",
+                     "end": "2026-09-29T06:30:00+00:00", "link": "", "attendees": []},
+                    {"title": "Later UTC", "start": "2026-09-29T10:00:00+00:00",
+                     "end": "2026-09-29T10:30:00+00:00", "link": "", "attendees": []},
+                    {"title": "Earlier CEST", "start": "2026-09-29T11:00:00+02:00",
+                     "end": "2026-09-29T11:30:00+02:00", "link": "", "attendees": []},
+                ]
+
+        from datetime import datetime
+        plans = CallPlans(self.root / "absent.json", self.state, active, FakeCalendar())
+        result = plans.agenda(datetime.fromisoformat("2026-09-29T09:00:00+02:00"))
+        self.assertEqual([item["title"] for item in result["meetings"]], ["Earlier CEST", "Later UTC"])
+        self.assertEqual(result["unscheduled_plans"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

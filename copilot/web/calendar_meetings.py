@@ -26,6 +26,9 @@ class CalendarMeetings:
         self._cache: dict[str, tuple[float, list[dict]]] = {}
         self._lock = threading.Lock()
 
+    def available(self) -> bool:
+        return bool(self.executable) and (self.enabled is None or bool(self.enabled()))
+
     def for_day(self, day: date) -> list[dict]:
         if self.enabled is not None and not self.enabled():
             return []
@@ -42,7 +45,7 @@ class CalendarMeetings:
             "calendarId": "primary", "timeMin": start.isoformat(),
             "timeMax": end.isoformat(), "singleEvents": True,
             "maxResults": 100,
-            "fields": "items(summary,start,end,location,description,hangoutLink)",
+            "fields": "items(summary,start,end,location,description,hangoutLink,attendees(email,displayName,self))",
         }
         events: list[dict] = []
         try:
@@ -71,6 +74,13 @@ class CalendarMeetings:
                         "title": str(raw.get("summary") or "")[:250],
                         "start": event_start.isoformat(), "end": event_end.isoformat(),
                         "link": match.group(0).rstrip("/.,);") if match else "",
+                        # Attendees as the calendar gives them (no response status or comments).
+                        "attendees": [
+                            {"email": str(person.get("email") or "")[:200],
+                             "name": str(person.get("displayName") or "")[:200],
+                             "self": bool(person.get("self"))}
+                            for person in (raw.get("attendees") or [])[:50] if isinstance(person, dict)
+                        ] if isinstance(raw.get("attendees"), list) else [],
                     })
         except (OSError, subprocess.TimeoutExpired, ValueError):
             pass

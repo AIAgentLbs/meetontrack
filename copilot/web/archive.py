@@ -23,6 +23,7 @@ from functools import wraps
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 from speaker_edits import SpeakerEdits, carry_corrections, segment_id, _seconds
 from fact_check import with_speakers
 from delivery_health import DeliveryHealth, drive_links_ready
@@ -828,6 +829,12 @@ class MeetingArchive:
         report = detail.get("report") or {}
         active = detail.get("status") in {"recording", "loading", "overloaded"}
         detail["audio_gap"] = None if active else self._audio_gap(detail)
+        # Drive copies recorded by delivery (Google Drive API uploads only; rclone/local copies have none).
+        detail["drive_links"] = {
+            key.removeprefix("drive_"): report[key] for key in ("drive_folder_url", "drive_pdf_url", "drive_html_url")
+            if isinstance(report.get(key), str) and urlparse(report[key]).scheme == "https"
+            and urlparse(report[key]).netloc in {"drive.google.com", "docs.google.com"}
+        }
         failure = _json(self.reports_root / _safe(detail["meeting_id"]) / REPORT_FAILURE, None)
         detail["report_failure"] = failure if isinstance(failure, dict) else None
         detail["library_status"] = ("recording" if active
