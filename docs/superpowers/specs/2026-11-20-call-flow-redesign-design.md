@@ -86,9 +86,13 @@ any of them by hand.
 ```
 Today
   14:00  Title of the meeting              Counterpart name, company
-         Line one of the memo.
-         Line two of the memo.
-         Line three of the memo.           Open memo   3 sources
+  in 40 min
+         Goal of the call, one line.
+         - Question to ask
+         - Question to ask
+         - Question to ask
+         One line of background.           Open memo   3 sources
+                                           Do not record this call
   16:30  Title of the meeting              Counterpart name
          Memo is being prepared...
 Tomorrow
@@ -100,12 +104,20 @@ Tomorrow
   (`memo_markdown`, `has_memo`). `renderAgenda` and `memoNodes` already exist
   in the Preparation tab and move here.
 - Each row shows time, title, the attendees other than the user, and one of:
-  up to three summary lines of the memo with a source count, "being prepared",
-  "nothing found", or the reason the memo could not be made.
-- The server returns the summary lines as their own field. For a memo the app
-  wrote they are its opening three lines. For a picked-up `-prep.md` they are
-  the first three list items or sentences under the memo's first section,
-  never a heading (author's call).
+  the memo digest with a source count, "being prepared", "nothing found", or
+  the reason the memo could not be made.
+- The memo digest answers "what to remember" in five seconds: the goal of the
+  call in one line, up to three questions to ask, and at most one line of
+  background. Never a block of prose. The server returns it as its own
+  fields. A memo the app wrote carries them explicitly; for a picked-up
+  `-prep.md` the goal is the memo's goal paragraph (or its first summary
+  line) and the questions are the first plan items of kind question
+  (author's call, after the first critique found a 70-word block unreadable).
+- The time left until the next call is prominent on its row.
+- "Nothing found" is not a dead end: it offers Connect a source, which opens
+  the Sources settings.
+- The next call's row has a quiet "Do not record this call". Recording
+  otherwise starts by itself.
 - Empty states, each with one action at most: calendar not connected (Connect),
   calendar tool missing (how to get it), no meetings today or tomorrow.
 - Past meetings stay one click away (the existing library).
@@ -126,6 +138,11 @@ Tomorrow
 
 - One current hint in 22-24 px type with one line saying where it comes from.
   Nothing else on the screen competes with it.
+- The hint is one clause of eight words or fewer, readable in under two
+  seconds while speaking. The reasoning and the quote go into the source
+  line. This is a rule for the AI prompt and is enforced on output: a longer
+  hint is cut to its first clause (author's call, after the first critique
+  measured a 20-word hint at 4-5 s).
 - The single slot is filled in this order: an answer to a question put to the
   user; a contradiction with the memo or a failed fact check; a risk or
   objection; the next memo question not yet covered. Data: `journal`,
@@ -143,7 +160,23 @@ Tomorrow
   words, not only colour.
 - The transcript and the four-column board open on demand and close back to
   the feed. No per-hint triage buttons.
-- End stops the call at once and offers Undo for about 10 s. No dialog.
+- End sits at the far end of the top bar, away from the status marks. It
+  stops the call at once and the bar shows "Call ended - Undo" for about
+  10 s. No dialog.
+- The recording mark is neutral, never the error colour; the timer shows
+  minutes and seconds. One vocabulary for audio everywhere: heard, not heard.
+- One vocabulary for the end of a call on every screen: the control is "End
+  recording", the state after it is "Recording stopped" with "Resume
+  recording" for those 10 s; the After view says when the recording stopped.
+  This replaces "End" and "Call ended - Undo" above (author's call, after the
+  second critique found three wordings for one event).
+- Narrow window: at 480-600 px (the app beside a video call) the hint wraps
+  and stays the largest thing, the status marks stack or shorten, and the ask
+  field stays usable.
+- The source line under the hint shows its first line only; the rest opens
+  on demand.
+- Quiet key hints on the ask field, "End recording" and Send. They are an aid
+  for regular users, never the only way to reach a control.
 
 ### After (MEETONTRACK-163)
 
@@ -153,12 +186,12 @@ Tomorrow
 
   Summary (editable)             Next steps (editable)
 
-  Against the memo
-    Answered   Who signs off on the budget: "..." 12:40
-    Open       Which format they prefer
-    Changed    Earlier notes said X; today they said Y  12:55
+  Against the memo: 4 answered, 2 open, 1 differs
 
-  Questions to ask | To me and the group | Risks and objections | Fact check
+  Questions to ask   | Questions to me | Risks and objections | Fact check
+  Open: ...          |                 |                      | Differs: ...
+  Open: ...          |                 |                      |
+  4 answered (show)  |                 |                      |
 ```
 
 - The four-column board becomes the main view, with the summary and next
@@ -170,11 +203,29 @@ Tomorrow
   "being prepared", "goes when the final transcript is ready", "sent".
   Edits made before sending are included; after sending, an edit offers Send
   again. No confirmation dialog.
-- Hold stops every channel of that one report until the person presses Send.
-  It is stored with the report, survives a restart, and never sends by itself
-  afterwards. Delivery retries skip a held report (author's call).
-- "Against the memo": for each memo question, answered (with a quote and time)
-  or open; plus statements that differ from earlier notes. One AI run per
+- The control is worded "Do not send", with the line "goes only when you press
+  Send". It stops every channel of that one report until the person presses
+  Send. It is stored with the report, survives a restart, and never sends by
+  itself afterwards. Delivery retries skip a held report (author's call).
+  States shown: waiting, held, sent per channel, edited after sending.
+- The automatic send waits while a summary or next-steps field has focus and
+  says so; it resumes when the field is left (author's call, after the
+  second critique: a report must not leave mid-edit).
+- Column names are generic, so they read right for any call: "Ask the other
+  side", "Asked of you", "Risks and objections", "Fact check". A differing
+  statement names the speaker and the meeting on both sides.
+- Fewer frames: recipients are one line, the summary and next steps are plain
+  editable text with one shared note, and board items are list rows separated
+  by hairlines, not cards.
+- "Against the memo" is not a separate list: nothing appears twice. One
+  explaining line sits under the board heading ("what was said on the call,
+  checked against the memo"); there is no line of counts, the status tags
+  carry them. The summary holds facts only: questions live on the board and a
+  deadline appears in one place. The "Questions to ask" column shows the
+  memo questions with their status, open ones first and answered ones folded
+  into one expandable line; statements that differ from earlier notes appear
+  only in the fact-check column, under one word for that idea. Each answered
+  or differing item carries a quote and a time. One AI run per
   meeting that has a memo, when the final transcript is ready, as a new task
   in `PURPOSES`; stored in `report.json` and included in the report. Without a
   memo the block is absent. The run happens while the report is created, with
