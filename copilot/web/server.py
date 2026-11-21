@@ -11,6 +11,7 @@ import json
 import locale
 import mimetypes
 import os
+import plistlib
 import re
 import subprocess
 import sys
@@ -2624,15 +2625,35 @@ def memo_sources(meeting: dict) -> list[dict]:
     return [source for kind, sources in found.items() if not changed.get(kind) for source in sources]
 
 
+_APPLE_LANGUAGE = [float("-inf"), ""]  # read time, first AppleLanguages entry: the loop asks every minute
+
+
+def apple_language() -> str:
+    """The first macOS preferred language, the one the page's browser language follows; "" when unknown."""
+    if time.monotonic() - _APPLE_LANGUAGE[0] >= 60:
+        try:
+            with (Path.home() / "Library/Preferences/.GlobalPreferences.plist").open("rb") as file:
+                found = plistlib.load(file)
+            languages = found.get("AppleLanguages") if isinstance(found, dict) else None
+            first = languages[0] if isinstance(languages, list) and languages else ""
+        except (OSError, ValueError):  # missing, unreadable or not a plist
+            first = ""
+        _APPLE_LANGUAGE[:] = [time.monotonic(), first if isinstance(first, str) else ""]
+    return _APPLE_LANGUAGE[1]
+
+
 def memo_language() -> str:
-    """The saved interface language; with none saved, Russian for a Russian system locale, else English."""
+    """What the page shows: the saved interface language; with none saved, Russian when the first preferred
+    language (macOS) or else the system locale is Russian ("ru_RU", Windows "Russian_Russia"), else English."""
     if saved := interface_preferences(CAPTURE_CONFIG_FILE).get("interface_language"):
         return saved
-    try:
-        system = locale.getlocale()[0] or ""
-    except ValueError:  # a locale name Python cannot parse
-        system = ""
-    return "ru" if system.startswith("ru") else "en"
+    system = apple_language() if sys.platform == "darwin" else ""
+    if not system:
+        try:
+            system = locale.getlocale()[0] or ""
+        except ValueError:  # a locale name Python cannot parse
+            system = ""
+    return "ru" if re.match(r"(ru|russian)(?![a-z])", system, re.IGNORECASE) else "en"
 
 
 MEMOS = MemoWriter(MEMOS_FILE, AI, memo_sources, memo_language)

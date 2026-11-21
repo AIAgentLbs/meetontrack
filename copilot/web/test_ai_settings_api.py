@@ -111,7 +111,7 @@ class AISettingsAPITests(unittest.TestCase):
         self.assertIn("if (aiState.check) current.ai = aiState.check;", source)
         self.assertNotIn("drafts[", source)  # one choice, no per-task rows
         for purpose in server.AI.PURPOSES:  # every task has a label, or its readiness never shows
-            self.assertIn(f"\n    {purpose}: [", source)
+            self.assertRegex(source, rf"\b{purpose}: \[")
 
 
 if __name__ == "__main__":

@@ -1185,9 +1185,20 @@ class MemoLanguageTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.config = Path(temp.name) / "config.json"
-        patcher = patch.object(server, "CAPTURE_CONFIG_FILE", self.config)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.plist = Path(temp.name) / "Library/Preferences/.GlobalPreferences.plist"
+        self.plist.parent.mkdir(parents=True)
+        # Never the real ~/Library plist: HOME is the temp dir, the 60 s cache starts empty, Linux by default.
+        for patcher in (patch.object(server, "CAPTURE_CONFIG_FILE", self.config),
+                        patch.dict("os.environ", {"HOME": temp.name}),
+                        patch.object(server, "_APPLE_LANGUAGE", [float("-inf"), ""]),
+                        patch.object(server.sys, "platform", "linux")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def languages(self, *names):
+        import plistlib
+        self.plist.write_bytes(plistlib.dumps({"AppleLanguages": list(names), "AppleLocale": "en_US"}, fmt=plistlib.FMT_BINARY))
+        self.server._APPLE_LANGUAGE[0] = float("-inf")
 
     def test_saved_interface_language_wins(self):
         self.config.write_text(json.dumps({"interface_language": "en"}), encoding="utf-8")
@@ -1196,14 +1207,43 @@ class MemoLanguageTests(unittest.TestCase):
         self.config.write_text(json.dumps({"interface_language": "ru"}), encoding="utf-8")
         with patch("locale.getlocale", return_value=("en_US", "UTF-8")):
             self.assertEqual(self.server.memo_language(), "ru")
+        self.config.write_text(json.dumps({"interface_language": "en"}), encoding="utf-8")
+        self.languages("ru-RU")
+        with patch.object(self.server.sys, "platform", "darwin"):
+            self.assertEqual(self.server.memo_language(), "en")
 
     def test_system_locale_when_nothing_is_saved(self):
         for found, language in ((("ru_RU", "UTF-8"), "ru"), (("en_US", "UTF-8"), "en"), ((None, None), "en"),
-                                (("C", "UTF-8"), "en")):
+                                (("C", "UTF-8"), "en"), (("Russian_Russia", "1251"), "ru"),
+                                (("Rundi_Burundi", "1252"), "en")):
             with patch("locale.getlocale", return_value=found):
                 self.assertEqual(self.server.memo_language(), language, found)
         with patch("locale.getlocale", side_effect=ValueError("unknown locale: x")):
             self.assertEqual(self.server.memo_language(), "en")
+
+    def test_first_mac_preferred_language_decides(self):
+        with patch.object(self.server.sys, "platform", "darwin"):
+            for names, language in ((("ru-US", "en-US"), "ru"), (("en-US", "ru-RU"), "en"), (("ru",), "ru")):
+                self.languages(*names)
+                with patch("locale.getlocale", return_value=("en_US", "UTF-8") if language == "ru" else ("ru_RU", "UTF-8")):
+                    self.assertEqual(self.server.memo_language(), language, names)
+            # Read at most once a minute: a change shows after the cache expires.
+            self.languages("ru-RU")
+            self.assertEqual(self.server.memo_language(), "ru")
+            self.plist.write_bytes(b"")
+            self.assertEqual(self.server.memo_language(), "ru")
+            self.server._APPLE_LANGUAGE[0] = float("-inf")
+            # Missing, broken or odd preferences fall back to the system locale.
+            for content in (None, b"not a plist", b'<?xml version="1.0"?><plist><array/></plist>'):
+                self.plist.unlink(missing_ok=True)
+                if content is not None:
+                    self.plist.write_bytes(content)
+                self.server._APPLE_LANGUAGE[0] = float("-inf")
+                with patch("locale.getlocale", return_value=("ru_RU", "UTF-8")):
+                    self.assertEqual(self.server.memo_language(), "ru", content)
+            self.languages(7, "en-US")
+            with patch("locale.getlocale", return_value=("ru_RU", "UTF-8")):
+                self.assertEqual(self.server.memo_language(), "ru")
 
     def test_memos_writer_uses_the_function(self):
         self.assertIs(self.server.MEMOS.language, self.server.memo_language)
