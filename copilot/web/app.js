@@ -88,6 +88,38 @@ const elements = {
 const translations = {
   ru: {
     "home.title": "Ближайшие встречи",
+    "home.today": "Сегодня, {date}",
+    "home.tomorrow": "Завтра, {date}",
+    "home.in_minutes": "через {n} мин",
+    "home.in_hours": "через {h} ч {m} мин",
+    "home.now": "идет сейчас",
+    "home.goal": "Цель: {goal}",
+    "home.sources.one": "Откуда это: {n} источник",
+    "home.sources.few": "Откуда это: {n} источника",
+    "home.sources.many": "Откуда это: {n} источников",
+    "home.sources.other": "Откуда это: {n} источника",
+    "home.open_memo": "Открыть мемо",
+    "home.hide_memo": "Свернуть мемо",
+    "home.call_link": "Открыть ссылку на звонок",
+    "home.skip": "Не записывать этот звонок",
+    "home.skipped": "Этот звонок не будет записан",
+    "home.unskip": "Вернуть",
+    "home.preparing_since": "Мемо готовится с {time},",
+    "home.preparing_note": "обычно 2-3 минуты. Появится здесь само.",
+    "home.nothing_found": "О собеседнике в ваших источниках пока ничего нет.",
+    "home.calendar_on": "Календарь уже подключен.",
+    "home.connect_sources": "Подключить почту и папки с файлами",
+    "home.failed": "Мемо не получилось: {reason}.",
+    "home.reason.ai_no_answer": "ИИ не ответил",
+    "home.reason.ai_needs_choice": "не выбран ИИ",
+    "home.reason.timeout": "ИИ не успел",
+    "home.reason.error": "ошибка при подготовке",
+    "home.retry_at": "Ничего делать не нужно, попробуем снова в {time}.",
+    "home.retry": "Повторить",
+    "home.check_ai": "Проверить ИИ в настройках",
+    "home.action_failed": "Не получилось. Попробуйте еще раз.",
+    "home.cannot_skip": "Программа записи не умеет пропускать звонок. Обновите приложение.",
+    "home.more_people": "и еще {n}",
     "meeting.connecting": "Подключение к записи...",
     "status.checking": "Проверка",
     "shell.home": "Главная",
@@ -155,8 +187,6 @@ const translations = {
     "plan.memo": "Мемо перед встречей",
     "plan.talk_track": "Шпаргалка ведущего",
     "plan.memo_open": "Открыть документ мемо",
-    "plan.agenda": "Встречи сегодня и завтра",
-    "plan.no_memo": "Нет мемо",
     "plan.unscheduled": "Подготовка без события в календаре",
     "plan.question": "Вопросы",
     "plan.risk": "Риски",
@@ -320,6 +350,38 @@ const translations = {
   },
   en: {
     "home.title": "Upcoming meetings",
+    "home.today": "Today, {date}",
+    "home.tomorrow": "Tomorrow, {date}",
+    "home.in_minutes": "in {n} min",
+    "home.in_hours": "in {h} h {m} min",
+    "home.now": "on now",
+    "home.goal": "Goal: {goal}",
+    "home.sources.one": "Where this comes from: {n} source",
+    "home.sources.few": "Where this comes from: {n} sources",
+    "home.sources.many": "Where this comes from: {n} sources",
+    "home.sources.other": "Where this comes from: {n} sources",
+    "home.open_memo": "Open memo",
+    "home.hide_memo": "Hide memo",
+    "home.call_link": "Open the call link",
+    "home.skip": "Do not record this call",
+    "home.skipped": "This call will not be recorded",
+    "home.unskip": "Undo",
+    "home.preparing_since": "Memo in progress since {time},",
+    "home.preparing_note": "usually 2-3 minutes. It will appear here by itself.",
+    "home.nothing_found": "Nothing about this contact in your sources yet.",
+    "home.calendar_on": "The calendar is already connected.",
+    "home.connect_sources": "Connect mail and file folders",
+    "home.failed": "The memo could not be made: {reason}.",
+    "home.reason.ai_no_answer": "the AI did not answer",
+    "home.reason.ai_needs_choice": "no AI is chosen",
+    "home.reason.timeout": "the AI ran out of time",
+    "home.reason.error": "something went wrong",
+    "home.retry_at": "Nothing to do, we will try again at {time}.",
+    "home.retry": "Retry",
+    "home.check_ai": "Check the AI in settings",
+    "home.action_failed": "That did not work. Try again.",
+    "home.cannot_skip": "The recorder cannot skip a call. Update the app.",
+    "home.more_people": "and {n} more",
     "meeting.connecting": "Connecting to the recording...",
     "status.checking": "Checking",
     "shell.home": "Home",
@@ -387,8 +449,6 @@ const translations = {
     "plan.memo": "Pre-call memo",
     "plan.talk_track": "Talk track",
     "plan.memo_open": "Open memo document",
-    "plan.agenda": "Meetings today and tomorrow",
-    "plan.no_memo": "No memo",
     "plan.unscheduled": "Preparation without a calendar event",
     "plan.question": "Questions",
     "plan.risk": "Risks",
@@ -1982,67 +2042,25 @@ function memoNodes(plan) {
   return nodes;
 }
 
-// Before a call the Preparation tab lists today's and tomorrow's meetings with their memos.
-let agenda = null;
-let agendaSignature = "";
+// Today's and tomorrow's meetings, polled for Home (home.js renders them).
 async function refreshAgenda() {
   try {
-    agenda = await getJSON("/api/agenda");
+    window.agendaData = await getJSON("/api/agenda");
   } catch {
     return;
   }
-  window.agendaData = agenda;
   window.renderShell?.();
-  if (agendaMode) renderCallPlan(currentCallPlan, true);
 }
 
-function renderAgenda() {
-  const meetings = agenda?.meetings || [];
-  const unscheduled = agenda?.unscheduled_plans || [];
-  elements.callPlanTab.hidden = !meetings.length && !unscheduled.length;
-  elements.callPlanCount.textContent = String(meetings.length + unscheduled.length);
-  const signature = `${uiLanguage}:${JSON.stringify(agenda)}`;
-  if (signature === agendaSignature) return;
-  agendaSignature = signature;
-  const fragment = document.createDocumentFragment();
-  fragment.append(textNode("h3", "call-plan-title", t("plan.agenda")));
-  const planNodes = (plan) => {
-    const block = document.createElement("div");
-    block.append(textNode("p", "call-plan-source", plan.title), ...memoNodes(plan));
-    return block;
-  };
-  for (const meeting of meetings) {
-    const card = document.createElement("article");
-    const start = new Date(meeting.start);
-    const when = start.toLocaleString(uiLanguage === "en" ? "en-GB" : "ru-RU",
-      { weekday: "short", hour: "2-digit", minute: "2-digit" });
-    card.append(textNode("h4", "call-plan-section-title", `${when} · ${meeting.title}`));
-    const people = (meeting.attendees || []).filter((person) => !person.self).map((person) => person.name || person.email);
-    if (people.length) card.append(textNode("p", "", people.join(", ")));
-    if (!meeting.plans.length) card.append(textNode("p", "call-plan-tentative", t("plan.no_memo")));
-    for (const plan of meeting.plans) card.append(planNodes(plan));
-    fragment.append(card);
-  }
-  if (unscheduled.length) {
-    fragment.append(textNode("h4", "call-plan-section-title", t("plan.unscheduled")));
-    for (const plan of unscheduled) fragment.append(planNodes(plan));
-  }
-  elements.callPlan.replaceChildren(fragment);
-}
-
-// showAgenda: between calls the last call's plan stays for the board, the tab shows the agenda.
-let agendaMode = true;
-function renderCallPlan(plan, showAgenda = false) {
+function renderCallPlan(plan) {
   currentCallPlan = plan;
-  agendaMode = !plan || showAgenda;
   elements.callPlanTab.hidden = !plan;
-  if (agendaMode) {
+  if (!plan) {
     callPlanSignature = "";
     selectedPlanMeetingId = "";
-    renderAgenda();
+    elements.callPlan.replaceChildren();
     return;
   }
-  agendaSignature = "";
   selectedPlanMeetingId = plan.meeting_id;
   elements.callPlanCount.textContent = String(plan.items.filter((item) => item.status !== "resolved").length);
   const signature = `${uiLanguage}:${JSON.stringify(plan)}`;
@@ -3162,8 +3180,7 @@ async function state() {
     renderFrames(data.frames || []);
     renderFrameStatus(data.frame_capture || {});
     renderMessages(data.copilot, data.journal || []);
-    // Between calls the last call's plan gives way to the agenda of upcoming meetings.
-    renderCallPlan(data.call_plan || null, data.transcript?.status === "finished");
+    renderCallPlan(data.call_plan || null);
     renderJournal(data.journal || []);
     renderFactChecks(data.fact_checks);
     renderCallBoard(data.call_plan || null, data.journal || []);
