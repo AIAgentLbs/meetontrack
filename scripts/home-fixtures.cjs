@@ -1,5 +1,6 @@
 // Synthetic Home data for the browser checks: invented people and companies only, every time
 // relative to the moment a fixture is read, so the checks pass on any day and in any time zone.
+// The data is English for the checks; the critique renders ask for it in the page's language (`data: 'ru'`).
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
@@ -7,9 +8,36 @@ const MIN = 60000;
 const root = path.resolve(__dirname, '../copilot/web');
 const iso = ms => new Date(ms).toISOString();
 const me = { name: 'Me', email: 'me@example.com', self: true };
-const anna = { name: 'Anna Petrova', email: 'anna@example.com', company: 'Example LLC', self: false };
-const oleg = { name: 'Oleg Ivanov', email: 'oleg@example.org', self: false };
 const nina = { name: '', email: 'nina@example.org', self: false };
+// Every text of the fixtures, in English (the checks) and Russian (the critique renders of the RU page).
+const TEXT = {
+  en: {
+    anna: 'Anna Petrova', company: 'Example LLC', oleg: 'Oleg Ivanov', review: 'Pilot review', supply: 'Supply accounting intro',
+    first: 'First talk about the pilot', sync: 'Example LLC sync', followup: 'Pilot follow-up', focus: 'Focus time',
+    draft: 'Contract draft review', draftText: 'Check the draft before sending it.',
+    goal: 'Agree on the pilot scope and the start date',
+    questions: ['What budget is set for the pilot this year?', 'Who signs off the purchase?', 'Which part of the proposal matters most now?'],
+    fourth: 'A fourth question that the digest leaves out?', background: 'The last proposal went out a week ago and has no answer yet.',
+    memoGoal: 'Agree on the **pilot scope** and the start date with [Example LLC](https://example.com/llc).',
+    questionsHeading: 'Questions', backgroundHeading: 'Background', thread: 'See the thread: https://example.org/history', links: ['Proposal', 'Notes'],
+    longTitle: 'Quarterly review of the supply accounting pilot with every regional office and the central procurement team',
+    longGoal: 'Agree on the pilot scope, ', longQuestion: 'Which offices will join the pilot first and why',
+    longBackground: 'A long background line that keeps going ', participant: n => `Participant Number${n} Longsurname`,
+  },
+  ru: {
+    anna: 'Анна Петрова', company: 'ООО Пример', oleg: 'Олег Иванов', review: 'Обзор пилота', supply: 'Знакомство по учету поставок',
+    first: 'Первый разговор о пилоте', sync: 'Встреча с ООО Пример', followup: 'Продолжение по пилоту', focus: 'Время без встреч',
+    draft: 'Проверка черновика договора', draftText: 'Проверить черновик перед отправкой.',
+    goal: 'Согласовать объем пилота и дату старта',
+    questions: ['Какой бюджет заложен на пилот в этом году?', 'Кто подписывает закупку?', 'Какая часть предложения сейчас важнее всего?'],
+    fourth: 'Четвертый вопрос, которого нет в кратком мемо?', background: 'Последнее предложение ушло неделю назад, ответа пока нет.',
+    memoGoal: 'Согласовать **объем пилота** и дату старта с [ООО Пример](https://example.com/llc).',
+    questionsHeading: 'Вопросы', backgroundHeading: 'Контекст', thread: 'Переписка: https://example.org/history', links: ['Предложение', 'Заметки'],
+    longTitle: 'Квартальный обзор пилота по учету поставок со всеми региональными офисами и центральной службой закупок',
+    longGoal: 'Согласовать объем пилота, ', longQuestion: 'Какие офисы подключатся к пилоту первыми и почему',
+    longBackground: 'Длинная строка контекста, которая все продолжается ', participant: n => `Участник Номер${n} Длиннофамильный`,
+  },
+};
 
 const memo = (state, extra = {}) => ({ state, goal: '', questions: [], background: '', source_count: 0, plan_id: '',
   written_by: 'app', since: null, reason: '', retry_at: null, ...extra });
@@ -19,41 +47,45 @@ const meeting = (id, start, minutes, title, attendees, extra = {}) => ({ event_i
   end: iso(start + minutes * MIN), title, link: `https://example.com/call/${id}`, attendees: [me, ...attendees],
   plans: [], skip_recording: false, ...extra });
 
-const MEMO_TEXT = [
-  '# Pilot review', '', 'Agree on the **pilot scope** and the start date with [Example LLC](https://example.com/llc).', '',
-  '## Questions', '- What budget is set for the pilot this year?', '- Who signs off the purchase?',
-  '- Which part of the proposal matters most now?', '- A fourth question that the digest leaves out?',
+// The full memo: a title heading, the goal, the questions (three of them in the digest), a background section.
+const memoText = L => [
+  `# ${L.review}`, '', L.memoGoal, '',
+  `## ${L.questionsHeading}`, ...L.questions.map(question => `- ${question}`), `- ${L.fourth}`, '',
+  `## ${L.backgroundHeading}`, L.background, L.thread,
 ].join('\n');
-const LINKS = [{ label: 'Proposal', url: 'https://example.com/proposal' }, { label: 'Notes', url: 'https://example.org/notes' }];
+const links = L => [{ label: L.links[0], url: 'https://example.com/proposal' }, { label: L.links[1], url: 'https://example.org/notes' }];
 
-function build(name) {
+function build(name, lang = 'en') {
+  const L = TEXT[lang];
+  const MEMO_TEXT = memoText(L);
+  const LINKS = links(L);
+  const anna = { name: L.anna, email: 'anna@example.com', company: L.company, self: false };
+  const oleg = { name: L.oleg, email: 'oleg@example.org', self: false };
   const now = Date.now();
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
   tomorrow.setHours(10, 0, 0, 0);
   const at10 = tomorrow.getTime();
-  const ready = (extra = {}) => meeting('evt-ready', now + 40 * MIN, 30, 'Pilot review', [anna], {
-    plans: [plan('plan-1', 'Pilot review', MEMO_TEXT, LINKS)],
-    memo: memo('ready', { goal: 'Agree on the pilot scope and the start date', plan_id: 'plan-1', source_count: 2,
-      questions: ['What budget is set for the pilot this year?', 'Who signs off the purchase?',
-        'Which part of the proposal matters most now?'],
-      background: 'The last proposal went out a week ago and has no answer yet.' }), ...extra });
-  const preparing = (start, id = 'evt-prep') => meeting(id, start, 45, 'Supply accounting intro', [oleg],
+  const ready = (extra = {}) => meeting('evt-ready', now + 40 * MIN, 30, L.review, [anna], {
+    plans: [plan('plan-1', L.review, MEMO_TEXT, LINKS)],
+    memo: memo('ready', { goal: L.goal, plan_id: 'plan-1', source_count: 2, questions: L.questions, background: L.background }),
+    ...extra });
+  const preparing = (start, id = 'evt-prep') => meeting(id, start, 45, L.supply, [oleg],
     { memo: memo('preparing', { since: iso(now - 5 * MIN) }) });
   // Tomorrow at 10:00 local time: always on the next calendar day, so it always crosses midnight.
-  const nothing = (start, id = 'evt-nothing') => meeting(id, start, 30, 'First talk about the pilot', [nina],
+  const nothing = (start, id = 'evt-nothing') => meeting(id, start, 30, L.first, [nina],
     { memo: memo('nothing_found') });
   const agenda = (meetings, extra = {}) => ({ calendar: true, calendar_state: 'connected', skip_recording_supported: true,
     meetings: meetings.sort((a, b) => Date.parse(a.start) - Date.parse(b.start)), unscheduled_plans: [], ...extra });
   const agendas = {
     ready: () => agenda([ready(), preparing(now + 120 * MIN), nothing(at10)]),
     preparing: () => agenda([preparing(now + 40 * MIN), nothing(at10),
-      meeting('evt-prep-3', now + 90 * MIN, 30, 'Example LLC sync', [anna], { memo: memo('preparing') })]),
+      meeting('evt-prep-3', now + 90 * MIN, 30, L.sync, [anna], { memo: memo('preparing') })]),
     nothing_found: () => agenda([nothing(now + 40 * MIN), preparing(at10, 'evt-prep-2')]),
     failed: () => agenda([
-      meeting('evt-failed', now + 40 * MIN, 30, 'Supply accounting intro', [oleg],
+      meeting('evt-failed', now + 40 * MIN, 30, L.supply, [oleg],
         { memo: memo('failed', { reason: 'ai_no_answer', retry_at: iso(now + 20 * MIN) }) }),
-      meeting('evt-choice', now + 180 * MIN, 30, 'Pilot follow-up', [anna],
+      meeting('evt-choice', now + 180 * MIN, 30, L.followup, [anna],
         { memo: memo('failed', { reason: 'ai_needs_choice', retry_at: iso(now + 30 * MIN) }) }),
     ]),
     skipped: () => agenda([ready({ skip_recording: true }), nothing(at10)]),
@@ -61,27 +93,26 @@ function build(name) {
       const strip = item => { delete item.memo; return item; };
       return agenda([
         strip(ready()),
-        strip(meeting('evt-ext', now + 150 * MIN, 30, 'Pilot follow-up', [oleg])),
-        strip(meeting('evt-solo', at10, 60, 'Focus time', [])),
-      ], { unscheduled_plans: [plan('plan-2', 'Contract draft review', 'Check the draft before sending it.')] });
+        strip(meeting('evt-ext', now + 150 * MIN, 30, L.followup, [oleg])),
+        strip(meeting('evt-solo', at10, 60, L.focus, [])),
+      ], { unscheduled_plans: [plan('plan-2', L.draft, L.draftText)] });
     },
     no_skip_support: () => agenda([ready(), preparing(now + 120 * MIN)], { skip_recording_supported: false }),
     long: () => {
-      const people = Array.from({ length: 10 }, (_, index) => ({ name: `Participant Number${index + 1} Longsurname`,
+      const people = Array.from({ length: 10 }, (_, index) => ({ name: L.participant(index + 1),
         email: `participant.number${index + 1}.with.a.long.address@subdomain.example.org`, self: false }));
-      const goal = 'Agree on the pilot scope, '.repeat(12).slice(0, 300);
+      const goal = L.longGoal.repeat(12).slice(0, 300);
       return agenda([
-        meeting('evt-long', now + 40 * MIN, 60,
-          'Quarterly review of the supply accounting pilot with every regional office and the central procurement team',
-          people, { memo: memo('ready', { goal, questions: [Array(6).fill('Which offices will join the pilot first and why').join(', ') + '?'],
-            background: 'A long background line that keeps going '.repeat(8), source_count: 2, plan_id: 'plan-long' }),
+        meeting('evt-long', now + 40 * MIN, 60, L.longTitle,
+          people, { memo: memo('ready', { goal, questions: [Array(6).fill(L.longQuestion).join(', ') + '?'],
+            background: L.longBackground.repeat(8), source_count: 2, plan_id: 'plan-long' }),
           plans: [plan('plan-long', 'Long', MEMO_TEXT)] }),
         nothing(at10),
       ]);
     },
     calendar_off: () => agenda([], { calendar: false, calendar_state: 'not_connected' }),
     calendar_off_with_plans: () => agenda([], { calendar: false, calendar_state: 'not_connected',
-      unscheduled_plans: [plan('plan-2', 'Contract draft review', 'Check the draft before sending it.')] }),
+      unscheduled_plans: [plan('plan-2', L.draft, L.draftText)] }),
     tool_missing: () => agenda([], { calendar: false, calendar_state: 'tool_missing', skip_recording_supported: false }),
     no_meetings: () => agenda([]),
     load_failed: () => null, // /api/agenda answers 500
@@ -89,6 +120,8 @@ function build(name) {
     mic_missing_delivery: () => agenda([ready(), nothing(at10)]),
     // Started 5 minutes ago and still nothing recorded.
     not_recording: () => agenda([ready({ start: iso(now - 5 * MIN), end: iso(now + 25 * MIN) }), nothing(at10)]),
+    // The next call's memo opened (the check and the critique renders press Open memo first).
+    ready_memo_open: () => agenda([ready(), preparing(now + 120 * MIN), nothing(at10)]),
     menu_open: () => agenda([ready(), nothing(at10)]),
     menu_narrow: () => agenda([ready(), nothing(at10)]),
     keys: () => agenda([ready(), nothing(at10)]),
@@ -101,13 +134,13 @@ function build(name) {
     recording_health: { capture: { state: 'inactive' } }, copilot: { busy: false, analysis: { state: 'idle' }, messages: [] } };
   // A report that did not reach its channel: the delivery pill joins the bar.
   if (name === 'mic_missing_delivery') Object.assign(state.delivery, { channels: { gmail: { configured: true, state: 'sent', issues: [] } },
-    undelivered: [{ meeting_id: 'm9', channels: ['email'], title: 'Pilot review', started_at: iso(now - 24 * 60 * MIN) }] });
+    undelivered: [{ meeting_id: 'm9', channels: ['email'], title: L.review, started_at: iso(now - 24 * 60 * MIN) }] });
   return { agenda: agendas[name](), state, permissions };
 }
 
 // name -> {agenda, state, permissions}, rebuilt on every read so the times stay relative to now.
 const states = Object.defineProperties({}, Object.fromEntries(
-  ['ready', 'preparing', 'nothing_found', 'failed', 'skipped', 'adapter', 'no_skip_support', 'long',
+  ['ready', 'ready_memo_open', 'preparing', 'nothing_found', 'failed', 'skipped', 'adapter', 'no_skip_support', 'long',
     'calendar_off', 'calendar_off_with_plans', 'tool_missing', 'no_meetings', 'load_failed',
     'mic_missing', 'mic_missing_delivery', 'not_recording', 'menu_open', 'menu_narrow', 'keys']
     .map(name => [name, { enumerable: true, get: () => build(name) }])));
@@ -145,10 +178,10 @@ async function route(context, fixture, origin) {
 }
 
 // A page on Home with the fixture: page.api is the route's recorder, page.errors the script errors.
-async function open(browser, { fixture, width = 1440, scheme = 'light', lang = 'ru', gate = null, clock = null }) {
+async function open(browser, { fixture, width = 1440, scheme = 'light', lang = 'ru', data: dataLang = 'en', gate = null, clock = null }) {
   const origin = 'http://home-ui.test';
   const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme, locale: lang });
-  const data = states[fixture];
+  const data = build(fixture, dataLang);
   data.state.preferences.interface_language = lang;
   const api = await route(context, data, origin);
   api.gate = gate;
@@ -165,4 +198,4 @@ async function open(browser, { fixture, width = 1440, scheme = 'light', lang = '
   return page;
 }
 
-module.exports = { states, route, open };
+module.exports = { states, build, route, open };

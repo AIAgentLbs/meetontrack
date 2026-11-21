@@ -18,7 +18,10 @@
       </nav>
       <div class="status" id="call-status">
         <span class="status-text" id="call-status-text" aria-live="polite"></span>
-        <button id="call-status-action" type="button" hidden></button>
+        <span class="status-actions">
+          <button id="call-status-action" type="button" hidden></button>
+          <button class="ql" id="call-status-help" type="button" data-i18n="action.how_to_fix" hidden>Как исправить</button>
+        </span>
       </div>
       <span class="spacer"></span>
       <div class="tools">
@@ -31,7 +34,7 @@
           <button id="new-meeting-button" type="button" role="menuitem" data-i18n="meeting.new" aria-haspopup="dialog" disabled>Начать новую встречу</button>
           <button id="settings-open" type="button" role="menuitem" aria-expanded="false" aria-controls="settings-panel"><span class="mi"><span data-i18n="shell.settings">Настройки</span><small data-i18n="shell.settings_note">ИИ, распознавание речи, источники, куда отправлять отчет</small></span></button>
           <button id="menu-notes" type="button" role="menuitem" hidden><span class="mi"><span id="menu-notes-title"></span><small data-i18n="shell.notes_note">ваш текст, который учтут подсказки</small></span></button>
-          <button id="repo-button" type="button" role="menuitem" data-i18n="shell.sources" aria-haspopup="dialog">Источники</button>
+          <button id="repo-button" type="button" role="menuitem" aria-haspopup="dialog"><span class="mi"><span data-i18n="shell.sources">Источники</span><small data-i18n="shell.sources_note">папки, Google Диск и Git-проекты</small></span></button>
           <button id="getting-started-open" type="button" role="menuitem" data-i18n="shell.getting_started" aria-expanded="false" aria-controls="getting-started">Начало работы</button>
           <button id="updates-notice" type="button" role="menuitem" aria-controls="settings-panel" hidden></button>
           <button id="updates-install" type="button" role="menuitem" hidden></button>

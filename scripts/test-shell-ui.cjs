@@ -170,6 +170,10 @@ const errors = [];
       result.time = homeClock(at(40));
       result.later = homeClock(at(60));
       result.started = homeClock(at(-1));
+      // The next call is tomorrow: the status says so; up to 480 px the bar shows the short form.
+      const tomorrow = callStatus({}, agenda(call(24 * 60 + 40)), perms(), now);
+      result.tomorrow = [tomorrow.text, tomorrow.short, homeClock(at(24 * 60 + 40)) === result.time];
+      result.waitingShort = callStatus(...cases.waiting, now).short;
       // Never Start recording with the microphone denied, whatever else holds.
       // The page lost the server: a capture seen a moment ago is no longer a recording claim.
       stateConnectionFailed = true;
@@ -190,21 +194,23 @@ const errors = [];
       runningNotDetected: ['not_recording', 'Запись не идет: звонок не замечен', 'start!'],
       runningUnknown: ['not_recording', 'Запись не идет: звонок не замечен', 'start!'],
       startedOneMinuteAgo: ['waiting', `Ждет звонка в ${started}, запись включится сама`, 'start'],
-      runningSkipped: ['waiting', 'Ждет звонка, запись включится сама', 'start'],
+      runningSkipped: ['waiting', 'Запись включится сама, когда начнется звонок', 'start'],
       skippedThenNext: ['mic_missing', `Нет доступа к микрофону: запись в ${later} не включится`, 'open_mic!'],
       ended: ['waiting', 'Ждет звонка', null],
       micMissing: ['mic_missing', `Нет доступа к микрофону: запись в ${time} не включится`, 'open_mic!'],
       callAudioMissing: ['mic_missing', `Нет доступа к звуку звонка: запись в ${time} будет без собеседника`, 'open_call_audio!'],
       micDeniedNoCall: ['waiting', 'Ждет звонка', null],
       unknownEverywhere: ['waiting', `Ждет звонка в ${time}, запись включится сама`, 'start'],
-      notLoaded: ['waiting', 'Ждет звонка, запись включится сама', 'start'],
+      notLoaded: ['waiting', 'Запись включится сама, когда начнется звонок', 'start'],
       waiting: ['waiting', `Ждет звонка в ${time}, запись включится сама`, 'start'],
-      soloRunning: ['waiting', 'Ждет звонка, запись включится сама', 'start'],
+      soloRunning: ['waiting', 'Запись включится сама, когда начнется звонок', 'start'],
       soloThenCall: ['mic_missing', `Нет доступа к микрофону: запись в ${time} не включится`, 'open_mic!'],
       linkOnlyRunning: ['not_recording', 'Запись не идет: звонок не замечен', 'start!'],
       autoOff: ['waiting', `Ждет звонка в ${time}`, 'start'],
       autoOffNoCall: ['waiting', 'Ждет звонка', 'start'],
       recorderStoppedBefore: ['waiting', `Ждет звонка в ${time}`, 'start'],
+      tomorrow: [`Ждет звонка завтра в ${time}, запись включится сама`, `Ждет звонка завтра в ${time}`, true],
+      waitingShort: `Ждет звонка в ${time}`,
       homeNext: 'e40',
       captureRecording: ['recording', 'Запись', null],
       captureVerifying: ['recording', 'Запись', null],
@@ -388,7 +394,7 @@ const errors = [];
     assert.deepEqual(await shown(), { view: 'home', workspace: false, boundaryBar: false, home: true });
     assert.equal(await page.locator('#home-heading').count(), 1);
     // On Home the bar shows the call status, never the transcript's old idle line.
-    await page.waitForFunction(() => document.querySelector('#call-status-text').textContent === 'Ждет звонка, запись включится сама');
+    await page.waitForFunction(() => document.querySelector('#call-status-text').textContent === 'Запись включится сама, когда начнется звонок');
     // Home has no call: no transcript, panel, new-meeting or notes controls in the menu.
     await page.locator('#menu-button').click();
     assert.deepEqual(await page.evaluate(() => ['transcript-show', 'swap-panels', 'new-meeting-button', 'menu-notes']

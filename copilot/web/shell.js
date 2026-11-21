@@ -77,8 +77,10 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
   }
   // Recording starts by itself only with auto-record on and the recorder not known to be stopped.
   const manual = permissions?.auto_record === false || permissions?.recorder === "stopped" ? "_manual" : "";
-  return { kind: "waiting", text: next ? t(`status.waiting_at${manual}`, { time }) : t(`status.waiting${manual}`),
-    action: mic ? null : action("start", false) };
+  // A next call on another date is tomorrow's (the agenda holds today and tomorrow). `short` is for a narrow bar.
+  const day = next && new Date(next.start).toDateString() !== new Date(now).toDateString() ? "tomorrow_" : "";
+  return { kind: "waiting", text: next ? t(`status.waiting_${day}at${manual}`, { time }) : t(`status.waiting${manual}`),
+    short: next ? t(`status.waiting_${day}at_manual`, { time }) : null, action: mic ? null : action("start", false) };
 }
 
 const currentStatus = () => callStatus(window.appState, window.agendaData, window.permissionsData);
@@ -97,8 +99,8 @@ const keyHint = label => {
 };
 let statusError = null; // {text, state}: a failed status action, shown until the next state poll replaces the state
 
-// A status action from the bar or the Home row: both copies share one busy key, so a double click posts once,
-// and stay disabled until the agenda and permissions are fetched again.
+// A status action from the bar: its busy key makes a double click post once, and it stays disabled until the
+// agenda and permissions are fetched again.
 async function statusAction(button, id) {
   const key = `status|${id}`;
   if (homeBusy.has(key)) return;
@@ -119,6 +121,10 @@ async function statusAction(button, id) {
   }
 }
 
+// Up to 480 px the waiting status drops "recording starts by itself", so the bar keeps to two rows.
+const SHORT_BAR = matchMedia("(max-width: 480px)");
+SHORT_BAR.addEventListener("change", () => renderShell());
+
 function renderStatus(view) {
   if (statusError && statusError.state !== window.appState) statusError = null;
   const status = currentStatus();
@@ -127,7 +133,7 @@ function renderStatus(view) {
     status.action = { id: "back", label: t("action.back_to_call"), primary: true };
   }
   const text = $("call-status-text");
-  const shown = statusError?.text || status.text;
+  const shown = statusError?.text || (SHORT_BAR.matches && status.short) || status.text;
   if (text.textContent !== shown) text.textContent = shown;
   text.className = `status-text${status.kind === "recording" ? " rec" : statusError || status.kind !== "waiting" ? " fail" : ""}`;
   const button = $("call-status-action");
@@ -141,6 +147,8 @@ function renderStatus(view) {
     button.replaceChildren(label);
     if (id === "start") button.append(keyHint(RECORD_KEY));
   }
+  // R34: the bar owns a call that is not being recorded, and How to fix sits beside its button.
+  $("call-status-help").hidden = status.kind !== "not_recording";
   $("menu-notes").hidden = view === "home";
   const transcript = window.appState?.transcript || {};
   const title = transcript.display_meeting || transcript.meeting;
@@ -275,6 +283,7 @@ $("menu-nav-home").addEventListener("click", goHome);
 $("menu-past-calls").addEventListener("click", () => $("archive-button").click());
 $("menu-updates").addEventListener("click", () => $("updates-notice").click());
 $("getting-started-open").addEventListener("click", () => $("settings-panel").hidden || $("settings-close").click());
+$("call-status-help").addEventListener("click", () => $("getting-started-open").click());
 $("call-status-action").addEventListener("click", event => {
   if (event.currentTarget.dataset.action !== "back") return statusAction(event.currentTarget, event.currentTarget.dataset.action);
   try {

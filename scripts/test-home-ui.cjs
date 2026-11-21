@@ -13,6 +13,8 @@ const scriptErrors = page => page.errors.filter(error => /(shell|home)\.js/.test
 const texts = (page, selector) => page.locator(selector).allInnerTexts();
 const EMPTY = ['calendar_off', 'calendar_off_with_plans', 'tool_missing', 'no_meetings', 'load_failed'];
 const MENU = ['menu_open', 'menu_narrow'];
+const OPEN_MEMO = ['ready_memo_open'];
+const pressOpenMemo = page => page.locator('#home .row.next .actions button[aria-controls]').click();
 const START = /^(Начать запись|Start recording)/;
 const recordKey = page => page.evaluate(() => (/Mac/.test(navigator.platform) ? 'Meta+Shift+R' : 'Alt+Shift+R'));
 const nextClock = page => page.evaluate(() => homeClock(window.agendaData.meetings[0].start));
@@ -115,6 +117,17 @@ const checks = {
     assert.match(await row.locator('.goal').innerText(), /^(Цель|Goal): Agree on the pilot scope/);
     assert.equal(await row.locator('.asks li').count(), 3);
     assert.match(await row.locator('.soon').innerText(), /через 40 мин|in 40 min/);
+    // The bar: the whole status in a wide window; up to 480 px the short one, so the bar keeps to two rows.
+    const time = await nextClock(page);
+    const status = page.locator('#call-status-text');
+    assert.equal(await status.innerText(), lang === 'ru' ? `Ждет звонка в ${time}, запись включится сама`
+      : `Waiting for the ${time} call, recording starts by itself`);
+    await page.setViewportSize({ width: 400, height: 900 });
+    await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text,
+      lang === 'ru' ? `Ждет звонка в ${time}` : `Waiting for the ${time} call`);
+    assert.equal(await status.evaluate(node => Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight))), 1);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForFunction(() => /,/.test(document.querySelector('#call-status-text').textContent));
     assert.match(await row.locator('.bg').innerText(), /(Откуда это: 2 источника|Where this comes from: 2 sources)$/);
     // Day headings: the next meeting is today unless it crosses midnight; tomorrow's 10:00 meeting is tomorrow.
     const crosses = new Date(Date.now() + 40 * 60000).getDate() !== new Date().getDate();
@@ -124,7 +137,7 @@ const checks = {
     // Each meeting is an article titled by its heading, under a day heading.
     assert.equal(await page.locator('#home article.row > h3.mtitle').count(), 3);
     // The call link opens in a new tab and leaks nothing.
-    const link = row.locator('a.ql');
+    const link = row.locator('.actions a.ql');
     assert.deepEqual([await link.getAttribute('href'), await link.getAttribute('target'), await link.getAttribute('rel')],
       ['https://example.com/call/evt-ready', '_blank', 'noopener noreferrer']);
     // Keyboard: the row's controls follow one another in Tab order, as they read.
@@ -200,6 +213,51 @@ const checks = {
     await row.locator('[data-key$="|skip"]').waitFor();
     assert.equal(await row.locator('[data-key$="|skip"]').innerText(), lang === 'ru' ? 'Вернуть' : 'Undo');
   },
+  // The opened memo is part of the row: one toggle, real section headings, no repeat of the digest above it,
+  // links by their labels only, the materials as plain underlined links.
+  async ready_memo_open(page, lang) {
+    const row = page.locator('#home .row.next');
+    const toggle = row.locator('.actions button[aria-controls]');
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
+    assert.match(await toggle.innerText(), lang === 'ru' ? /^Свернуть мемо/ : /^Hide memo/);
+    const panel = page.locator(`#${await toggle.getAttribute('aria-controls')}`);
+    assert.equal(await row.locator(`#${await toggle.getAttribute('aria-controls')}`).count(), 1, 'the memo sits in its row');
+    const memo = await panel.evaluate(node => {
+      const style = getComputedStyle(node);
+      const headings = [...node.querySelectorAll('h1, h2, h3, h4, h5, h6')];
+      return {
+        toggles: node.querySelectorAll('details, summary').length,
+        box: style.borderTopStyle !== 'none' || style.backgroundColor !== 'rgba(0, 0, 0, 0)',
+        headings: headings.map(item => item.textContent),
+        type: [...new Set(headings.map(item => `${getComputedStyle(item).fontSize}/${getComputedStyle(item).fontWeight}/${getComputedStyle(item).textTransform}`))],
+        text: node.innerText,
+        links: [...node.querySelectorAll('a')].map(item => [item.textContent, item.getAttribute('href'), item.target, item.rel,
+          item.classList.contains('ql')]),
+        items: [...node.querySelectorAll('li')].map(item => item.textContent),
+      };
+    });
+    assert.equal(memo.toggles, 0, 'no inner disclosure: Open memo is the only toggle');
+    assert.equal(memo.box, false, 'no box of its own inside the row');
+    assert.deepEqual(memo.headings, ['Questions', 'Background', lang === 'ru' ? 'Материалы' : 'Materials']);
+    assert.deepEqual(memo.type, ['16px/600/none']);
+    // The goal and the three questions are already in the digest above: the memo goes on from the fourth.
+    assert.doesNotMatch(memo.text, /Agree on the|What budget|Who signs off|Which part of the proposal|Pilot review/);
+    assert.deepEqual(memo.items, ['A fourth question that the digest leaves out?']);
+    assert.match(memo.text, /The last proposal went out a week ago/);
+    assert.doesNotMatch(memo.text, /https?:|\(|\*\*/, 'no raw URL or Markdown marks');
+    assert.deepEqual(memo.links, [
+      ['example.org', 'https://example.org/history', '_blank', 'noopener noreferrer', false],
+      ['Proposal', 'https://example.com/proposal', '_blank', 'noopener noreferrer', true],
+      ['Notes', 'https://example.org/notes', '_blank', 'noopener noreferrer', true]]);
+    // The materials look like Open the call link.
+    const look = selector => page.locator(selector).first().evaluate(node => ['textDecorationLine', 'fontWeight', 'fontSize', 'color']
+      .map(key => getComputedStyle(node)[key]).join(' '));
+    assert.equal(await look('#home .row.next .memo-details a.ql'), await look('#home .row.next .actions a.ql'));
+    // Hide memo closes it again.
+    await toggle.click();
+    assert.equal(await panel.isVisible(), false);
+    assert.match(await toggle.innerText(), lang === 'ru' ? /^Открыть мемо/ : /^Open memo/);
+  },
   async preparing(page, lang) {
     const status = page.locator('#home .row.next [role="status"]');
     assert.match(await status.innerText(), lang === 'ru' ? /с \d\d:\d\d,/ : /since \d\d:\d\d,/);
@@ -229,9 +287,13 @@ const checks = {
     const choice = await rowOf(page, 'Pilot follow-up').locator('.state').innerText();
     assert.match(choice, /не выбран ИИ|no AI is chosen/);
     assert.doesNotMatch(choice, /Ничего делать не нужно|Nothing to do/);
-    // Retrying cannot help without a chosen AI: the only action is Check the AI.
+    // Retrying cannot help without a chosen AI: the only action is Choose the AI.
     assert.deepEqual(await rowOf(page, 'Pilot follow-up').locator('.actions button').allInnerTexts(),
-      [lang === 'ru' ? 'Проверить ИИ' : 'Check the AI']);
+      [lang === 'ru' ? 'Выбрать ИИ' : 'Choose the AI']);
+    // Nothing to do here: one quiet Retry now link at most, no Check the AI, then the call's own actions.
+    assert.deepEqual(await row.locator('.actions > *').evaluateAll(nodes => nodes.map(node => [node.textContent, node.className])),
+      lang === 'ru' ? [['Повторить сейчас', 'ql'], ['Открыть ссылку на звонок', 'ql'], ['Не записывать этот звонок', 'quiet']]
+        : [['Retry now', 'ql'], ['Open the call link', 'ql'], ['Do not record this call', 'quiet']]);
     // A second click while the POST is in flight posts nothing more.
     let release;
     page.api.responses['/api/memo/rebuild'] = new Promise(resolve => { release = resolve; });
@@ -259,12 +321,23 @@ const checks = {
     await row.locator('.row-error').waitFor();
     assert.match(await row.locator('.row-error').innerText(), /^(Не получилось\. Попробуйте еще раз\.|That did not work\. Try again\.)$/);
     assert.match(await row.locator('.state').first().innerText(), /ИИ не ответил|the AI did not answer/);
-    const check = row.locator('button.ql', { hasText: /^(Проверить ИИ|Check the AI)$/ });
-    await check.click();
+    await rowOf(page, 'Pilot follow-up').locator('button', { hasText: /^(Выбрать ИИ|Choose the AI)$/ }).click();
     await page.locator('#getting-started').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#startup-ai-heading').evaluate(node => {
+      const box = node.getBoundingClientRect();
+      return box.top >= document.querySelector('.topbar').getBoundingClientRect().bottom && box.bottom <= innerHeight;
+    }), true, 'the AI step is on screen');
   },
-  async skipped(page) {
+  async skipped(page, lang) {
     const row = page.locator('#home .row.next');
+    // The next call to record is tomorrow's: the bar says tomorrow, also in its short form.
+    const time = await page.evaluate(() => homeClock(window.agendaData.meetings[1].start));
+    await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text, lang === 'ru'
+      ? `Ждет звонка завтра в ${time}, запись включится сама` : `Waiting for tomorrow's ${time} call, recording starts by itself`);
+    await page.setViewportSize({ width: 400, height: 900 });
+    await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text,
+      lang === 'ru' ? `Ждет звонка завтра в ${time}` : `Waiting for tomorrow's ${time} call`);
+    await page.setViewportSize({ width: 1440, height: 900 });
     assert.match(await row.locator('.status-text').innerText(), /^(Этот звонок не будет записан|This call will not be recorded)$/);
     assert.equal(await row.locator('button.quiet').count(), 0);
     // A dropped connection on Undo: the row stays skipped and says it did not work.
@@ -329,7 +402,7 @@ const checks = {
   async tool_missing(page, lang) {
     const block = await emptyState(page, lang, [
       { ru: 'Нет программы для чтения календаря', en: 'The calendar reader is not installed' },
-      { ru: 'MeetOnTrack читает Google Календарь через программу gws.', en: 'MeetOnTrack reads Google Calendar through the gws tool.' }], 1);
+      { ru: 'Для чтения Google Календаря нужна программа Google Workspace CLI.', en: 'Reading Google Calendar needs the Google Workspace CLI.' }], 1);
     const link = block.locator('a.ql');
     assert.deepEqual([await link.innerText(), await link.getAttribute('href'), await link.getAttribute('target'), await link.getAttribute('rel')],
       [lang === 'ru' ? 'Как ее установить' : 'How to install it',
@@ -337,11 +410,18 @@ const checks = {
   },
   async no_meetings(page, lang) {
     await emptyState(page, lang, [{ ru: 'Больше звонков сегодня и завтра нет', en: 'No more calls today or tomorrow' },
-      { ru: 'Прошедшие звонки - сверху или в меню.', en: 'Past calls are in the top bar and the menu.' }], 0);
+      { ru: 'Прошедшие звонки - вверху.', en: 'Past calls are in the top bar.' }], 0);
+    // No next call: the bar does not wait for one.
+    assert.equal(await page.locator('#call-status-text').innerText(),
+      lang === 'ru' ? 'Запись включится сама, когда начнется звонок' : 'Recording starts by itself when a call begins');
+    // Up to 700 px the past calls are in the menu, and the line says so.
+    await page.setViewportSize({ width: 400, height: 900 });
+    assert.equal(await page.locator('#home .empty .state').innerText(), lang === 'ru' ? 'Прошедшие звонки - в меню.' : 'Past calls are in the menu.');
+    await page.setViewportSize({ width: 1440, height: 900 });
   },
   async load_failed(page, lang) {
     const block = await emptyState(page, lang, [{ ru: 'Не удалось загрузить звонки', en: 'Could not load your calls' },
-      { ru: 'Попробуем снова сами, или нажмите Повторить.', en: 'We will keep trying, or press Retry.' }], 1);
+      { ru: 'Попробуем снова через минуту или нажмите Повторить.', en: 'We will try again in a minute, or press Retry.' }], 1);
     // Retry is disabled while it fetches; a failed fetch gives it back, focused.
     const retry = block.locator('button', { hasText: /^(Повторить|Retry)$/ });
     let reopen;
@@ -362,7 +442,7 @@ const checks = {
     await page.evaluate(() => refreshAgenda());
     await page.locator('#home .empty').waitFor();
     await emptyState(page, lang, [{ ru: 'Не удалось загрузить звонки', en: 'Could not load your calls' },
-      { ru: 'Попробуем снова сами, или нажмите Повторить.', en: 'We will keep trying, or press Retry.' }], 1);
+      { ru: 'Попробуем снова через минуту или нажмите Повторить.', en: 'We will try again in a minute, or press Retry.' }], 1);
     // Today loaded, tomorrow did not: today's rows stay, tomorrow says it could not be loaded, with Retry.
     const tomorrow = new Date(Date.now() + 24 * 3600000);
     const day = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
@@ -430,6 +510,38 @@ const checks = {
     await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text, text, { timeout: 4000 });
   },
   async mic_missing_delivery(page, lang) {
+    // The pill names the problem in a few words and never cuts them; the meeting is named in the dialog it opens.
+    const pill = page.locator('#delivery-alert');
+    await pill.waitFor();
+    for (const width of [1440, 1024, 960, 760, 400]) {
+      await page.setViewportSize({ width, height: 900 });
+      await frames(page);
+      assert.deepEqual(await pill.evaluate(node => [node.textContent, node.scrollWidth <= node.clientWidth + 1 && node.scrollHeight <= node.clientHeight + 1]),
+        [lang === 'ru' ? 'Отчет не отправлен' : 'Report not sent', true], `pill at ${width}`);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const plural = await page.evaluate(() => {
+      const item = n => ({ meeting_id: `m${n}`, channels: ['email'], title: 'Pilot review', started_at: new Date().toISOString() });
+      const shown = [2, 5, 21].map(count => {
+        renderDeliveryHealth({ ...deliveryHealth, undelivered: Array.from({ length: count }, (_, index) => item(index)) });
+        return document.getElementById('delivery-alert').textContent;
+      });
+      for (const extra of [{ uncertain: true }, { missing: true }, { failed: { reason: 'pdf' } }, { failed: { fallback: 'html' } }, { final_wait: { state: 'waiting' } }]) {
+        renderDeliveryHealth({ ...deliveryHealth, undelivered: [{ ...item(1), ...extra }] });
+        shown.push(document.getElementById('delivery-alert').textContent);
+      }
+      renderDeliveryHealth(window.appState.delivery);
+      return shown;
+    });
+    assert.deepEqual(plural, lang === 'ru' ? ['2 отчета не отправлены', '5 отчетов не отправлены', '21 отчет не отправлен',
+      'Отчет мог не дойти', 'Отчет не найден', 'Отчет не создан', 'PDF отчета не создан', 'Отчет ждет расшифровку']
+      : ['2 reports not sent', '5 reports not sent', '21 reports not sent',
+        'Report may not have arrived', 'Report not found', 'Report not created', 'Report PDF not created', 'Report waits for the transcript']);
+    await pill.click();
+    await page.locator('#archive-dialog').waitFor({ state: 'visible' });
+    assert.match(await page.locator('#archive-dialog').innerText(), lang === 'ru' ? /Отчет по встрече «Pilot review» от \d+ \S+ не отправлен/
+      : /Report for “Pilot review” on \S+ \S+ was not sent/);
+    await page.locator('#archive-close').click();
     // 1024 px: the problem has priority over the delivery pill, the pill shrinks first.
     await page.setViewportSize({ width: 1024, height: 900 });
     await page.locator('#delivery-alert').waitFor();
@@ -496,9 +608,8 @@ const checks = {
       getComputedStyle(document.querySelector('.settings-panel')).top]);
     assert.deepEqual(await height(page), await height(fresh), 'bar after 400 -> 1440 vs fresh 1440');
     await fresh.close();
-    // The short cap is for the squeezed 701-1100 range only: at 400 (own row) the pill keeps its width, at 1440 its
-    // usual limit (it may still share the row with a two-line Russian status there, as before the cap).
-    const pill = async () => {
+    // The pill keeps one width with and without a recording problem.
+    const pillWidths = async () => {
       const widths = {};
       for (const width of [400, 1440]) {
         await page.setViewportSize({ width, height: 900 });
@@ -508,11 +619,11 @@ const checks = {
       }
       return widths;
     };
-    const withProblem = await pill();
+    const withProblem = await pillWidths();
     page.api.fixture.permissions.microphone = 'granted';
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await page.waitForFunction(() => !document.querySelector('#call-status-text').classList.contains('fail'));
-    assert.deepEqual(withProblem, await pill(), 'pill width with and without a problem');
+    assert.deepEqual(withProblem, await pillWidths(), 'pill width with and without a problem');
   },
   async not_recording(page, lang) {
     await failing(page);
@@ -521,28 +632,46 @@ const checks = {
     await readableStatus(page, [701, 760, 860, 900, 960, 1024, 1120], 'not recording');
     const fix = lang === 'ru' ? 'Открыть программу записи' : 'Open the recorder';
     assert.equal(await page.locator('#call-status-action').innerText(), fix);
-    // The next row puts the fix first, then Start recording, then How to fix; one primary action.
+    // R34: the bar owns the call status, with How to fix beside its button. The row keeps its memo actions only.
+    const help = page.locator('#call-status-help');
+    assert.equal(await help.innerText(), lang === 'ru' ? 'Как исправить' : 'How to fix');
+    const [action, beside] = await Promise.all([page.locator('#call-status-action').boundingBox(), help.boundingBox()]);
+    assert.ok(beside.x >= action.x + action.width && Math.abs(beside.y + beside.height / 2 - (action.y + action.height / 2)) < 4,
+      `How to fix beside the bar's button: ${JSON.stringify({ action, beside })}`);
     const row = page.locator('#home .row.next');
-    const actions = await row.locator('.actions > *').evaluateAll(nodes => nodes.map(node => [node.textContent, node.className]));
-    assert.deepEqual(actions.slice(0, 3), [[fix, 'primary'], [lang === 'ru' ? 'Начать запись' : 'Start recording', ''],
-      [lang === 'ru' ? 'Как исправить' : 'How to fix', 'ql']]);
-    assert.equal(await row.locator('.actions .primary').count(), 1);
-    // The row's fix posts once and disables the bar's copy too.
+    const actions = await row.locator('.actions > *').evaluateAll(nodes => nodes.map(node => [node.textContent.replace('↵', ''), node.className]));
+    assert.deepEqual(actions, lang === 'ru'
+      ? [['Открыть мемо', 'primary'], ['Открыть ссылку на звонок', 'ql'], ['Не записывать этот звонок', 'quiet']]
+      : [['Open memo', 'primary'], ['Open the call link', 'ql'], ['Do not record this call', 'quiet']]);
+    assert.equal(await page.locator('#home').getByText(fix).count(), 0, 'the fix is not repeated in the row');
+    // The bar's fix posts once while it is in flight.
     let release;
     page.api.responses['/api/getting-started/open-recorder'] = new Promise(resolve => { release = resolve; });
-    await row.locator('.actions button.primary').click();
+    await page.locator('#call-status-action').click();
     assert.equal(await page.locator('#call-status-action').isDisabled(), true);
+    await page.locator('#call-status-action').click({ force: true });
     release();
     await page.waitForFunction(() => !document.querySelector('#call-status-action').disabled);
     assert.deepEqual(page.api.posts.map(item => item.path), ['/api/getting-started/open-recorder']);
-    await row.locator('.actions button', { hasText: START }).click();
-    await page.waitForFunction(() => !document.querySelector('#home .row.next .actions button:disabled'));
-    assert.deepEqual(page.api.posts.map(item => item.path), ['/api/getting-started/open-recorder', '/api/getting-started/start-recording']);
-    await row.locator('.actions button.ql', { hasText: /^(Как исправить|How to fix)$/ }).click();
+    // At 400 px How to fix stays beside the button, inside the window.
+    await page.setViewportSize({ width: 400, height: 900 });
+    const narrowBoxes = await Promise.all([page.locator('#call-status-action').boundingBox(), help.boundingBox()]);
+    assert.ok(narrowBoxes[1].x + narrowBoxes[1].width <= 400 && Math.abs(narrowBoxes[1].y - narrowBoxes[0].y) < 20,
+      `How to fix at 400: ${JSON.stringify(narrowBoxes)}`);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await help.click();
     await page.locator('#getting-started').waitFor({ state: 'visible' });
   },
   async menu_open(page, lang) {
     assert.equal(await page.locator('#app-menu').isVisible(), true);
+    // The first visible item has no divider over it (the hidden navigation group leaves none behind).
+    const first = await page.locator('#app-menu').evaluate(menu => {
+      const shown = [...menu.children].filter(node => node.checkVisibility());
+      return [shown[0].tagName, getComputedStyle(shown[0]).borderTopStyle];
+    });
+    assert.deepEqual(first, ['BUTTON', 'none']);
+    assert.equal(await page.locator('#repo-button small').innerText(),
+      lang === 'ru' ? 'папки, Google Диск и Git-проекты' : 'folders, Google Drive and Git projects');
     assert.equal(await page.locator('#menu-notes').isVisible(), false, 'notes belong to a call');
     const shortcuts = await page.locator('#menu-shortcuts [role="menuitem"]').evaluateAll(nodes =>
       nodes.filter(node => node.checkVisibility()).map(node => [node.querySelector('.mi').textContent, node.querySelector('kbd').textContent]));
@@ -593,12 +722,12 @@ const checks = {
     for (const id of ['interface-language', 'question']) {
       await page.evaluate(id => document.getElementById(id).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })), id);
     }
-    // Nor on a summary or anything that acts as a button.
+    // Nor on anything that acts as a button.
     await page.evaluate(() => {
       const extra = Object.assign(document.createElement('span'), { tabIndex: 0 });
       extra.setAttribute('role', 'button');
       document.getElementById('home').append(extra);
-      for (const node of [document.querySelector('#home .row.next .memo-details summary'), extra]) {
+      for (const node of [extra]) {
         node.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       }
       extra.remove();
@@ -740,6 +869,7 @@ const checks = {
         try {
           await page.locator('#home :is(.row, .empty)').first().waitFor({ timeout: 5000 });
           if (MENU.includes(fixture)) await page.locator('#menu-button').click();
+          if (OPEN_MEMO.includes(fixture)) await pressOpenMemo(page);
           for (const width of [1440, 1024, 400]) {
             for (const scheme of ['light', 'dark']) {
               const label = `${fixture}-${width}-${scheme}-${lang}`;

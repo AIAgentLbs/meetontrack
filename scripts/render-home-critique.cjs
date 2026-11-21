@@ -1,5 +1,5 @@
 // Renders Home and the app chrome for a design critique: every fixture at 1440, 1024 and 400 px, light and dark,
-// Russian and English, full page, into <out-dir>, with index.html and manifest.json. Exits 1 when a page raised an
+// Russian and English (with fixture data in the page's language), full page, into <out-dir>, with index.html and manifest.json. Exits 1 when a page raised an
 // error or scrolled horizontally. It does not run the critique. PROBES adds a few widths for a single check
 // (the problem status on its own row at 760 px); those files are listed apart and not counted in the manifest.
 // Usage: PLAYWRIGHT_MODULE=... node scripts/render-home-critique.cjs <out-dir>
@@ -9,6 +9,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const { states, open } = require('./home-fixtures.cjs');
 
 const MENU = ['menu_open', 'menu_narrow'];
+const OPEN_MEMO = ['ready_memo_open'];
 const PROBES = { not_recording: [760] };
 const out = process.argv[2];
 if (!out) {
@@ -25,11 +26,12 @@ if (!out) {
   try {
     for (const state of Object.keys(states)) {
       for (const lang of ['ru', 'en']) {
-        const page = await open(browser, { fixture: state, lang });
+        const page = await open(browser, { fixture: state, lang, data: lang });
         try {
           await page.waitForFunction(lang => document.documentElement.lang === lang, lang);
           await page.locator('#home :is(.row, .empty)').first().waitFor({ timeout: 5000 });
           if (MENU.includes(state)) await page.locator('#menu-button').click();
+          if (OPEN_MEMO.includes(state)) await page.locator('#home .row.next .actions button[aria-controls]').click();
           for (const width of [1440, 1024, 400]) {
             for (const scheme of ['light', 'dark']) {
               const file = `${state}-${width}-${scheme}-${lang}.png`;

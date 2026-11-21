@@ -118,21 +118,23 @@ const translations = {
     "home.reason.error": "ошибка при подготовке",
     "home.retry_at": "Ничего делать не нужно, попробуем снова в {time}.",
     "home.retry": "Повторить",
-    "home.check_ai": "Проверить ИИ",
+    "home.retry_now": "Повторить сейчас",
+    "home.choose_ai": "Выбрать ИИ",
     "home.action_failed": "Не получилось. Попробуйте еще раз.",
     "home.cannot_skip": "Программа записи не умеет пропускать звонок. Обновите приложение.",
     "home.recording_active": "Сейчас идет запись. Остановите ее, чтобы не записывать звонок.",
     "home.more_people": "и еще {n}",
     "home.tool_title": "Нет программы для чтения календаря",
-    "home.tool_text": "MeetOnTrack читает Google Календарь через программу gws.",
+    "home.tool_text": "Для чтения Google Календаря нужна программа Google Workspace CLI.",
     "home.tool_link": "Как ее установить",
     "home.calendar_off_title": "Календарь не подключен",
     "home.calendar_off_text": "Звонки и мемо появятся после подключения.",
     "home.calendar_connect": "Подключить календарь",
     "home.empty_title": "Больше звонков сегодня и завтра нет",
-    "home.empty_text": "Прошедшие звонки - сверху или в меню.",
+    "home.empty_text_wide": "Прошедшие звонки - вверху.",
+    "home.empty_text_narrow": "Прошедшие звонки - в меню.",
     "home.load_failed_title": "Не удалось загрузить звонки",
-    "home.load_failed_text": "Попробуем снова сами, или нажмите Повторить.",
+    "home.load_failed_text": "Попробуем снова через минуту или нажмите Повторить.",
     "meeting.connecting": "Подключение к записи...",
     "status.checking": "Проверка",
     "shell.home": "Главная",
@@ -141,6 +143,7 @@ const translations = {
     "shell.settings": "Настройки",
     "shell.settings_note": "ИИ, распознавание речи, источники, куда отправлять отчет",
     "shell.sources": "Источники",
+    "shell.sources_note": "папки, Google Диск и Git-проекты",
     "shell.getting_started": "Начало работы",
     "shell.updates": "Обновления",
     "shell.notes": "Заметки к звонку «{title}»",
@@ -149,8 +152,10 @@ const translations = {
     "shell.key.memo": "Открыть мемо следующего звонка",
     "shell.key.join": "Открыть ссылку на звонок",
     "shell.key.skip": "Не записывать следующий звонок",
-    "status.waiting": "Ждет звонка, запись включится сама",
+    "status.waiting": "Запись включится сама, когда начнется звонок",
     "status.waiting_at": "Ждет звонка в {time}, запись включится сама",
+    "status.waiting_tomorrow_at": "Ждет звонка завтра в {time}, запись включится сама",
+    "status.waiting_tomorrow_at_manual": "Ждет звонка завтра в {time}",
     "status.waiting_manual": "Ждет звонка",
     "status.disconnected": "Нет связи с MeetOnTrack, пробуем снова",
     "status.waiting_at_manual": "Ждет звонка в {time}",
@@ -420,21 +425,23 @@ const translations = {
     "home.reason.error": "something went wrong",
     "home.retry_at": "Nothing to do, we will try again at {time}.",
     "home.retry": "Retry",
-    "home.check_ai": "Check the AI",
+    "home.retry_now": "Retry now",
+    "home.choose_ai": "Choose the AI",
     "home.action_failed": "That did not work. Try again.",
     "home.cannot_skip": "The recorder cannot skip a call. Update the app.",
     "home.recording_active": "A recording is in progress. Stop it first to skip this call.",
     "home.more_people": "and {n} more",
     "home.tool_title": "The calendar reader is not installed",
-    "home.tool_text": "MeetOnTrack reads Google Calendar through the gws tool.",
+    "home.tool_text": "Reading Google Calendar needs the Google Workspace CLI.",
     "home.tool_link": "How to install it",
     "home.calendar_off_title": "The calendar is not connected",
     "home.calendar_off_text": "Calls and memos appear once it is connected.",
     "home.calendar_connect": "Connect the calendar",
     "home.empty_title": "No more calls today or tomorrow",
-    "home.empty_text": "Past calls are in the top bar and the menu.",
+    "home.empty_text_wide": "Past calls are in the top bar.",
+    "home.empty_text_narrow": "Past calls are in the menu.",
     "home.load_failed_title": "Could not load your calls",
-    "home.load_failed_text": "We will keep trying, or press Retry.",
+    "home.load_failed_text": "We will try again in a minute, or press Retry.",
     "meeting.connecting": "Connecting to the recording...",
     "status.checking": "Checking",
     "shell.home": "Home",
@@ -443,6 +450,7 @@ const translations = {
     "shell.settings": "Settings",
     "shell.settings_note": "AI, speech recognition, sources, where the report goes",
     "shell.sources": "Sources",
+    "shell.sources_note": "folders, Google Drive and Git projects",
     "shell.getting_started": "Getting started",
     "shell.updates": "Updates",
     "shell.notes": "Notes for the call {title}",
@@ -451,8 +459,10 @@ const translations = {
     "shell.key.memo": "Open the next call's memo",
     "shell.key.join": "Open the call link",
     "shell.key.skip": "Do not record the next call",
-    "status.waiting": "Waiting for a call, recording starts by itself",
+    "status.waiting": "Recording starts by itself when a call begins",
     "status.waiting_at": "Waiting for the {time} call, recording starts by itself",
+    "status.waiting_tomorrow_at": "Waiting for tomorrow's {time} call, recording starts by itself",
+    "status.waiting_tomorrow_at_manual": "Waiting for tomorrow's {time} call",
     "status.waiting_manual": "Waiting for a call",
     "status.disconnected": "No connection to MeetOnTrack, trying again",
     "status.waiting_at_manual": "Waiting for the {time} call",
@@ -979,6 +989,9 @@ Object.assign(translations.ru, {
   "delivery.dismiss": "Прочитано", "delivery.dismiss_failed": "Не удалось сохранить. Повторите.",
   "delivery.local_note": "Запись и отчет остаются локально. Ошибки доставки не останавливают звонок.",
   "delivery.auth_pill": "{channel}: войдите снова", "delivery.open_settings": "Открыть настройки",
+  "delivery.pill.undelivered": "Отчет не отправлен", "delivery.pill.unsure": "Отчет мог не дойти",
+  "delivery.pill.missing": "Отчет не найден", "delivery.pill.failed": "Отчет не создан",
+  "delivery.pill.nopdf": "PDF отчета не создан", "delivery.pill.final": "Отчет ждет расшифровку",
   "delivery.undelivered.title_date": "Отчет по встрече «{title}» от {date} не отправлен",
   "delivery.undelivered.title": "Отчет по встрече «{title}» не отправлен",
   "delivery.undelivered.date": "Отчет по встрече от {date} не отправлен",
@@ -1050,6 +1063,9 @@ Object.assign(translations.en, {
   "delivery.dismiss": "Mark as read", "delivery.dismiss_failed": "Could not save. Try again.",
   "delivery.local_note": "Recordings and reports stay locally. Delivery errors do not interrupt the call.",
   "delivery.auth_pill": "{channel}: sign in again", "delivery.open_settings": "Open settings",
+  "delivery.pill.undelivered": "Report not sent", "delivery.pill.unsure": "Report may not have arrived",
+  "delivery.pill.missing": "Report not found", "delivery.pill.failed": "Report not created",
+  "delivery.pill.nopdf": "Report PDF not created", "delivery.pill.final": "Report waits for the transcript",
   "delivery.undelivered.title_date": "Report for “{title}” on {date} was not sent",
   "delivery.undelivered.title": "Report for “{title}” was not sent",
   "delivery.undelivered.date": "Report for the meeting on {date} was not sent",
@@ -1209,13 +1225,16 @@ function speakerReviewText(review) {
   return t("speaker_review", {count: (review.segment_ids || []).length, names: names ? `; ${names}` : ""});
 }
 
+const deliveryFamily = item => (item.failed?.fallback === "html" ? "nopdf" : item.failed ? "failed" : item.missing ? "missing"
+  : item.final_wait ? "final" : item.uncertain ? "unsure" : "undelivered");
+
 function undeliveredLabel(item) {
   const started = new Date(item.started_at || "");
   const values = {
     title: item.title || "",
     date: Number.isNaN(started.getTime()) ? "" : started.toLocaleDateString(uiLanguage, { day: "numeric", month: "long" }),
   };
-  const family = item.failed?.fallback === "html" ? "nopdf" : item.failed ? "failed" : item.missing ? "missing" : item.final_wait ? "final" : item.uncertain ? "unsure" : "undelivered";
+  const family = deliveryFamily(item);
   return t(`delivery.${family}.${["title", "date"].filter(key => values[key]).join("_") || "plain"}`, values);
 }
 
@@ -1304,7 +1323,8 @@ function renderDeliveryHealth(health = {}) {
   // The pill names the concrete problem; automatic retries are not the person's problem.
   const problems = [];
   if (authChannels.length) problems.push(t("delivery.auth_pill", { channel: authChannels.map(key => deliveryChannelNames[key]).join(", ") }));
-  if (undelivered.length === 1) problems.push(undeliveredLabel(undelivered[0]));
+  // A few words that never get cut; the meeting's title and date are in the dialog the pill opens.
+  if (undelivered.length === 1) problems.push(t(`delivery.pill.${deliveryFamily(undelivered[0])}`));
   else if (undelivered.length) {
     // Never state an unknown outcome as a confirmed failure.
     const family = undelivered.some(item => item.uncertain) ? "unsure_many" : "undelivered_many";
@@ -1386,7 +1406,7 @@ function renderDeliveryHealth(health = {}) {
     row.append(value);
     fragment.append(row);
   }
-  elements.deliveryAlert.title = [...problems, ...hints].join("\n");
+  elements.deliveryAlert.title = [...problems, ...undelivered.map(undeliveredLabel), ...hints].join("\n");
   elements.deliveryChannels.replaceChildren(fragment);
   elements.deliverySummary.hidden = !Object.keys(channels).length;
   const notices = (health.notifications || []).filter(item => item.id > deliveryAcknowledgedThrough);
@@ -3258,7 +3278,6 @@ async function state() {
     const projectKind = project.kind || "all";
     const hint = projectKind === "all" ? "project.all_hint"
       : project.confidence === "manual" ? "project.manual_hint" : "project.auto_hint";
-    elements.repoStatus.textContent = t("shell.sources");
     const repositoryList = scopedRepositories
       .map((repo) => `${repo.name}: ${repo.path}`)
       .join("\n");

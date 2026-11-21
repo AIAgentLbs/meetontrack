@@ -83,7 +83,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       'Report not created. Open the meeting and press Create the report again.');
     assert.equal(await page.locator('#archive-detail .archive-report-failure-detail p').textContent(),
       'The report was not created: Chrome could not save the PDF. Attempts: 3, last at 23:19. The app tries again by itself in 30 minutes, or press Create the report again.');
-    await page.waitForFunction(() => document.querySelector('#delivery-alert')?.textContent.includes('was not created'));
+    await page.waitForFunction(() => document.querySelector('#delivery-alert')?.textContent === 'Report not created');
     assert.equal(await page.locator('#delivery-alert').getAttribute('data-state'), 'action_required');
     await page.locator('#archive-detail .archive-report-failure-detail').getByRole('button', {name: 'Create the report again', exact: true}).click();
     await page.locator('#archive-detail .archive-report-failure-detail').waitFor({state: 'detached'});
