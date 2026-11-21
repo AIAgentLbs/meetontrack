@@ -113,10 +113,11 @@ function homeRelease(id) {
   }
 }
 
-// Mail, folders and the calendar are connected in the project dialog's Google section.
+// The calendar is connected in Settings, Google section: open it there with the Calendar checkbox in view.
 function homeConnect() {
-  document.getElementById("repo-button").click();
+  document.getElementById("settings-open").click();
   document.getElementById("google-context-settings").open = true;
+  document.querySelector('#google-sources input[value="calendar"]').scrollIntoView({ block: "center" });
 }
 
 // Home without rows: a title, one line and at most one action.

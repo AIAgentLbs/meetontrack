@@ -19,6 +19,20 @@ const nextClock = page => page.evaluate(() => homeClock(window.agendaData.meetin
 const frames = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 const failing = (page, timeout) => page.waitForFunction(() => document.querySelector('#call-status-text').classList.contains('fail'), null, { timeout });
 const visibleKbd = locator => locator.evaluate(node => Boolean(node.querySelector('kbd')?.checkVisibility()));
+// The status between 701 and 1200 px: its own row where the bar is squeezed, never cut, never a sideways scroll.
+async function readableStatus(page, widths, label) {
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: 900 });
+    await frames(page);
+    const box = await page.evaluate(() => {
+      const text = document.getElementById('call-status-text');
+      return { wide: text.getBoundingClientRect().width >= 160, whole: text.scrollWidth <= text.clientWidth + 1 && text.scrollHeight <= text.clientHeight + 1,
+        scroll: document.documentElement.scrollWidth <= innerWidth };
+    });
+    assert.deepEqual(box, { wide: true, whole: true, scroll: true }, `${label} at ${width}`);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
 const rowOf = (page, title) => page.locator('#home .row', { has: page.locator('.mtitle', { hasText: title }) });
 
 // Rules for every fixture, width, scheme and language.
@@ -189,8 +203,13 @@ const checks = {
     const button = page.locator('#home .row.next .actions button', { hasText: /почт.*пап|mail.*folder/i });
     assert.equal(await button.count(), 1);
     await button.click();
-    await page.waitForFunction(() => document.querySelector('#project-dialog').open);
-    assert.equal(await page.evaluate(() => document.querySelector('#google-context-settings').open), true);
+    await page.locator('#settings-panel').waitFor({ state: 'visible' });
+    assert.equal(await page.evaluate(() => document.querySelector('#project-dialog').open), false);
+    const calendarBox = await page.locator('#google-sources input[value="calendar"]').evaluate(node => {
+      const box = node.getBoundingClientRect();
+      return node.checkVisibility() && box.top >= document.querySelector('.topbar').getBoundingClientRect().bottom && box.bottom <= innerHeight;
+    });
+    assert.equal(calendarBox, true, 'the Calendar checkbox is on screen in Settings');
   },
   async failed(page, lang) {
     const row = page.locator('#home .row.next');
@@ -280,9 +299,16 @@ const checks = {
       { ru: 'Звонки и мемо появятся после подключения.', en: 'Calls and memos appear once it is connected.' }], 1);
     const button = block.locator('button.primary');
     assert.equal(await button.innerText(), lang === 'ru' ? 'Подключить календарь' : 'Connect the calendar');
+    // The calendar settings sit low in a short window: they are scrolled into view.
+    await page.setViewportSize({ width: 1024, height: 550 });
     await button.click();
-    await page.waitForFunction(() => document.querySelector('#project-dialog').open);
-    assert.equal(await page.evaluate(() => document.querySelector('#google-context-settings').open), true);
+    await page.locator('#settings-panel').waitFor({ state: 'visible' });
+    assert.equal(await page.evaluate(() => document.querySelector('#project-dialog').open), false);
+    const calendarBox = await page.locator('#google-sources input[value="calendar"]').evaluate(node => {
+      const box = node.getBoundingClientRect();
+      return node.checkVisibility() && box.top >= document.querySelector('.topbar').getBoundingClientRect().bottom && box.bottom <= innerHeight;
+    });
+    assert.equal(calendarBox, true, 'the Calendar checkbox is on screen in Settings');
   },
   async calendar_off_with_plans(page, lang) {
     // One calendar block, then the plans without an event under their own heading.
@@ -376,6 +402,7 @@ const checks = {
         pill: document.getElementById('delivery-alert').getBoundingClientRect().width < text.getBoundingClientRect().width };
     });
     assert.deepEqual(wide, { cut: false, pill: true }, 'at 1024 the status is whole, the pill narrower');
+    await readableStatus(page, [701, 760, 860, 900, 960, 1024, 1120, 1200], 'problem with the delivery pill');
     // 400 px with the delivery pill: the status reads, its action and Menu stay in the window.
     await page.setViewportSize({ width: 400, height: 900 });
     await page.locator('#delivery-alert').waitFor();
@@ -396,6 +423,20 @@ const checks = {
     const [bar, heading] = await Promise.all(['.topbar', '#settings-close'].map(selector => page.locator(selector).boundingBox()));
     assert.ok(heading.y >= bar.y + bar.height, `settings below the bar: ${JSON.stringify({ bar, heading })}`);
     await page.locator('#settings-close').click();
+    // A setup blocker above the bar pushes it down: Settings still open below the bar, and follow it back up.
+    const settingsUnderBar = async () => {
+      await page.locator('#menu-button').click();
+      await page.locator('#settings-open').click();
+      await frames(page);
+      const [bar, close] = await Promise.all(['.topbar', '#settings-close'].map(selector => page.locator(selector).boundingBox()));
+      await page.locator('#settings-close').click();
+      return { below: close.y >= bar.y + bar.height, gap: Math.round(close.y - (bar.y + bar.height)) };
+    };
+    await page.evaluate(() => { const banner = document.getElementById('blocker-banner'); banner.textContent = 'Example blocker line'; banner.hidden = false; });
+    const blocked = await settingsUnderBar();
+    assert.equal(blocked.below, true, `settings below the bar under a blocker: ${JSON.stringify(blocked)}`);
+    await page.evaluate(() => { document.getElementById('blocker-banner').hidden = true; });
+    assert.deepEqual(await settingsUnderBar(), { below: true, gap: blocked.gap }, 'without the blocker the panel follows the bar up');
     // Back to 1440: the bar shrinks to the height of a fresh 1440 page, and overlays follow it.
     await page.setViewportSize({ width: 1440, height: 900 });
     await frames(page);
@@ -430,6 +471,7 @@ const checks = {
     await failing(page);
     assert.equal(await page.locator('#call-status-text').innerText(),
       lang === 'ru' ? 'Запись не идет: программа записи не запущена' : 'Not recording: the recorder is not running');
+    await readableStatus(page, [701, 760, 860, 900, 960, 1024, 1120], 'not recording');
     const fix = lang === 'ru' ? 'Открыть программу записи' : 'Open the recorder';
     assert.equal(await page.locator('#call-status-action').innerText(), fix);
     // The next row puts the fix first, then Start recording, then How to fix; one primary action.
@@ -581,6 +623,20 @@ const checks = {
     assert.equal(page.api.permissionReads[0], '');
   },
   async long(page, lang) {
+    // Past calls opened from Home take its place: in a short window their controls are on screen, and Home closes them.
+    await page.setViewportSize({ width: 1024, height: 550 });
+    await page.locator('#archive-button').click();
+    await page.locator('#archive-dialog').waitFor({ state: 'visible' });
+    const library = await page.evaluate(() => ({ home: document.getElementById('home').checkVisibility(),
+      controls: ['#archive-search', '#archive-close'].every(selector => {
+        const box = document.querySelector(selector).getBoundingClientRect();
+        return box.height > 0 && box.top >= 0 && box.bottom <= innerHeight;
+      }) }));
+    assert.deepEqual(library, { home: false, controls: true }, 'past calls replace Home at 1024x550');
+    await page.locator('#nav-home').click();
+    await page.locator('#archive-dialog').waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('#home .row.next').isVisible(), true);
+    await page.setViewportSize({ width: 1440, height: 900 });
     // Ten attendees: three by name, then one muted line with the rest, the whole list in its tooltip.
     const who = page.locator('#home .row.next .who');
     assert.equal(await who.locator('b').count(), 3);

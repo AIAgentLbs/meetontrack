@@ -150,13 +150,18 @@ function renderStatus(view) {
 }
 
 // A status cut short keeps its whole text in the tooltip. The bar grows to two rows in a narrow window or with
-// a long status; overlays open under it, wherever it ends. Checked on every render and every resize of the bar.
+// a long status, and a setup blocker above it pushes it down; overlays open under it, wherever it ends on screen.
+// Checked on every render, every resize of the bar or the blocker, and every scroll.
 function fitBar() {
   const text = $("call-status-text");
   text.title = text.scrollWidth > text.clientWidth + 1 || text.scrollHeight > text.clientHeight + 1 ? text.textContent : "";
-  document.documentElement.style.setProperty("--bar-h", `${document.querySelector(".topbar").offsetHeight}px`);
+  const bottom = Math.max(0, Math.ceil(document.querySelector(".topbar").getBoundingClientRect().bottom));
+  document.documentElement.style.setProperty("--bar-h", `${bottom}px`);
 }
-new ResizeObserver(fitBar).observe(document.querySelector(".topbar"));
+const barWatch = new ResizeObserver(fitBar);
+barWatch.observe(document.querySelector(".topbar"));
+barWatch.observe($("blocker-banner"));
+addEventListener("scroll", fitBar, { passive: true });
 
 // Keys. Enter opens the next call's memo, J its link, N skips it (Home only, through the row's own controls);
 // the record key starts recording when the status offers it. None fire in a field, on a button (Enter),
@@ -259,8 +264,12 @@ document.addEventListener("keydown", event => {
 document.addEventListener("click", event => {
   if (!menu.hidden && !menu.contains(event.target) && !$("menu-button").contains(event.target)) toggleMenu(false);
 });
-$("nav-home").addEventListener("click", () => openView("home"));
-$("menu-nav-home").addEventListener("click", () => openView("home"));
+const goHome = () => {
+  if (!$("archive-dialog").hidden) closeArchive();
+  openView("home");
+};
+$("nav-home").addEventListener("click", goHome);
+$("menu-nav-home").addEventListener("click", goHome);
 $("menu-past-calls").addEventListener("click", () => $("archive-button").click());
 $("menu-updates").addEventListener("click", () => $("updates-notice").click());
 $("getting-started-open").addEventListener("click", () => $("settings-panel").hidden || $("settings-close").click());
