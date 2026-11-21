@@ -44,7 +44,7 @@ final class AutoRecordController {
     private let loadSettings: () -> Config.AutoRecordSettings
     private let checkMic: (Config.AutoRecordSettings) -> MicActivityMonitor.Result
     private let now: () -> Date
-    private let skipped: (Date) -> Bool
+    private let skips: () -> [SkipRecording.Call]
     private let microphone: @MainActor () -> SetupPermissions.State
     private let notifyMicrophoneMissing: @MainActor () -> Void
     private var timer: Timer?
@@ -52,9 +52,10 @@ final class AutoRecordController {
     private var micIdleSince: Date?
     private var handledEventIDs = Set<String>()
     private var standingDownUntilCallEnds = false
-    /// A start was skipped while the mic was held; that call stays skipped,
-    /// even past its scheduled end, until the call app lets go of the mic.
-    private var skippingUntilCallEnds = false
+    /// The start of the stored call skipped while the mic was held. That call
+    /// stays skipped, even past its scheduled end, until the call app lets go
+    /// of the mic, or until Undo in MeetOnTrack removes it from the file.
+    private var skippedCallStart: Date?
     private var lastCalendarCheck = Date.distantPast
     private var currentEventEnd: Date?
 
@@ -78,7 +79,7 @@ final class AutoRecordController {
             MicActivityMonitor.check(callApps: $0.callApps, ignoring: $0.ignoreApps)
         },
         now: @escaping () -> Date = Date.init,
-        skipped: @escaping (Date) -> Bool = { SkipRecording.covers($0) },
+        skips: @escaping () -> [SkipRecording.Call] = { SkipRecording.calls() },
         microphone: @escaping @MainActor () -> SetupPermissions.State = SetupPermissions.microphone,
         notifyMicrophoneMissing: @escaping @MainActor () -> Void = Notifications.microphoneMissing
     ) {
@@ -87,7 +88,7 @@ final class AutoRecordController {
         self.loadSettings = loadSettings
         self.checkMic = checkMic
         self.now = now
-        self.skipped = skipped
+        self.skips = skips
         self.microphone = microphone
         self.notifyMicrophoneMissing = notifyMicrophoneMissing
     }
@@ -171,12 +172,14 @@ final class AutoRecordController {
 
         // The person chose in MeetOnTrack not to record this call. Manual
         // starts never come through here, so they still work.
-        if skippingUntilCallEnds, !mic.active,
-           (micIdleSince.map { now.timeIntervalSince($0) } ?? 0) > settings.stopDelay {
-            skippingUntilCallEnds = false
+        let calls = skips()
+        if let latched = skippedCallStart,
+           !calls.contains(where: { $0.start == latched })
+            || !mic.active && (micIdleSince.map { now.timeIntervalSince($0) } ?? 0) > settings.stopDelay {
+            skippedCallStart = nil
         }
-        if skippingUntilCallEnds || skipped(now) {
-            if mic.active { skippingUntilCallEnds = true }
+        if let start = skippedCallStart ?? calls.first(where: { $0.covers(now) })?.start {
+            if mic.active { skippedCallStart = start }
             lastDecision = localised("skipped: chosen in MeetOnTrack", "пропуск: выбрано в MeetOnTrack")
             return
         }

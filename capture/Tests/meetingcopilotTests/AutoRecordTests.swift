@@ -225,7 +225,7 @@ struct NoCallAudioStopTests {
                     active: true, names: ["Google Chrome"], families: ["com.google.Chrome"],
                     allHolders: ["Google Chrome"])
             },
-            now: { clock }, skipped: { _ in false }, notifyMicrophoneMissing: {})
+            now: { clock }, skips: { [] }, notifyMicrophoneMissing: {})
         controller.currentSession = { session }
         controller.stopRecording = { stops.append($0); session = nil }
         controller.startRecording = { _, _ in starts += 1 }
@@ -256,7 +256,7 @@ struct NoCallAudioStopTests {
                         active: true, names: ["zoom.us"], families: ["us.zoom.xos"], allHolders: ["zoom.us"])
                 },
                 now: { clock },
-                skipped: { _ in skip },
+                skips: { skip ? [SkipRecording.Call(start: clock, end: clock.addingTimeInterval(30 * 60))] : [] },
                 notifyMicrophoneMissing: {})
             controller.startRecording = { _, _ in starts += 1 }
 
@@ -288,7 +288,7 @@ struct NoCallAudioStopTests {
                         active: true, names: ["zoom.us"], families: ["us.zoom.xos"], allHolders: ["zoom.us"])
                 },
                 now: { clock },
-                skipped: { _ in false },
+                skips: { [] },
                 microphone: { state },
                 notifyMicrophoneMissing: { notices += 1 })
             controller.startRecording = { _, _ in starts += 1 }
@@ -321,7 +321,7 @@ struct NoCallAudioStopTests {
                     allHolders: active ? ["zoom.us"] : [])
             },
             now: { clock },
-            skipped: { $0 >= start.addingTimeInterval(-5 * 60) && $0 < end },
+            skips: { [SkipRecording.Call(start: start, end: end)] },
             notifyMicrophoneMissing: {})
         controller.startRecording = { _, _ in starts += 1 }
 
@@ -341,6 +341,42 @@ struct NoCallAudioStopTests {
             controller.tick()
             clock.addTimeInterval(5)
         }
+        #expect(starts == 1)
+    }
+
+    @Test("Undo in MeetOnTrack lifts an active skip; a new end for the same call keeps it")
+    @MainActor
+    func testUndoLiftsActiveSkip() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var clock = start.addingTimeInterval(-2 * 60)
+        var stored = [SkipRecording.Call(start: start, end: start.addingTimeInterval(30 * 60))]
+        var starts = 0
+        var settings = Config.AutoRecordSettings()
+        settings.startDelay = 10
+        let controller = AutoRecordController(
+            settings: settings, calendar: nil, loadSettings: { settings },
+            checkMic: { _ in
+                MicActivityMonitor.Result(
+                    active: true, names: ["zoom.us"], families: ["us.zoom.xos"], allHolders: ["zoom.us"])
+            },
+            now: { clock },
+            skips: { stored },
+            notifyMicrophoneMissing: {})
+        controller.startRecording = { _, _ in starts += 1 }
+
+        for _ in 0..<4 {
+            controller.tick()
+            clock.addTimeInterval(5)
+        }
+        #expect(starts == 0)
+        // The server ends the skip earlier (a call booked after it): the same call, still skipped.
+        stored = [SkipRecording.Call(start: start, end: clock)]
+        controller.tick()
+        clock.addTimeInterval(5)
+        #expect(starts == 0)
+        // Undo removes the call from the file: the call app still holds the mic, and recording starts.
+        stored = []
+        controller.tick()
         #expect(starts == 1)
     }
 
@@ -396,7 +432,7 @@ struct ManualStopAutoRecordTests {
                 )
             },
             now: { clock.date },
-            skipped: { _ in false },
+            skips: { [] },
             notifyMicrophoneMissing: {}
         )
         controller.startRecording = { _, _ in onStart() }

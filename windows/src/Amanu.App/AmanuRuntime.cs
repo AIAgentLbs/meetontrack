@@ -69,7 +69,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
 
         capture = new WindowsAudioCapture();
         coordinator = new RecordingCoordinator(sessions, new AutoRecordPolicy(Options(settings)), capture,
-            () => Settings.SystemAudio == "all", at => SkipRecording.Covers(at));
+            () => Settings.SystemAudio == "all", () => SkipRecording.Calls());
         activityMonitor = new CallActivityMonitor(Matcher(settings));
         httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
         httpClient.DefaultRequestHeaders.UserAgent.ParseAdd($"MeetOnTrack-Windows/{AppVersion}");

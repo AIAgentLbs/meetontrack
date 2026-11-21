@@ -11,17 +11,33 @@ enum SkipRecording {
     /// How long before its start a call already counts as that call.
     static let lead: TimeInterval = 5 * 60
 
-    /// True when a stored call has `start - 5 min <= now < end`. A missing,
-    /// unreadable or malformed file skips nothing.
-    static func covers(_ now: Date, at url: URL = path) -> Bool {
+    /// One stored call. Its start names it: the server may end a skip earlier
+    /// (a call booked right after it), never move its start.
+    struct Call: Equatable {
+        let start: Date
+        let end: Date
+
+        /// `start - 5 min <= now < end`.
+        func covers(_ now: Date) -> Bool {
+            start.addingTimeInterval(-SkipRecording.lead) <= now && now < end
+        }
+    }
+
+    /// The stored calls. A missing, unreadable or malformed file holds none.
+    static func calls(at url: URL = path) -> [Call] {
         guard let data = try? Data(contentsOf: url),
               let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let calls = document["calls"] as? [[String: Any]]
-        else { return false }
-        return calls.contains { call in
-            guard let start = instant(call["start"]), let end = instant(call["end"]) else { return false }
-            return start.addingTimeInterval(-lead) <= now && now < end
+        else { return [] }
+        return calls.compactMap { call in
+            guard let start = instant(call["start"]), let end = instant(call["end"]) else { return nil }
+            return Call(start: start, end: end)
         }
+    }
+
+    /// True when a stored call covers `now`.
+    static func covers(_ now: Date, at url: URL = path) -> Bool {
+        calls(at: url).contains { $0.covers(now) }
     }
 
     private static func instant(_ value: Any?) -> Date? {

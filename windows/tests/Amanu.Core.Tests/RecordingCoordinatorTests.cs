@@ -240,7 +240,8 @@ public sealed class RecordingCoordinatorTests
     public async Task SkippedCallDoesNotAutoStart(bool skip)
     {
         using var root = new TemporaryDirectory();
-        var coordinator = Coordinator(root.Path, new InspectableCapture(), _ => skip);
+        var coordinator = Coordinator(root.Path, new InspectableCapture(),
+            () => skip ? new[] { new SkipCall(Started, Started.AddMinutes(30)) } : Array.Empty<SkipCall>());
 
         await coordinator.ObserveAsync(Observation(Started, "Zoom.exe"));
         await coordinator.ObserveAsync(Observation(Started.AddSeconds(12), "Zoom.exe"));
@@ -254,8 +255,7 @@ public sealed class RecordingCoordinatorTests
     {
         using var root = new TemporaryDirectory();
         var end = Started.AddMinutes(30);
-        var coordinator = Coordinator(root.Path, new InspectableCapture(),
-            at => at >= Started.AddMinutes(-5) && at < end);
+        var coordinator = Coordinator(root.Path, new InspectableCapture(), () => [new SkipCall(Started, end)]);
 
         var at = Started.AddMinutes(-2);
         for (; at <= end.AddMinutes(10); at = at.AddSeconds(5))
@@ -273,15 +273,38 @@ public sealed class RecordingCoordinatorTests
     public async Task A_skipped_call_still_records_by_hand()
     {
         using var root = new TemporaryDirectory();
-        var coordinator = Coordinator(root.Path, new InspectableCapture(), _ => true);
+        var coordinator = Coordinator(root.Path, new InspectableCapture(), () => [new SkipCall(Started, Started.AddMinutes(30))]);
 
         await coordinator.StartManualAsync(Started);
 
         Assert.True(coordinator.State.IsRecording);
     }
 
+    [Fact]
+    public async Task Undo_lifts_an_active_skip_and_a_new_end_keeps_it()
+    {
+        using var root = new TemporaryDirectory();
+        IReadOnlyList<SkipCall> stored = [new SkipCall(Started, Started.AddMinutes(30))];
+        var coordinator = Coordinator(root.Path, new InspectableCapture(), () => stored);
+
+        var at = Started.AddMinutes(-2);
+        for (; at <= Started.AddMinutes(-1); at = at.AddSeconds(5))
+            await coordinator.ObserveAsync(Observation(at, "Zoom.exe"));
+        Assert.False(coordinator.State.IsRecording);
+
+        // The server ends the skip earlier (a call booked after it): the same call, still skipped.
+        stored = [new SkipCall(Started, at)];
+        await coordinator.ObserveAsync(Observation(at, "Zoom.exe"));
+        Assert.False(coordinator.State.IsRecording);
+
+        // Undo removes the call from the file: the call app still holds the mic, and recording starts.
+        stored = [];
+        await coordinator.ObserveAsync(Observation(at.AddSeconds(5), "Zoom.exe"));
+        Assert.True(coordinator.State.IsRecording);
+    }
+
     private static RecordingCoordinator Coordinator(
-        string root, InspectableCapture capture, Func<DateTimeOffset, bool>? skipped = null)
+        string root, InspectableCapture capture, Func<IReadOnlyList<SkipCall>>? skips = null)
     {
         var options = new AutoRecordOptions(
             Enabled: true,
@@ -291,7 +314,7 @@ public sealed class RecordingCoordinatorTests
             SilenceStop: TimeSpan.FromMinutes(10),
             MaximumDuration: TimeSpan.FromHours(5));
         return new RecordingCoordinator(
-            new SessionStore(root, processId: 99), new AutoRecordPolicy(options), capture, skipped: skipped);
+            new SessionStore(root, processId: 99), new AutoRecordPolicy(options), capture, skips: skips);
     }
 
     private static AudioObservation Observation(DateTimeOffset at, string process) => new(
