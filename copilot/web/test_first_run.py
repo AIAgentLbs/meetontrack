@@ -91,7 +91,7 @@ class CheckAITests(unittest.TestCase):
             self.assertIn("roots", next(o for p, o in options.items() if p.startswith("Read the file")))
             self.assertTrue(next(o for p, o in options.items() if p.startswith("Which colour")).get("image"))
             self.assertEqual(set(result["purposes"]), {"live_analysis", "live_translation", "frame_relevance",
-                                                       "summary_rewrite", "summary", "speaker_names", "fact_check"})
+                                                       "summary_rewrite", "summary", "speaker_names", "fact_check", "memo"})
             for purpose in ("summary_rewrite", "live_translation", "summary", "speaker_names", "fact_check"):
                 self.assertEqual(result["purposes"][purpose]["state"], "ready", purpose)
             self.assertEqual(result["purposes"]["live_analysis"]["state"], "error")  # the fake cannot read files

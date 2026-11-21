@@ -39,7 +39,7 @@ from private_dirs import private_dir
 
 # The AI tasks. summary and speaker_names run in the Swift recorder; Python lists and checks them.
 PURPOSES = ("live_analysis", "live_translation", "frame_relevance", "summary_rewrite", "summary", "speaker_names",
-            "fact_check")
+            "fact_check", "memo")
 NEEDS_IMAGE = {"frame_relevance"}
 RECORDER_TASKS = {"summary", "speaker_names"}  # run by the Swift recorder (Summary/LLMBackend.swift)
 CHOICE_KEYS = ("provider", "model", "effort", "speed")
