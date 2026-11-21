@@ -9,7 +9,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from calendar_meetings import CalendarMeetings
+from calendar_meetings import CalendarMeetings, CalendarUnavailable
 from repo_preparations import RepositoryPreparations
 from private_dirs import private_dir
 
@@ -210,7 +210,11 @@ class CallPlans:
         except (KeyError, TypeError, ValueError):
             return []
         matches = []
-        for event in self.calendar.for_day(started.astimezone().date()):
+        try:
+            events = self.calendar.for_day(started.astimezone().date())
+        except CalendarUnavailable:
+            return []  # the live call keeps its plan by other means; Home reports the failure
+        for event in events:
             try:
                 event_start = datetime.fromisoformat(event["start"])
                 event_end = datetime.fromisoformat(event["end"])

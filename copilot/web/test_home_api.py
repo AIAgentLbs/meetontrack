@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 import server
-from calendar_meetings import CalendarMeetings
+from calendar_meetings import CalendarMeetings, CalendarUnavailable
 from skip_recording import SkipRecording
 
 NOW = datetime(2026, 11, 21, 10, 0, tzinfo=timezone.utc)
@@ -18,6 +18,14 @@ NOW = datetime(2026, 11, 21, 10, 0, tzinfo=timezone.utc)
 def meeting(event_id='', title='Pilot review', start=NOW + timedelta(hours=1), minutes=30):
     return {'event_id': event_id, 'title': title, 'start': start.isoformat(),
             'end': (start + timedelta(minutes=minutes)).isoformat()}
+
+
+ANNA = {'email': 'anna@example.com', 'name': 'Anna Petrova', 'self': False}
+
+
+def call(event_id, start, minutes=30, **extra):
+    """An agenda meeting with someone else in it: a call, not a solo block."""
+    return {**meeting(event_id, start=start, minutes=minutes), 'attendees': [ANNA], 'link': '', **extra}
 
 
 def serve(test):
@@ -96,11 +104,47 @@ class SkipRecordingTests(unittest.TestCase):
         self.assertTrue(self.skips.skipped(first))
         self.assertFalse(self.skips.skipped(second))
 
-    def test_skip_prunes_ended_calls(self):
+    def test_skip_prunes_calls_ended_a_day_ago(self):
+        # An ended call stays a day: a recorder holding its skip through an overrun keeps it until the mic is let go.
         early = meeting('evt-early', start=NOW, minutes=30)
         self.skips.set(early, True, NOW)
         self.skips.set(meeting('evt-late'), True, NOW + timedelta(hours=1))
-        self.assertEqual([call['key'] for call in json.loads(self.path.read_text())['calls']], ['evt-late'])
+        self.assertEqual([call['key'] for call in json.loads(self.path.read_text())['calls']], ['evt-early', 'evt-late'])
+        self.skips.set(meeting('evt-next', start=NOW + timedelta(days=3)), True, NOW + timedelta(days=2))
+        self.assertEqual([call['key'] for call in json.loads(self.path.read_text())['calls']], ['evt-next'])
+
+    def stored(self):
+        return {item['key']: item['end'] for item in json.loads(self.path.read_text())['calls']}
+
+    def test_skip_ends_five_minutes_before_the_next_call(self):
+        # Skip 10:00-10:30; the next call at 10:20 is joined early, so the skip ends at 10:15.
+        skipped, following = call('evt-a', NOW), call('evt-b', NOW + timedelta(minutes=20))
+        self.skips.set(skipped, True, NOW - timedelta(hours=1), meetings=[skipped, following])
+        self.assertEqual(self.stored(), {'evt-a': (NOW + timedelta(minutes=15)).isoformat()})
+        # A call that starts inside the skip without its own calendar event stays skipped: no clip without an event.
+        self.skips.set(skipped, True, NOW - timedelta(hours=1), meetings=[skipped])
+        self.assertEqual(self.stored(), {'evt-a': skipped['end']})
+
+    def test_skip_is_not_clipped_by_a_skipped_call_a_solo_block_or_a_call_too_close(self):
+        skipped = call('evt-a', NOW)
+        later = call('evt-later', NOW + timedelta(minutes=40))
+        solo = {**meeting('evt-solo', start=NOW + timedelta(minutes=20)), 'attendees': [{'email': 'me@example.com', 'self': True}], 'link': ''}
+        close = call('evt-close', NOW + timedelta(minutes=3))
+        both = call('evt-b', NOW + timedelta(minutes=20))
+        self.skips.set(skipped, True, NOW - timedelta(hours=1), meetings=[skipped, later, solo, close])
+        self.assertEqual(self.stored(), {'evt-a': skipped['end']})
+        self.skips.set(both, True, NOW - timedelta(hours=1), meetings=[skipped, both])
+        self.assertEqual(self.stored(), {'evt-a': skipped['end'], 'evt-b': both['end']})
+
+    def test_clip_applies_to_a_call_booked_after_the_skip(self):
+        skipped = call('evt-a', NOW)
+        self.skips.set(skipped, True, NOW - timedelta(hours=1), meetings=[skipped])
+        before = self.path.stat().st_mtime_ns
+        self.skips.clip([skipped])
+        self.assertEqual(self.path.stat().st_mtime_ns, before, 'nothing to clip writes nothing')
+        self.skips.clip([skipped, call('evt-b', NOW + timedelta(minutes=20))])
+        self.assertEqual(self.stored(), {'evt-a': (NOW + timedelta(minutes=15)).isoformat()})
+        self.assertTrue(self.skips.skipped(skipped))
 
     def test_skip_rejects_bad_times(self):
         for call in ({**meeting('evt-1'), 'start': '2026-11-21T11:00:00'},
@@ -132,8 +176,21 @@ class FakePlans:
 
 
 class FakeSkips:
+    def __init__(self):
+        self.clipped = None
+
     def skipped(self, call):
         return call['event_id'] == 'evt-2'
+
+    def clip(self, meetings):
+        self.clipped = meetings
+
+
+class FailingPlans(FakePlans):
+    calendar = CalendarMeetings(executable='/bin/gws')
+
+    def agenda(self, now=None):
+        raise CalendarUnavailable()
 
 
 class FakeProbe:
@@ -156,6 +213,19 @@ class AgendaRouteTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual((body['ok'], body['calendar_state'], body['meetings'][1]['skip_recording']),
                          (True, 'not_connected', True))
+
+    def test_agenda_payload_clips_stored_skips_against_its_meetings(self):
+        skips = FakeSkips()
+        with mock.patch.object(server, 'PLANS', FakePlans()), mock.patch.object(server, 'SKIPS', skips), \
+                mock.patch.object(server, 'PERMISSIONS', FakeProbe(True)):
+            server.agenda_payload(NOW)
+        self.assertEqual([item['event_id'] for item in skips.clipped], ['evt-1', 'evt-2'])
+
+    def test_a_failed_calendar_read_is_not_an_empty_day(self):
+        with mock.patch.object(server, 'PLANS', FailingPlans()), mock.patch.object(server, 'SKIPS', FakeSkips()), \
+                mock.patch.object(server, 'PERMISSIONS', FakeProbe(True)):
+            payload = server.agenda_payload(NOW)
+        self.assertEqual((payload['calendar_state'], payload['meetings'], payload['unscheduled_plans']), ('failed', [], []))
 
     def test_agenda_payload_without_calendar_is_tool_missing(self):
         plans = FakePlans()
@@ -195,6 +265,65 @@ class AgendaRouteTests(unittest.TestCase):
                     self.assertEqual(status, 400)
                     self.assertFalse(body['ok'])
             self.assertTrue(skips.skipped(call))
+
+    def skip_route(self, payload, recording, plans=None):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        skips = SkipRecording(Path(directory.name) / 'skip-recording.json')
+        port = serve(self)
+        with mock.patch.object(server, 'SKIPS', skips), mock.patch.object(server, 'PERMISSIONS', FakeProbe(True)), \
+                mock.patch.object(server, 'capture_recording', return_value=recording), \
+                mock.patch.object(server, 'PLANS', plans or FakePlans()):
+            return request(port, 'POST', '/api/agenda/skip-recording', payload), skips
+
+    def test_skip_refused_for_the_call_being_recorded(self):
+        now = datetime.now(timezone.utc)
+        running = meeting('evt-now', start=now - timedelta(minutes=10))
+        (answer, skips) = self.skip_route({**running, 'skip': True}, recording=True)
+        self.assertEqual(answer, (409, {'ok': False, 'error': 'already_recording'}))
+        self.assertFalse(skips.skipped(running))
+        # A later call, an undo, or no recording: accepted.
+        for payload, recording in (({**meeting('evt-later', start=now + timedelta(hours=2)), 'skip': True}, True),
+                                   ({**running, 'skip': False}, True), ({**running, 'skip': True}, False)):
+            with self.subTest(payload=payload, recording=recording):
+                self.assertEqual(self.skip_route(payload, recording)[0], (200, {'ok': True}))
+
+    def test_skip_route_clips_against_the_agenda(self):
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        skipped, following = call('evt-a', now + timedelta(hours=1)), call('evt-b', now + timedelta(hours=1, minutes=20))
+
+        class Plans(FakePlans):
+            def agenda(self, now=None):
+                return {'calendar': True, 'meetings': [skipped, following], 'unscheduled_plans': []}
+
+        (answer, skips) = self.skip_route({**meeting('evt-a', start=now + timedelta(hours=1)), 'skip': True}, False, Plans())
+        self.assertEqual(answer, (200, {'ok': True}))
+        self.assertEqual([item['end'] for item in json.loads(skips.path.read_text())['calls']],
+                         [(now + timedelta(hours=1, minutes=15)).isoformat()])
+        # The calendar cannot be read: the skip is stored as asked.
+        (answer, skips) = self.skip_route({**meeting('evt-a', start=now + timedelta(hours=1)), 'skip': True}, False, FailingPlans())
+        self.assertEqual(answer, (200, {'ok': True}))
+        self.assertTrue(skips.skipped(skipped))
+
+
+class CalendarFailureTests(unittest.TestCase):
+    def test_a_failed_read_raises_and_is_not_kept_as_an_empty_day(self):
+        calendar = CalendarMeetings(executable='/bin/gws')
+        failed = mock.Mock(returncode=1, stdout='')
+        empty = mock.Mock(returncode=0, stdout=json.dumps({'items': []}))
+        clock = [1000.0]
+        with mock.patch('calendar_meetings.subprocess.run', return_value=failed), \
+                mock.patch('calendar_meetings.time.monotonic', side_effect=lambda: clock[0]):
+            with self.assertRaises(CalendarUnavailable):
+                calendar.for_day(NOW.date())
+            for broken in (OSError('gws gone'), ValueError('not json')):
+                with self.subTest(broken=broken), mock.patch('calendar_meetings.subprocess.run', side_effect=broken), \
+                        self.assertRaises(CalendarUnavailable):
+                    clock[0] += 60
+                    calendar.for_day(NOW.date())
+            clock[0] += 60  # a minute later the calendar is read again, not served from a cache
+            with mock.patch('calendar_meetings.subprocess.run', return_value=empty):
+                self.assertEqual(calendar.for_day(NOW.date()), [])
 
 
 if __name__ == '__main__':

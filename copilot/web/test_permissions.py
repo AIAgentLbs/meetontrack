@@ -1,6 +1,7 @@
 import http.client
 import json
 import subprocess
+import tempfile
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
@@ -122,6 +123,10 @@ class FakeProbe:
 
 class RouteTests(unittest.TestCase):
     def setUp(self):
+        # Never the real settings file: no config means the recorders' defaults.
+        patcher = mock.patch.object(server, 'CAPTURE_CONFIG_FILE', Path('/nonexistent/meeting-copilot/config.json'))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.httpd = ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.addCleanup(self.httpd.server_close)
@@ -142,7 +147,7 @@ class RouteTests(unittest.TestCase):
             status, payload = self.request('GET', '/api/permissions')
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(payload), {'ok': True, 'microphone': 'denied', 'call_audio': 'granted',
-                                               'recorder': 'stopped'})
+                                               'recorder': 'stopped', 'auto_record': True})
 
         with mock.patch.object(server, 'open_settings') as opener:
             status, _ = self.request('POST', '/api/permissions/open', {'which': 'microphone'},
@@ -193,6 +198,24 @@ class RouteTests(unittest.TestCase):
                     mock.patch.object(server, 'recorder_running', return_value=value):
                 self.assertEqual(json.loads(self.request('GET', '/api/permissions')[1])['recorder'], expected)
 
+
+    def test_auto_record_from_the_shared_config(self):
+        # The recorders' own keys and defaults: on, starting from the mic; off when it is off or has nothing to start from.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        config = Path(directory.name) / 'config.json'
+        for text, expected in ((None, True), ('not json', True), ('{"auto_record": {"enabled": false}}', False),
+                               ('{"auto_record": {"mic_activity": false}}', False),
+                               ('{"auto_record": {"mic_activity": false, "calendar": true}}', True),
+                               ('{"auto_record": {"enabled": true}, "live_transcription": {}}', True)):
+            if text is None:
+                config.unlink(missing_ok=True)
+            else:
+                config.write_text(text)
+            with self.subTest(text=text), mock.patch.object(server, 'PERMISSIONS', FakeProbe()), \
+                    mock.patch.object(server, 'recorder_running', return_value=True), \
+                    mock.patch.object(server, 'CAPTURE_CONFIG_FILE', config):
+                self.assertIs(json.loads(self.request('GET', '/api/permissions')[1])['auto_record'], expected)
 
 if __name__ == '__main__':
     unittest.main()

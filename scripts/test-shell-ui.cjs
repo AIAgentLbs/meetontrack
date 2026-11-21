@@ -77,6 +77,12 @@ const errors = [];
           transcript: { meeting_id: 'm3', status: 'recording', live: true } }, now),
         manualAfter3h: viewFor(finished(ago(180)), manualAfter(180), now),
         manualAfter10m: viewFor(finished(ago(180)), manualAfter(10), now),
+        // After counts from when the recording ended, not from the last transcript line: a call with live
+        // transcription off has no latest_at, and a quiet ending leaves latest_at early.
+        endedNoLatest: viewFor({ transcript: { meeting_id: 'm1', status: 'finished', ended_at: ago(10) } }, null, now),
+        endedAfterQuietEnd: viewFor({ transcript: { meeting_id: 'm1', status: 'finished', latest_at: ago(150), ended_at: ago(10) } }, null, now),
+        finishedExport: viewFor({ transcript: { meeting_id: 'm1', status: 'finished', updated_at: ago(10) } }, null, now),
+        endedLongAgo: viewFor({ transcript: { meeting_id: 'm1', status: 'finished', latest_at: ago(10), ended_at: ago(130) } }, null, now),
       };
     });
     assert.deepEqual(views, {
@@ -84,6 +90,7 @@ const errors = [];
       manualAfterKeyChanged: 'call', exactly2h: 'after', justOver2h: 'home', finishedNoLatest: 'home',
       recordingNotLive: 'call', stalled: 'call', paused: 'call', crashed: 'home', keyHolds: true,
       manualAfter3h: 'home', manualAfter10m: 'after',
+      endedNoLatest: 'after', endedAfterQuietEnd: 'after', finishedExport: 'after', endedLongAgo: 'home',
     });
 
     // One call status, first rule that matches: live, a call running without a recording, a missing
@@ -91,7 +98,11 @@ const errors = [];
     const statuses = await page.evaluate(() => {
       const now = Date.parse('2026-11-21T12:00:00Z');
       const at = minutes => new Date(now + minutes * 60000).toISOString();
-      const call = (start, minutes = 30, extra = {}) => ({ event_id: `e${start}`, title: 'Pilot review', start: at(start), end: at(start + minutes), ...extra });
+      const me = { email: 'me@example.com', self: true };
+      const call = (start, minutes = 30, extra = {}) => ({ event_id: `e${start}`, title: 'Pilot review', start: at(start), end: at(start + minutes),
+        attendees: [me, { name: 'Anna Petrova', email: 'anna@example.com', self: false }], link: '', ...extra });
+      // A calendar block with nobody else and no call link (focus time, lunch) is not a call.
+      const solo = (start, extra = {}) => call(start, 30, { attendees: [me], ...extra });
       const agenda = (...meetings) => ({ meetings });
       const perms = (microphone = 'granted', call_audio = 'granted', recorder = 'running') => ({ microphone, call_audio, recorder });
       const live = { transcript: { meeting_id: 'm2', status: 'recording', live: true } };
@@ -117,6 +128,13 @@ const errors = [];
         unknownEverywhere: [{}, agenda(call(40)), perms('unknown', 'unknown', 'unknown')],
         notLoaded: [{}, null, null],
         waiting: [{}, agenda(call(40)), perms()],
+        soloRunning: [{}, agenda(solo(-3)), perms()],
+        soloThenCall: [{}, agenda(solo(-3), call(40)), perms('denied')],
+        linkOnlyRunning: [{}, agenda(solo(-3, { link: 'https://example.com/call/1' })), perms()],
+        // Auto-record off, or the recorder known stopped before the call: no promise that it starts by itself.
+        autoOff: [{}, agenda(call(40)), { ...perms(), auto_record: false }],
+        autoOffNoCall: [{}, agenda(), { ...perms(), auto_record: false }],
+        recorderStoppedBefore: [{}, agenda(call(40)), perms('granted', 'granted', 'stopped')],
         captureRecording: [captured('recording'), agenda(), perms()],
         captureVerifying: [captured('verifying'), agenda(), perms()],
         capturePaused: [captured('paused'), agenda(), perms()],
@@ -125,6 +143,7 @@ const errors = [];
         transcriptPaused: [{ transcript: { meeting_id: 'm4', status: 'paused', live: false, updated_at: at(-1) } }, agenda(), perms()],
       };
       const result = Object.fromEntries(Object.entries(cases).map(([name, args]) => [name, short(callStatus(...args, now))]));
+      result.homeNext = nextMeeting(agenda(solo(10), call(40)), now)?.event_id;
       result.time = homeClock(at(40));
       result.later = homeClock(at(60));
       result.started = homeClock(at(-1));
@@ -150,13 +169,20 @@ const errors = [];
       startedOneMinuteAgo: ['waiting', `Ждет звонка в ${started}, запись включится сама`, 'start'],
       runningSkipped: ['waiting', 'Ждет звонка, запись включится сама', 'start'],
       skippedThenNext: ['mic_missing', `Нет доступа к микрофону: запись в ${later} не включится`, 'open_mic!'],
-      ended: ['waiting', 'Ждет звонка, запись включится сама', null],
+      ended: ['waiting', 'Ждет звонка', null],
       micMissing: ['mic_missing', `Нет доступа к микрофону: запись в ${time} не включится`, 'open_mic!'],
       callAudioMissing: ['mic_missing', `Нет доступа к звуку звонка: запись в ${time} будет без собеседника`, 'open_call_audio!'],
-      micDeniedNoCall: ['waiting', 'Ждет звонка, запись включится сама', null],
+      micDeniedNoCall: ['waiting', 'Ждет звонка', null],
       unknownEverywhere: ['waiting', `Ждет звонка в ${time}, запись включится сама`, 'start'],
       notLoaded: ['waiting', 'Ждет звонка, запись включится сама', 'start'],
       waiting: ['waiting', `Ждет звонка в ${time}, запись включится сама`, 'start'],
+      soloRunning: ['waiting', 'Ждет звонка, запись включится сама', 'start'],
+      soloThenCall: ['mic_missing', `Нет доступа к микрофону: запись в ${time} не включится`, 'open_mic!'],
+      linkOnlyRunning: ['not_recording', 'Запись не идет: звонок не замечен', 'start!'],
+      autoOff: ['waiting', `Ждет звонка в ${time}`, 'start'],
+      autoOffNoCall: ['waiting', 'Ждет звонка', 'start'],
+      recorderStoppedBefore: ['waiting', `Ждет звонка в ${time}`, 'start'],
+      homeNext: 'e40',
       captureRecording: ['recording', 'Запись', null],
       captureVerifying: ['recording', 'Запись', null],
       capturePaused: ['not_recording', 'Запись не идет: запись на паузе', null],
@@ -166,6 +192,8 @@ const errors = [];
       disconnected: ['not_recording', 'Запись не идет: нет свежих данных от программы записи', null],
       disconnectedLive: ['not_recording', 'Запись не идет: нет свежих данных от программы записи', null],
     });
+    assert.deepEqual(await page.evaluate(() => ['status.waiting_manual', 'status.waiting_at_manual'].map(key => translations.en[key])),
+      ['Waiting for a call', 'Waiting for the {time} call']);
     // The same reasons exist in English.
     assert.deepEqual(await page.evaluate(() => ['paused', 'stalled', 'stale'].map(reason => translations.en[`status.reason.${reason}`])),
       ['recording is paused', 'audio stopped being saved', 'no fresh data from the recorder']);

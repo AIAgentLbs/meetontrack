@@ -40,7 +40,8 @@ function viewFor(state, manual, now = Date.now()) {
   if (manual && manual.key === callKey(state, now) && now - manual.at < AFTER_WINDOW_MS) return manual.view;
   if (isLive(state, now)) return "call";
   const transcript = state?.transcript || {};
-  const ended = Date.parse(transcript.latest_at || "");
+  // When the recording ended, as the server counts it (meeting_boundaries.py): the stop, the finished export, the last line.
+  const ended = Date.parse(transcript.ended_at || transcript.updated_at || transcript.latest_at || "");
   if (transcript.status === "finished" && transcript.meeting_id && now - ended <= AFTER_WINDOW_MS) return "after";
   return "home";
 }
@@ -52,7 +53,7 @@ function openView(view) {
   renderShell();
 }
 
-// One call status for the bar, first rule that matches. `next` is the first meeting not over and not skipped.
+// One call status for the bar, first rule that matches. `next` is the first call not over and not skipped.
 // A permission the platform cannot read ("unknown") shows nothing; Start recording never shows without a microphone.
 function callStatus(state, agenda, permissions, now = Date.now()) {
   const action = (id, primary = true) => ({ id, label: t(`action.${id}`), primary });
@@ -61,7 +62,7 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
     return reason ? { kind: "not_recording", text: t("status.not_recording", { reason: t(`status.reason.${reason}`) }), action: null }
       : { kind: "recording", text: t("status.recording"), action: null };
   }
-  const next = (agenda?.meetings || []).find(meeting => Date.parse(meeting.end) > now && !meeting.skip_recording);
+  const next = (agenda?.meetings || []).find(meeting => Date.parse(meeting.end) > now && !meeting.skip_recording && homeIsCall(meeting));
   const time = next && homeClock(next.start);
   const mic = permissions?.microphone === "denied";
   if (next && Date.parse(next.start) + 120000 <= now) {
@@ -73,7 +74,10 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
   if (next && permissions?.call_audio === "denied") {
     return { kind: "mic_missing", text: t("status.call_audio_missing", { time }), action: action("open_call_audio") };
   }
-  return { kind: "waiting", text: next ? t("status.waiting_at", { time }) : t("status.waiting"), action: mic ? null : action("start", false) };
+  // Recording starts by itself only with auto-record on and the recorder not known to be stopped.
+  const manual = permissions?.auto_record === false || permissions?.recorder === "stopped" ? "_manual" : "";
+  return { kind: "waiting", text: next ? t(`status.waiting_at${manual}`, { time }) : t(`status.waiting${manual}`),
+    action: mic ? null : action("start", false) };
 }
 
 const currentStatus = () => callStatus(window.appState, window.agendaData, window.permissionsData);

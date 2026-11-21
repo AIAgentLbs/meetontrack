@@ -157,6 +157,25 @@ const checks = {
     assert.deepEqual(Object.keys(post.body).sort(), ['end', 'event_id', 'skip', 'start', 'title']);
     assert.equal(post.body.skip, true);
     assert.equal(post.body.event_id, 'evt-ready');
+    // The call is already being recorded (the server knows it before Home does): the row says how to stop it.
+    page.api.responses['/api/agenda/skip-recording'] = { status: 409, json: { ok: false, error: 'already_recording' } };
+    await row.locator('button.quiet').click();
+    await page.waitForFunction(() => /уже идет|already being recorded/.test(document.querySelector('#home .row.next .row-error')?.textContent));
+    assert.equal(await row.locator('.row-error').innerText(), lang === 'ru'
+      ? 'Запись этого звонка уже идет. Остановить ее можно в программе записи.'
+      : 'This call is already being recorded. You can stop it in the recorder.');
+    delete page.api.responses['/api/agenda/skip-recording'];
+    // During a call Home does not offer Do not record for the call being recorded: a skip cannot stop it.
+    const next = page.api.fixture.agenda.meetings[0];
+    Object.assign(next, { start: new Date(Date.now() - 2 * 60000).toISOString(), end: new Date(Date.now() + 28 * 60000).toISOString() });
+    page.api.fixture.state = { ...page.api.fixture.state,
+      transcript: { meeting_id: 'm1', meeting: 'Pilot review', status: 'recording', live: true, segments: [], speakers: [] },
+      recording_health: { checked_at: Date.now() / 1000 + 60, capture: { state: 'recording', audio_recording: true } } };
+    await page.waitForFunction(() => document.body.dataset.view === 'call');
+    await page.locator('#nav-home').click();
+    await page.evaluate(() => refreshAgenda());
+    await page.waitForFunction(() => document.body.dataset.view === 'home' && /идет сейчас|on now/.test(document.querySelector('#home .row.next .soon')?.textContent));
+    assert.equal(await row.locator('button.quiet').count(), 0, 'no Do not record for the call being recorded');
   },
   async preparing(page, lang) {
     const status = page.locator('#home .row.next [role="status"]');
@@ -303,6 +322,12 @@ const checks = {
     await Promise.all([page.waitForResponse(response => response.url().endsWith('/api/agenda')), retry.click()]);
     await page.locator('#home .row.next').waitFor();
     assert.equal(await page.locator('#home .empty').count(), 0);
+    // The calendar could not be read: not "no calls", the same block with Retry.
+    page.api.fixture.agenda = { ...states.no_meetings.agenda, calendar_state: 'failed' };
+    await page.evaluate(() => refreshAgenda());
+    await page.locator('#home .empty').waitFor();
+    await emptyState(page, lang, [{ ru: 'Не удалось загрузить звонки', en: 'Could not load your calls' },
+      { ru: 'Попробуем снова сами, или нажмите Повторить.', en: 'We will keep trying, or press Retry.' }], 1);
   },
   async mic_missing(page, lang) {
     await failing(page);
@@ -596,7 +621,9 @@ const checks = {
     await pending.locator('#home .row').first().waitFor();
     await pending.context().close();
 
-    for (const fixture of Object.keys(states)) {
+    // HOME_UI_ONLY=ready,load_failed runs only those fixtures (while working on them).
+    const only = process.env.HOME_UI_ONLY?.split(',');
+    for (const fixture of Object.keys(states).filter(name => !only || only.includes(name))) {
       for (const lang of ['ru', 'en']) {
         const page = await open(browser, { fixture, lang });
         await page.waitForFunction(lang => document.documentElement.lang === lang, lang);

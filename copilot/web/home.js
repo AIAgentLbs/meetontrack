@@ -38,8 +38,11 @@ function memoFromPlans(meeting) {
     source_count: (plan.links || []).length, plan_id: plan.id, written_by: "file" };
 }
 
+// Someone else is invited, or there is a call link: a solo block (focus time, lunch) is not a call (skip_recording.is_call).
+const homeIsCall = meeting => (meeting.attendees || []).some(person => !person.self) || Boolean(meeting.link);
+
 function nextMeeting(agenda, now = Date.now()) {
-  return (agenda?.meetings || []).find(meeting => Date.parse(meeting.end) > now) || null;
+  return (agenda?.meetings || []).find(meeting => Date.parse(meeting.end) > now && homeIsCall(meeting)) || null;
 }
 
 function homeTimeLeft(meeting, now) {
@@ -78,7 +81,8 @@ async function homeAction(button, key, path, body) {
     await post(path, body);
     homeErrors.delete(key);
   } catch (error) {
-    homeErrors.set(key, error.status === 409 && path === "/api/agenda/skip-recording" ? "home.cannot_skip" : "home.action_failed");
+    homeErrors.set(key, error.status !== 409 || path !== "/api/agenda/skip-recording" ? "home.action_failed"
+      : error.message === "already_recording" ? "home.already_recording" : "home.cannot_skip");
   }
   try {
     renderHome(window.agendaData, window.appState);
@@ -160,7 +164,7 @@ function homeMemo(plan, key, id, primary) {
   return { panel, button, show: () => { toggle(true); links.querySelector("a")?.focus(); } };
 }
 
-function homeRow(meeting, { next, now, supported, id, status }) {
+function homeRow(meeting, { next, now, supported, id, status, recording }) {
   const key = homeKey(meeting);
   const memo = meeting.memo || memoFromPlans(meeting);
   const plan = (meeting.plans || []).find(item => item.id === memo.plan_id);
@@ -241,7 +245,8 @@ function homeRow(meeting, { next, now, supported, id, status }) {
   if (meeting.skip_recording) {
     actions.append(textNode("span", "status-text", t("home.skipped")));
     if (supported) actions.append(homeButton(t("home.unskip"), "ql", `${key}|skip`, skip(false)));
-  } else if (next && supported && meeting.start) {
+  } else if (next && supported && meeting.start && !(recording && Date.parse(meeting.start) - 5 * 60000 <= now)) {
+    // Not for the call being recorded: the recorders read the skip only before they start (the server says 409).
     actions.append(homeButton(t("home.skip"), "quiet", `${key}|skip`, skip(true)));
   }
   if (actions.childElementCount) main.append(actions);
@@ -278,10 +283,12 @@ function renderHome(agenda, state, now = Date.now()) {
   const meetings = (agenda?.meetings || []).filter(meeting => Date.parse(meeting.end) > now);
   const unscheduled = agenda?.unscheduled_plans || [];
   const next = nextMeeting(agenda, now);
-  const failed = !agenda && Boolean(window.agendaFailed);
+  // Not loaded at all, or the calendar could not be read: never shown as an empty day.
+  const failed = !agenda && Boolean(window.agendaFailed) || agenda?.calendar_state === "failed";
   const status = callStatus(state, agenda, window.permissionsData, now);
+  const recording = isLive(state, now);
   const signature = JSON.stringify([uiLanguage, new Date(now).toDateString(), Boolean(agenda), failed, agenda?.calendar_state,
-    meetings, unscheduled, agenda?.skip_recording_supported, [...homeErrors], status.kind, status.action?.id]);
+    meetings, unscheduled, agenda?.skip_recording_supported, [...homeErrors], status.kind, status.action?.id, recording]);
   if (signature === homeSignature) {
     // Same rows: only the time left changes, in place, so focus, scroll and an open memo stay.
     const soon = home.querySelector(".soon");
@@ -309,7 +316,7 @@ function renderHome(agenda, state, now = Date.now()) {
   for (const meeting of meetings) {
     const title = homeDayTitle(meeting.start, now);
     if (title !== day) column.append(textNode("h2", "day", (day = title)));
-    column.append(homeRow(meeting, { next: meeting === next, now, supported: agenda.skip_recording_supported, id: `home-memo-${index++}`, status }));
+    column.append(homeRow(meeting, { next: meeting === next, now, supported: agenda.skip_recording_supported, id: `home-memo-${index++}`, status, recording }));
   }
   if (unscheduled.length) {
     column.append(textNode("h2", "day", t("plan.unscheduled")));
