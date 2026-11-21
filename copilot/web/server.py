@@ -83,6 +83,7 @@ UPDATES = ReleaseUpdates(HOME / ".config/meeting-copilot/updates.json", installe
                          data_dir=HOME / ".local/share/meeting-copilot")
 TRANSCRIPT_FILE = HOME / ".local/share/meeting-copilot/meeting-copilot-live.json"
 MEMOS_FILE = HOME / ".local/share/meeting-copilot/memos.json"
+BOUND_MEMOS_DIR = HOME / ".local/share/meeting-copilot/bound-memos"
 SESSION_FILE = HOME / ".config/meeting-copilot/SESSION.md"
 MANIFEST_FILE = HOME / ".config/meeting-copilot/repos.json"
 ACTIVE_REPOS_FILE = HOME / ".config/meeting-copilot/active-repos.json"
@@ -2472,7 +2473,8 @@ ASK формулируй как одну короткую реплику, кот
 TRANSCRIPT = TranscriptState()
 PLANS = CallPlans(PREPARATIONS_FILE, CALL_PLAN_STATE_FILE, ACTIVE_REPOS_FILE,
                  CalendarMeetings(enabled=lambda: "calendar" in GOOGLE_CONTEXT.enabled_sources()),
-                 app_plans=lambda: MEMOS.plans())  # late-bound: MEMOS is defined further down
+                 app_plans=lambda: MEMOS.plans(),  # late-bound: MEMOS is defined further down
+                 bound_dir=BOUND_MEMOS_DIR)
 TRANSLATIONS = LiveTranslation(lambda text: AI.run("live_translation", text, timeout=90).text)
 FRAMES = MeetingFrames(FRAMES_FILE)
 COPILOT = CodexSession(COPILOT_FILE)

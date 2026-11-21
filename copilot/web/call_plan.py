@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -11,6 +12,7 @@ from typing import Callable
 from urllib.parse import urlsplit
 
 from calendar_meetings import CalendarMeetings
+from archive import _atomic_json, _json
 from memo_writer import is_external
 from repo_preparations import RepositoryPreparations
 from private_dirs import private_dir
@@ -57,6 +59,7 @@ class CallPlans:
         repositories_path: Path | None = None,
         calendar: CalendarMeetings | None = None,
         app_plans: Callable[[], list[dict]] | None = None,
+        bound_dir: Path | None = None,
     ) -> None:
         self.config_path = config_path
         self.state_path = state_path
@@ -64,6 +67,8 @@ class CallPlans:
         self.repositories = RepositoryPreparations(repositories_path) if repositories_path else None
         self.calendar = calendar
         self.app_plans = app_plans  # plans the memo writer wrote, matched to their calendar event by id
+        # ponytail: one copy per bound recording, never pruned (the archive neither deletes nor expires a meeting)
+        self.bound_dir = bound_dir  # app data directory: the app memo revision each recording was bound to
 
     def _plans(self, transcript: dict) -> list[dict]:
         try:
@@ -175,13 +180,27 @@ class CallPlans:
                 return False
         except (ValueError, TypeError, KeyError):
             return False
-        if CallPlans._same_link(plan, transcript):
-            return True
+        return any(CallPlans._hits(plan, transcript))
+
+    @staticmethod
+    def _hits(plan: dict, transcript: dict) -> tuple[bool, bool, bool]:
+        """How a plan matches the call, strongest first: exact meeting link, title alias, attendee alias."""
+        def hit(field: str, text: str) -> bool:
+            aliases = plan.get(field) if isinstance(plan.get(field), list) else []
+            return any((alias := _normal(str(value))) and alias in text for value in aliases)
+
         names = _normal(" ".join(str(name) for name in transcript.get("remote_attendees", [])))
-        title = _normal(str(transcript.get("meeting") or ""))
-        attendee_hit = any(_normal(str(alias)) in names for alias in plan.get("attendee_aliases", []) if _normal(str(alias)))
-        title_hit = any(_normal(str(alias)) in title for alias in plan.get("title_aliases", []) if _normal(str(alias)))
-        return attendee_hit or title_hit
+        return (CallPlans._same_link(plan, transcript), hit("title_aliases", _normal(str(transcript.get("meeting") or ""))),
+                hit("attendee_aliases", names))
+
+    @staticmethod
+    def _distance(plan: dict, transcript: dict) -> float:
+        """Seconds between the plan's start and the call's; a plan with only a date counts as 12 h away."""
+        try:
+            started = datetime.fromisoformat(str(transcript["started_at"]).replace("Z", "+00:00"))
+            return abs((started - datetime.fromisoformat(str(plan["starts_at"]))).total_seconds())
+        except (KeyError, TypeError, ValueError):
+            return 12 * 3600
 
     @staticmethod
     def _same_link(plan: dict, transcript: dict) -> bool:
@@ -233,10 +252,14 @@ class CallPlans:
         return matches
 
     def _file_over_app(self, plan: dict | None, plans: list[dict], transcript: dict) -> dict | None:
-        """A file plan that the agenda shows for an app plan's event replaces the app plan; it was
-        found through the calendar event, so its match is "calendar"."""
-        if not plan or plan.get("written_by") != "app" or not plan.get("event_id") or not self.calendar:
+        """What a new recording may bind for a candidate plan. A file plan that the agenda shows for an app
+        plan's event replaces the app plan (found through the event, so its match is "calendar"). An app plan
+        is offered only while its event is in the calendar and external: not when it was cancelled, became
+        internal, or the calendar is off or failing."""
+        if not plan or plan.get("written_by") != "app" or not plan.get("event_id"):
             return plan
+        if not self.calendar:
+            return None
         try:
             day = datetime.fromisoformat(str(transcript["started_at"]).replace("Z", "+00:00")).astimezone().date()
         except (KeyError, TypeError, ValueError):
@@ -247,14 +270,14 @@ class CallPlans:
             try:
                 event_start = datetime.fromisoformat(event["start"])
             except (KeyError, TypeError, ValueError):
-                return plan
+                return None
             file_plan = next((other for other in plans if other.get("written_by") != "app"
                               and self._event_matches(other, event, day)
                               and self._near_scheduled_time(other, event_start)), None)
             if file_plan:
                 return {**file_plan, "_match": "calendar"}
             return plan if is_external(list(event.get("attendees") or [])) else None  # internal or solo now
-        return plan
+        return None
 
     @staticmethod
     def _files_first(plans: list[dict]) -> list[dict]:
@@ -365,22 +388,33 @@ class CallPlans:
             return None
         bound_id = state["meetings"].get(meeting_id, {}).get("plan_id")
         plans = [plan for plan in self._plans(transcript) if self._valid(plan)]
-        if bound_id:
-            stored = state["meetings"][meeting_id].get("plan")  # an app plan outlives the memo store's entry
-            return next((plan for plan in plans if plan["id"] == bound_id), None) or (
-                stored if isinstance(stored, dict) and self._valid(stored) and stored["id"] == bound_id else None)
+        if bound_id:  # the revision the recording was bound to, so its checklist ids keep their questions
+            stored = _json(self._bound_path(meeting_id), None) if self.bound_dir else None
+            if isinstance(stored, dict) and stored.get("id") == bound_id and self._valid(stored):
+                return stored
+            return next((plan for plan in plans if plan["id"] == bound_id), None)
         if transcript.get("explicit_boundary") and transcript.get("physical_meeting_id") != meeting_id:
             return None
-        matching = [plan for plan in plans if self._matches(plan, transcript)]
-        # The exact meeting link decides first; app plans matched only by a shared alias stay unbound.
-        candidates = self._files_first([plan for plan in matching if self._same_link(plan, transcript)] or matching)
-        chosen = candidates[0] if len(candidates) == 1 or candidates and candidates[0].get("written_by") != "app" else None
-        if not chosen:
-            calendar_matches = self._calendar_candidates(plans, transcript)
-            tentative = self._files_first([plan for plan in plans if self._time_fallback(plan, transcript)])
-            chosen = (calendar_matches[0] if len(calendar_matches) == 1
-                      else tentative[0] if len(tentative) == 1 else None)
+        # One ranked choice: link > title > attendee alias, then the nearest scheduled start.
+        ranked: dict[str, tuple[tuple, dict]] = {}
+        for plan in plans:
+            if self._matches(plan, transcript) and (offered := self._file_over_app(plan, plans, transcript)):
+                key = (*self._hits(plan, transcript), -self._distance(plan, transcript))
+                if offered["id"] not in ranked or key > ranked[offered["id"]][0]:
+                    ranked[offered["id"]] = (key, offered)
+        if ranked:
+            best = max(key for key, _ in ranked.values())
+            tied = self._files_first([plan for key, plan in ranked.values() if key == best])
+            # A file plan wins a tie (the first one, as before); a tie between app memos stays unbound.
+            return tied[0] if len(tied) == 1 or tied[0].get("written_by") != "app" else None
+        calendar_matches = self._calendar_candidates(plans, transcript)  # a generic capture: no title, names or link
+        tentative = self._files_first([plan for plan in plans if self._time_fallback(plan, transcript)])
+        chosen = (calendar_matches[0] if len(calendar_matches) == 1
+                  else tentative[0] if len(tentative) == 1 else None)
         return self._file_over_app(chosen, plans, transcript)
+
+    def _bound_path(self, meeting_id: str) -> Path:
+        return self.bound_dir / f"{hashlib.sha256(meeting_id.encode()).hexdigest()[:32]}.json"
 
     def snapshot(self, transcript: dict) -> dict | None:
         meeting_id = str(transcript.get("meeting_id") or "")
@@ -397,8 +431,9 @@ class CallPlans:
                     "plan_id": plan["id"], "items": {},
                     "match": "confirmed" if self._matches(plan, transcript)
                     else "calendar" if calendar_matches or plan.get("_match") else "time-only",
-                    **({"plan": plan} if plan.get("written_by") == "app" else {}),
                 }
+                if plan.get("written_by") == "app" and self.bound_dir:
+                    _atomic_json(self._bound_path(meeting_id), plan)
                 self._save(state)
             meeting = state["meetings"][meeting_id]
             items = []

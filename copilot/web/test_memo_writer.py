@@ -1068,6 +1068,17 @@ class LoopTests(unittest.TestCase):
         self.tick(NOW + timedelta(minutes=1))
         self.assertEqual((len(self.ai.calls), self.writer.events["ev1"]["state"]), (1, "ready"))
 
+    def test_a_call_that_starts_during_the_gather_uses_no_retry(self):
+        live = []
+
+        def broken(purpose=""):
+            raise RuntimeError("provider discovery failed")
+
+        self.ai.resolve = broken
+        self.gather.on_call = lambda: live.append(True)
+        self.tick(NOW, busy=lambda: bool(live))
+        self.assertEqual((self.ai.calls, self.writer.events, self.out.getvalue()), ([], {}, ""))
+
     def test_memo_of_an_event_that_became_internal_is_hidden(self):
         self.tick(NOW)
         internal = {**self.agenda["meetings"][0], "external": False}

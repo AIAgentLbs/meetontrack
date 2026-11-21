@@ -320,11 +320,12 @@ class MemoWriter:
             self._update(event_id, state="nothing_found", plan=None, **settled)
             return True
         ticket = reply = None
-        live = started = False
+        live, started = busy(), False
         try:
-            ticket = self.ai.resolve("memo")  # can block on provider discovery: the call and the start are checked after it
-            live = busy()
-            started = not live and self._started(start, now)
+            if not live:  # the lookup can block on provider discovery: the call and the start are checked after it too
+                ticket = self.ai.resolve("memo")
+                live = busy()
+                started = not live and self._started(start, now)
             if not (live or started):
                 if ticket.state != "ready":
                     raise AIChoiceError(ticket.state, ticket.reason)

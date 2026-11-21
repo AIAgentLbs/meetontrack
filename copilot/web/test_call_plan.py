@@ -29,6 +29,12 @@ def calendar_of(events_by_day):
     return FakeCalendar()
 
 
+def event(event_id, title, at):
+    hour, minute = map(int, at.split(":"))
+    return {"id": event_id, "title": title, "start": f"2026-09-29T{at}:00+02:00",
+            "end": f"2026-09-29T{hour:02d}:{minute + 30:02d}:00+02:00", "link": "", "attendees": EXTERNAL}
+
+
 class CallPlanTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -448,27 +454,91 @@ call_date: 2026-09-29
         self.assertEqual([p["id"] for p in result["meetings"][0]["plans"]], [APP_PLAN_FOR_EV1["id"]])
         self.assertEqual(result["unscheduled_plans"], [])
 
-    def test_bound_app_plan_survives_the_memo_store_pruning_it(self):
-        current = [APP_PLAN_FOR_EV1]
-        plans = CallPlans(self.root / "absent.json", self.state, app_plans=lambda: list(current))
-        live = {**self.meeting, "meeting_id": "live", "remote_attendees": ["Anna Petrova"],
-                "started_at": "2026-09-29T08:02:00Z"}
+    def app_plans(self, *plans, events=None, bound=True):
+        """CallPlans over app plans for events ev1 (10:00) and ev2 (11:00), both external, unless `events`."""
+        if events is None:
+            events = [event("ev1", "Pilot review", "10:00"), event("ev2", "Contract follow-up", "11:00")]
+        self.current = [dict(plan) for plan in plans]
+        return CallPlans(self.root / "absent.json", self.state, None, calendar_of({"2026-09-29": events}),
+                         app_plans=lambda: list(self.current), bound_dir=self.root / "data/bound-memos" if bound else None)
+
+    def live(self, meeting_id, at, title="Generic video call", attendees=("Anna Petrova",), link=""):
+        return {**self.meeting, "meeting_id": meeting_id, "meeting": title, "remote_attendees": list(attendees),
+                "meeting_link": link, "started_at": f"2026-09-29T{at}:00+02:00"}
+
+    def test_bound_app_plan_keeps_its_revision_in_the_data_directory(self):
+        plans = self.app_plans(APP_PLAN_FOR_EV1)
+        live = self.live("live", "10:02")
         bound = plans.snapshot(live)
         self.assertEqual(bound["id"], APP_PLAN_FOR_EV1["id"])
-        current.clear()  # two days later the memo writer prunes the entry
+        self.assertNotIn("plan", json.loads(self.state.read_text())["meetings"]["live"])  # not in settings
+        self.assertEqual(len(list((self.root / "data/bound-memos").glob("*.json"))), 1)
+        # A rebuild publishes another revision: the bound call keeps the one its checklist ids point at.
+        self.current = [{**APP_PLAN_FOR_EV1, "items": [{"id": "q1", "kind": "question", "text": "What is the budget?"}]}]
+        self.assertEqual(plans.snapshot(live)["items"][0]["text"], "Who signs off?")
+        self.current = []  # the memo store prunes the entry
         self.assertEqual(plans.snapshot(live), bound)
 
-    def test_exact_meeting_link_binds_the_app_plan_and_ambiguity_binds_none(self):
-        one = {**APP_PLAN_FOR_EV1, "meeting_link": "https://meet.example.com/one"}
-        two = {**APP_PLAN_FOR_EV1, "id": "app-fedcba9876543210", "event_id": "ev2",
-               "meeting_link": "https://meet.example.com/two"}
-        plans = CallPlans(self.root / "absent.json", self.state, app_plans=lambda: [one, two])
-        live = {**self.meeting, "meeting": "Pilot review", "remote_attendees": ["Anna Petrova"],
-                "started_at": "2026-09-29T08:02:00Z"}
-        linked = {**live, "meeting_id": "linked", "meeting_link": "https://meet.example.com/two/"}
-        self.assertEqual(plans.snapshot(linked)["id"], two["id"])
-        self.assertIsNone(plans.snapshot({**live, "meeting_id": "ambiguous"}))
-        self.assertNotIn("ambiguous", json.loads(self.state.read_text())["meetings"])
+    def test_existing_binding_keeps_a_memo_whose_event_was_cancelled(self):
+        plans = self.app_plans(APP_PLAN_FOR_EV1)
+        live = self.live("live", "10:02")
+        bound = plans.snapshot(live)
+        plans.calendar = calendar_of({})
+        self.assertEqual(plans.snapshot(live), bound)
+
+    def test_cancelled_or_internal_event_memo_is_not_offered_to_a_new_recording(self):
+        internal = {**event("ev1", "Pilot review", "10:00"), "attendees": [{"email": "me@example.org", "self": True}]}
+        for events in ([], [internal]):
+            with self.subTest(events=events):
+                plans = self.app_plans(APP_PLAN_FOR_EV1, events=events)
+                self.assertIsNone(plans.snapshot(self.live("new", "10:02", title="Pilot review")))
+
+    def test_back_to_back_memos_with_a_shared_attendee_bind_by_title(self):
+        second = {**APP_PLAN_FOR_EV1, "id": "app-fedcba9876543210", "event_id": "ev2",
+                  "starts_at": "2026-09-29T11:00:00+02:00", "title": "Contract follow-up",
+                  "title_aliases": ["Contract follow-up"]}
+        plans = self.app_plans(APP_PLAN_FOR_EV1, second)
+        self.assertEqual(plans.snapshot(self.live("first", "10:02", title="Pilot review"))["id"], APP_PLAN_FOR_EV1["id"])
+        # Only the shared attendee: the nearest start decides.
+        self.assertEqual(plans.snapshot(self.live("second", "10:58"))["id"], second["id"])
+
+    def test_shared_meeting_link_binds_by_title_then_nearest_start(self):
+        link = "https://meet.example.com/standing"
+        first = {**APP_PLAN_FOR_EV1, "meeting_link": link}
+        second = {**first, "id": "app-fedcba9876543210", "event_id": "ev2", "starts_at": "2026-09-29T11:00:00+02:00",
+                  "title": "Contract follow-up", "title_aliases": ["Contract follow-up"], "attendee_aliases": []}
+        plans = self.app_plans(first, second)
+        # 10:40 is nearer to 11:00, but only the first memo's title is the call's.
+        self.assertEqual(plans.snapshot(self.live("titled", "10:40", title="Pilot review", link=link + "/"))["id"],
+                         first["id"])
+        self.assertEqual(plans.snapshot(self.live("near", "10:55", attendees=(), link=link))["id"], second["id"])
+
+    def test_true_tie_between_app_memos_stays_unbound(self):
+        twin = {**APP_PLAN_FOR_EV1, "id": "app-fedcba9876543210", "event_id": "ev2"}
+        plans = self.app_plans(APP_PLAN_FOR_EV1, twin, events=[event("ev1", "Pilot review", "10:00"),
+                                                                event("ev2", "Pilot review", "10:00")])
+        self.assertIsNone(plans.snapshot(self.live("tie", "10:02", title="Pilot review")))
+        self.assertNotIn("tie", json.loads(self.state.read_text())["meetings"] if self.state.exists() else {})
+
+    def test_file_plan_beats_the_app_plan_when_calendar_is_off_or_failing(self):
+        self.config.write_text(json.dumps({"version": 1, "plans": [{
+            "id": "file-plan", "starts_at": "2026-09-29T10:00:00+02:00", "title_aliases": ["Pilot review"],
+            "title": "Pilot review", "items": [{"id": "q1", "kind": "question", "text": "Who signs off?"}]}]}),
+            encoding="utf-8")
+        app = {**APP_PLAN_FOR_EV1, "meeting_link": "https://meet.example.com/abc"}
+        live = self.live("live", "10:02", title="Pilot review", link="https://meet.example.com/abc")
+        for n, calendar in enumerate((None, calendar_of({}))):
+            with self.subTest(calendar=calendar):
+                plans = CallPlans(self.config, self.root / f"state-{n}.json", None, calendar, app_plans=lambda: [app],
+                                  bound_dir=self.root / "data/bound-memos")
+                self.assertEqual(plans.snapshot(live)["id"], "file-plan")
+
+    def test_malformed_aliases_of_another_plan_are_skipped(self):
+        raw = json.loads(self.config.read_text())
+        raw["plans"].append({"id": "broken", "starts_at": "2026-09-29T10:30:00+02:00", "title_aliases": None,
+                             "attendee_aliases": None, "items": []})
+        self.config.write_text(json.dumps(raw), encoding="utf-8")
+        self.assertEqual(self.plan.snapshot(self.meeting)["id"], "sample-2026-09-29")
 
     def test_file_plan_hours_away_does_not_hide_the_app_plan_of_the_live_call(self):
         self.config.write_text(json.dumps({"version": 1, "plans": [{
