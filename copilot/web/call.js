@@ -9,13 +9,14 @@ const callWords = text => text.split(/\s+/).filter(word => /[\p{L}\p{N}]/u.test(
 
 // The part of a hint a person can say aloud: its first line, cut to a clause or to twelve words.
 function speakable(text) {
-  const line = String(text || "").split(CALL_HINT_SPLIT)[0].trim();
+  const line = readableAnswer(String(text || "")).split(CALL_HINT_SPLIT)[0].trim();
   if (callWords(line).length <= CALL_HINT_WORDS) return line;
   const at = Math.min(...CALL_CLAUSE_MARKS.map(mark => line.indexOf(mark)).filter(index => index > 0));
   const clause = Number.isFinite(at) ? line.slice(0, at).trim() : "";
   const size = callWords(clause).length;
   if (size >= 3 && size <= CALL_HINT_WORDS) return line.endsWith("?") && !clause.endsWith("?") ? `${clause}?` : clause;
-  return `${line.split(/\s+/).slice(0, CALL_HINT_WORDS).join(" ").replace(/[,;:\-–—]+$/u, "")}…`;
+  // The same words the count saw: a lone dash is not a word, and no dash or stop is left before the ellipsis.
+  return `${callWords(line).slice(0, CALL_HINT_WORDS).join(" ").replace(/[\s,;:.\-–—]+$/u, "")}…`;
 }
 
 const callAt = value => {
@@ -27,7 +28,7 @@ const callAskOrSay = text => t(text.endsWith("?") ? "call.ask" : "call.say");
 
 // Source and detail of a journal hint: the lines after the hint line, then the evidence and the speaker.
 function callParts(raw, item) {
-  const text = String(raw || "");
+  const text = readableAnswer(String(raw || ""));
   const head = text.split(CALL_HINT_SPLIT)[0];
   const rest = text.slice(head.length).replace(/^\n/, "").split("\n").map(line => line.trim()).filter(Boolean);
   const evidence = String(item.evidence || "").trim();
@@ -51,7 +52,7 @@ function hintCandidates(state) {
       const label = speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
       hints.push({ kind: "answer", tier: 1, at, label: callLabel(label, at), question: String(item.text || ""),
         text: speakable(item.reply), ...callParts(item.reply, item) });
-    } else if (item.category === "CONTRADICTION") {
+    } else if (item.category === "CONTRADICTION" && open) {
       hints.push({ kind: "check", tier: 2, at, label: callLabel(t("call.clarify"), at), question: "",
         text: speakable(item.text), ...callParts(item.text, item) });
     } else if (["ASK", "RISK", "OBJECTION"].includes(item.category) && open) {

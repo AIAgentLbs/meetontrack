@@ -18,6 +18,10 @@ async function functions(browser) {
     plain: speakable('One two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty'),
     evidence: speakable('Ask who signs.\nОснование: the contract names a committee.'),
     inline: speakable('Ask who signs. Evidence: the contract names a committee.'),
+    markdown: speakable('**Ask who signs** `now`.\n**Основание:** the contract.'),
+    markdownInline: speakable('**Ask who signs.** **Evidence:** the contract.'),
+    dashFallback: speakable('Да — это первый ответ без запятых который идет все дальше и дальше и еще дальше'),
+    dashEnd: speakable('Yes, one two three four five six seven eight nine ten eleven— twelve thirteen'),
   }));
   assert.equal(spoken.dash, 'Уточните сроки запуска пилота');
   assert.ok(!spoken.dash.includes('—'));
@@ -26,6 +30,11 @@ async function functions(browser) {
   assert.equal(spoken.plain, 'One two three four five six seven eight nine ten eleven twelve…');
   assert.equal(spoken.evidence, 'Ask who signs.');
   assert.equal(spoken.inline, 'Ask who signs.');
+  // Model markdown never reaches the hint, and the cut never leaves a lone dash.
+  assert.equal(spoken.markdown, 'Ask who signs now.');
+  assert.equal(spoken.markdownInline, 'Ask who signs.');
+  assert.equal(spoken.dashFallback, 'Да это первый ответ без запятых который идет все дальше и дальше…');
+  assert.equal(spoken.dashEnd, 'Yes, one two three four five six seven eight nine ten eleven…');
 
   // pickHint: the newest fresh hint of the lowest tier, the memo when nothing is fresh.
   const picks = await run(() => {
@@ -90,6 +99,14 @@ async function functions(browser) {
     text: 'Ask who signs?', evidence: 'a committee decides' }] })[0]);
   assert.equal(fallback.source, 'a committee decides');
   assert.deepEqual(fallback.detail, []);
+  const marked = await run(() => hintCandidates({ journal: [{ category: 'RISK', created_at: new Date().toISOString(),
+    text: '**Say the date slips.**\n**Source:** `memo`' }] })[0]);
+  assert.deepEqual([marked.text, marked.source], ['Say the date slips.', 'Source: memo']);
+  // A resolved contradiction is never a hint; an open one is.
+  const contradictions = await run(() => hintCandidates({ journal: [
+    { category: 'CONTRADICTION', text: 'Two offices, not five.', status: 'resolved', created_at: new Date().toISOString() },
+    { category: 'CONTRADICTION', text: 'Q3, not Q2.', status: 'clarify', created_at: new Date().toISOString() }] }).map(hint => hint.text));
+  assert.deepEqual(contradictions, ['Q3, not Q2.']);
   const fixtureHint = await run(state => pickHint(state, Date.now()).current.kind, build('hint').state);
   assert.equal(fixtureHint, 'signal');
   const fixtureMemo = await run(state => pickHint(state, Date.now()), build('memo_question').state);
@@ -161,7 +178,7 @@ async function functions(browser) {
   assert.equal(clock.empty, '');
   assert.equal(await run(() => [HINT_FRESH_MS, OWN_FRESH_MS].join()), '30000,60000');
 
-  assert.deepEqual(page.errors.filter(error => /call\.js/.test(error)), []);
+  assert.deepEqual(page.errors, []);
   await page.context().close();
 }
 
@@ -180,7 +197,7 @@ async function fixtures(browser) {
   assert.deepEqual([final.stopping, final.last_stop.meeting_id], [null, 'm1']);
   const page = await open(browser, { fixture: 'hint', lang: 'ru', data: 'ru' });
   await page.waitForFunction(() => typeof renderCall === 'function');
-  assert.deepEqual(page.errors.filter(error => /call\.js/.test(error)), []);
+  assert.deepEqual(page.errors, []);
   await page.context().close();
 }
 
