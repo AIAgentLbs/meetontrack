@@ -27,6 +27,7 @@ from urllib.parse import urldefrag, urlparse, urlsplit, urlunsplit, parse_qs
 import hidden_consoles
 hidden_consoles.install()  # before any helper starts: no console windows on Windows
 from archive import MeetingArchive
+from permissions import RecorderProbe, open_settings
 from analysis_rebuild import WINDOW as ANALYSIS_WINDOW, AnalysisRebuilds, chunk_key, transcript_chunks, transcript_signature
 from canonical_transcript import canonical_segments
 from meeting_boundaries import MeetingBoundaries, BoundaryConflict, BoundaryUnavailable
@@ -2465,6 +2466,7 @@ ASK формулируй как одну короткую реплику, кот
 
 
 TRANSCRIPT = TranscriptState()
+PERMISSIONS = RecorderProbe(RECOGNITION_GUARD.binary)
 PLANS = CallPlans(PREPARATIONS_FILE, CALL_PLAN_STATE_FILE, ACTIVE_REPOS_FILE,
                  CalendarMeetings(enabled=lambda: "calendar" in GOOGLE_CONTEXT.enabled_sources()))
 TRANSLATIONS = LiveTranslation(lambda text: AI.run("live_translation", text, timeout=90).text)
@@ -2992,6 +2994,11 @@ class Handler(BaseHTTPRequestHandler):
                         "capture_running": recorder_running(),
                         "live_enabled": bool(config.get("live_transcription", {}).get("enabled", False)),
                         "folders": LOCAL_CONTEXT.snapshot()})
+        elif path == "/api/permissions":
+            state = PERMISSIONS.snapshot()
+            running = recorder_running()
+            self._json({"ok": True, "microphone": state["microphone"], "call_audio": state["call_audio"],
+                        "recorder": "unknown" if running is None else "running" if running else "stopped"})
         elif path == "/api/ai":
             # The one choice, each task's state with it (a task the choice cannot do is
             # unavailable with its reason) and the last Check AI result per task.
@@ -3142,6 +3149,9 @@ class Handler(BaseHTTPRequestHandler):
                     os.startfile(str(binary))
                 else:
                     subprocess.run(["/usr/bin/open", str(binary.parents[2])], check=True, timeout=10)
+                self._json({"ok": True})
+            elif path == "/api/permissions/open":
+                open_settings(str(payload.get("which") or ""))
                 self._json({"ok": True})
             elif path == "/api/getting-started/start-recording":
                 run = subprocess.run([str(RECOGNITION_GUARD.binary), "record", "start"],
