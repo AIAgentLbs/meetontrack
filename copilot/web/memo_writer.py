@@ -186,7 +186,8 @@ class MemoWriter:
         for entry in self.events.values():
             if entry.get("state") == "preparing":  # cut short by a restart: one automatic retry at most
                 attempts = int(entry.get("attempts") or 0) + 1
-                entry.update(state="failed", reason="error", attempts=attempts,
+                kept = isinstance(entry.get("plan"), dict) and isinstance(entry.get("digest"), dict)
+                entry.update(state="ready" if kept else "failed", reason="error", attempts=attempts,
                              retry_at=now if attempts == 1 else None, since=None)
 
     def _update(self, event_id: str, **values) -> None:
@@ -319,6 +320,9 @@ class MemoWriter:
             ticket = self.ai.resolve("memo")
             if ticket.state != "ready":
                 raise AIChoiceError(ticket.state, ticket.reason)
+            # The attempt is spent on disk before the run, so a restart during it never runs it again:
+            # no retry pending, this choice tried. A `preparing` entry also becomes a counted failure at start.
+            self._update(event_id, retry_at=None, choice_key=ticket.key)
             reply = self.ai.run("memo", memo_prompt(meeting, sources, language), ticket=ticket, web=False,
                                 timeout=self.AI_TIMEOUT)
             plan, digest = build_plan(event_id, meeting, parse_answer(reply.text, sources), sources, language)

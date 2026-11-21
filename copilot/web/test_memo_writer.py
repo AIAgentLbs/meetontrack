@@ -82,13 +82,15 @@ class DetectionTests(unittest.TestCase):
 class FakeAI:
     def __init__(self, answer="", state="ready"):
         self.answer, self.state, self.error, self.calls, self.gate, self.entered = answer, state, None, [], None, None
-        self.key = "k"
+        self.key, self.on_run = "k", None
 
     def resolve(self, purpose=""):
         return ai_providers.Ticket(purpose, self.state, "reason", {"provider": "fake", "model": "m1"}, self.key, "")
 
     def run(self, purpose, prompt, ticket=None, **options):
         self.calls.append((purpose, prompt, options))
+        if self.on_run:
+            self.on_run()
         if self.entered:
             self.entered.set()
         if self.gate:
@@ -562,11 +564,13 @@ def meeting(event_id, start, external=True, plans=()):
 
 class FakeGather:
     def __init__(self, result):
-        self.result, self.count, self.seen, self.fail = result, 0, [], set()
+        self.result, self.count, self.seen, self.fail, self.on_call = result, 0, [], set(), None
 
     def __call__(self, meeting):
         self.count += 1
         self.seen.append(meeting["event_id"])
+        if self.on_call:
+            self.on_call()
         if meeting["event_id"] in self.fail:
             raise ValueError("start cannot be parsed")
         return [dict(s) for s in self.result]
@@ -761,13 +765,24 @@ class LoopTests(unittest.TestCase):
                  "gather error": lambda ai, g: g.fail.add("ev1"),
                  "no sources": lambda ai, g: setattr(g, "result", []), "success": lambda ai, g: None}
         for n, (name, breaks) in enumerate(cases.items()):
-            with self.subTest(case=name):
-                ai, gather, writer = self.fresh(f"spend-{n}.json")
-                breaks(ai, gather)
-                for minutes in range(0, 5 * 60, 5):  # every five minutes until the meeting starts
-                    self.tick(EV_START - timedelta(hours=5) + timedelta(minutes=minutes), writer=writer)
-                self.assertLessEqual(len(ai.calls), 2)
-                self.assertLessEqual(gather.count, 3)
+            for restart in (None, "gather", "run"):
+                with self.subTest(case=name, restart=restart):
+                    ai, gather, writer = self.fresh(f"spend-{n}-{restart}.json")
+                    breaks(ai, gather)
+                    current = [writer]
+
+                    def restarted():  # the app restarts in the middle of the first gather or run
+                        ai.on_run = gather.on_call = None
+                        current.append(MemoWriter(writer.path, ai, gather, lambda: self.lang))
+
+                    if restart == "gather":
+                        gather.on_call = restarted
+                    elif restart == "run":
+                        ai.on_run = restarted
+                    for minutes in range(0, 5 * 60, 5):  # every five minutes until the meeting starts
+                        self.tick(EV_START - timedelta(hours=5) + timedelta(minutes=minutes), writer=current[-1])
+                    self.assertLessEqual(len(ai.calls), 2)
+                    self.assertLessEqual(gather.count, 3)
 
     def test_failed_run_keeps_an_earlier_memo_on_screen(self):
         self.ai.error = RuntimeError("boom")
@@ -799,6 +814,58 @@ class LoopTests(unittest.TestCase):
         e = self.writer.events["ev1"]
         self.assertEqual((e["state"], e["attempts"], e["retry_at"], len(self.ai.calls)), ("ready", 2, None, 4))
         self.assertEqual(self.writer.plans(), [plan])
+
+    def restart_during(self, when, ai):
+        """Hold the run of the tick at `when` open, restart the app on the same file mid-run, tick it."""
+        self.ai.gate, self.ai.entered = threading.Event(), threading.Event()
+        worker = threading.Thread(target=self.tick, args=(when,))
+        worker.start()
+        try:
+            self.assertTrue(self.ai.entered.wait(5))
+            gather = FakeGather(RAW)
+            fresh = MemoWriter(self.writer.path, ai, gather, lambda: self.lang)
+            for minutes in (1, 30, 60):
+                self.tick(when + timedelta(minutes=minutes), writer=fresh)
+        finally:
+            self.ai.gate.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual((ai.calls, gather.count), ([], 0))
+        return fresh
+
+    def test_restart_during_a_retry_of_a_shown_memo_runs_nothing_more(self):
+        self.tick(NOW)
+        plan = self.writer.plans()[0]
+        self.writer.rebuild("ev1", self.agenda)
+        self.ai.error = RuntimeError("boom")
+        self.tick(NOW + timedelta(minutes=1))
+        self.assertEqual(self.writer.events["ev1"]["attempts"], 1)
+        fresh = self.restart_during(NOW + timedelta(minutes=21), FakeAI(json.dumps(GOOD)))
+        self.assertEqual(fresh.plans(), [plan])
+        self.assertEqual(fresh.memo_for(self.agenda["meetings"][0], [], NOW)["state"], "ready")
+
+    def test_restart_during_a_run_after_a_choice_change_runs_nothing_more(self):
+        self.tick(NOW)
+        plan = self.writer.plans()[0]
+        self.writer.rebuild("ev1", self.agenda)
+        self.ai.error = ai_providers.AIChoiceError("unavailable", "x")
+        self.tick(NOW + timedelta(minutes=1))
+        self.assertEqual(self.writer.events["ev1"]["reason"], "ai_needs_choice")
+        self.ai.key, self.ai.error = "k2", None
+        restarted_ai = FakeAI(json.dumps(GOOD))
+        restarted_ai.key = "k2"
+        fresh = self.restart_during(NOW + timedelta(minutes=2), restarted_ai)
+        self.assertEqual(fresh.plans(), [plan])
+
+    def test_restart_during_a_rebuild_keeps_the_earlier_memo_shown(self):
+        self.tick(NOW)
+        plan = self.writer.plans()[0]
+        self.writer.rebuild("ev1", self.agenda)
+        fresh = MemoWriter(self.writer.path, FakeAI(json.dumps(GOOD)), FakeGather(RAW), lambda: self.lang)
+        e = fresh.events["ev1"]
+        self.assertEqual((e["state"], e["attempts"]), ("ready", 1))
+        self.assertIsNotNone(e["retry_at"])
+        self.assertEqual(fresh.plans(), [plan])
 
     def test_recheck_without_sources_keeps_the_memo(self):
         self.tick(EV_START - timedelta(hours=5))
