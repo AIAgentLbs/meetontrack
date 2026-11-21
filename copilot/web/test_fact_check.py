@@ -409,7 +409,7 @@ class ServerTests(unittest.TestCase):
         root = Path(temp.name)
         self.asked = []
         answer = "FACT — Обсуждаем видео\n" + capture(quote=HIGGSFIELD, claim=CLAIM["claim"], query="Higgsfield")
-        copilot = SimpleNamespace(busy=False, bind_meeting=lambda meeting_id: None, should_analyze=lambda context, force: True,
+        copilot = SimpleNamespace(busy=False, bind_meeting=lambda meeting_id: None, should_analyze=lambda context, force, urgent=False: True,
                                   record_analysis=lambda **values: None,
                                   ask=lambda question, *rest, **options: self.asked.append(question) or answer)
         self.store = FactChecks(root / "fact-checks.json")

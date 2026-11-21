@@ -3326,7 +3326,7 @@ async function state() {
       !data.copilot.busy
     ) {
       autoAnalysisPrimed = analysisKey;
-      void analyze(finishedWithoutAnalysis);
+      void analyze(finishedWithoutAnalysis, Boolean(data.heard_question));
     }
   } catch (error) {
     // The poll runs every 2.5 s, so one missed answer fixes itself. Say something only when it keeps failing.
@@ -3412,13 +3412,13 @@ async function saveNote() {
   }
 }
 
-async function analyze(force) {
+async function analyze(force, urgent = false) {
   if (requestBusy) return;
   requestBusy = true;
   elements.help.textContent = force ? t("analysis.searching") : t("analysis.checking");
   elements.help.classList.remove("error");
   try {
-    await post("/api/analyze", { force });
+    await post("/api/analyze", { force, urgent });
   } catch (error) {
     elements.help.textContent = plainError(error);
     elements.help.classList.add("error");

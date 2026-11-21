@@ -59,6 +59,7 @@ from local_context import LocalContext
 from memo_writer import MemoWriter, folder_sources, moment, past_reports, search_words
 from private_dirs import private_dir
 from recording_control import RecordingControl
+from call_feed import SPEAKABLE_RULE, heard_question
 
 
 HOST = "127.0.0.1"
@@ -862,6 +863,7 @@ class MeetingJournal:
         anchor_at: str = "",
         evidence: str = "",
         speaker: str = "",
+        reply: str = "",
     ) -> dict | None:
         clean = text.strip()
         if not clean or not register_question({"category": category, "source": source, "text": clean}):
@@ -885,6 +887,8 @@ class MeetingJournal:
             item["evidence"] = evidence[:400]
         if speaker:
             item["speaker"] = speaker[:120]
+        if reply.strip():
+            item["reply"] = reply.strip()[:200]
         with self.lock:
             if source in {"copilot", "screen", "transcript", "meeting_chat"} and any(
                 existing.get("category") == category
@@ -937,11 +941,13 @@ class MeetingJournal:
                     continue
                 if direction == "incoming" and (not segment.get("speaker_id") or segment["speaker_id"] in {"self", "unassigned"}):
                     direction = "general"
+                reply = question.get("reply") if direction == "incoming" else ""
                 item = self.add("INCOMING_QUESTION" if direction == "incoming" else "OPEN_QUESTION",
                                 quote, str(transcript.get("meeting_id") or ""),
                                 str(transcript.get("meeting") or ""), "transcript",
                                 evidence=quote, speaker=str(segment.get("speaker") or ""),
-                                anchor_at=str(segment.get("timestamp") or ""))
+                                anchor_at=str(segment.get("timestamp") or ""),
+                                reply=reply if isinstance(reply, str) else "")
                 captured += int(item is not None)
             except (ValueError, TypeError, AttributeError):
                 continue
@@ -2446,7 +2452,7 @@ ASK формулируй как одну короткую реплику, кот
                 self.busy = False
                 self._ticket, self._roots, self._rules = None, (), ""
 
-    def should_analyze(self, transcript: str, force: bool) -> bool:
+    def should_analyze(self, transcript: str, force: bool, urgent: bool = False) -> bool:
         fingerprint = hashlib.sha256(transcript.encode("utf-8")).hexdigest()
         with self.lock:
             if self.busy or not transcript.strip():
@@ -2454,7 +2460,8 @@ ASK формулируй как одну короткую реплику, кот
             if not force:
                 if fingerprint == self.last_analyzed_fingerprint:
                     return False
-                if time.time() - self.last_analyzed_at < (300 if self.last_error else 90):
+                # A question from the other side is waiting for its reply: a shorter gap.
+                if time.time() - self.last_analyzed_at < (300 if self.last_error else 15 if urgent else 90):
                     return False
             self.last_analyzed_fingerprint = fingerprint
             self.last_analyzed_at = time.time()
@@ -2742,12 +2749,12 @@ def analysis_question(snap: dict, context: str) -> tuple[str, str]:
         "('закончили проверку документов?') может быть содержательным. "
         "Если вопрос не требует ответа по делу — пропусти его, а не придумывай смысл. "
         "Отдельно фиксируй только содержательные реальные вопросы из новой речи строками QUESTION_CAPTURE: "
-        '{"kind":"substantive","direction":"incoming"|"general","evidence":"дословный вопрос из одной реплики"}. '
+        '{"kind":"substantive","direction":"incoming"|"general","evidence":"дословный вопрос из одной реплики","reply":"..."}. '
         "incoming — только вопрос собеседника, явно адресованный Майку; "
         "general — адресат не установлен или вопрос группе. Не выдавай ASK, "
         "вопрос пользователя к Copilot, риторический вопрос или подготовку за вопрос собеседника. "
         "OBJECTION — выраженное возражение, RISK — риск."
-    )
+    ) + SPEAKABLE_RULE
     live_items = [item for item in JOURNAL.snapshot(snap["meeting_id"])
                   if item.get("category") in JOURNAL.ACTIONABLE
                   and item.get("status", "open") != "resolved"][:50]
@@ -3181,6 +3188,7 @@ class Handler(BaseHTTPRequestHandler):
                 transcript["meeting"], self._transcript_text(transcript),
                 meeting_id=transcript["meeting_id"],
             )
+            journal = JOURNAL.snapshot(transcript["meeting_id"])
             self._json(
                 {
                     "preferences": interface_preferences(CAPTURE_CONFIG_FILE),
@@ -3191,7 +3199,10 @@ class Handler(BaseHTTPRequestHandler):
                     "frames": FRAMES.snapshot(transcript["meeting_id"]),
                     "frame_capture": FRAMES.status_snapshot(),
                     "copilot": COPILOT.snapshot(transcript["meeting_id"]),
-                    "journal": JOURNAL.snapshot(transcript["meeting_id"]),
+                    "journal": journal,
+                    "heard_question": heard_question(transcript["segments"], journal,
+                                                     analysis_started_at=COPILOT.last_analyzed_at,
+                                                     busy=COPILOT.busy, now=time.time()),
                     "fact_checks": fact_check_state(transcript),
                     "meeting_chat": MEETING_CHAT.snapshot(transcript["meeting_id"]),
                     "repositories": repository_count(),
@@ -3580,8 +3591,9 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 context, chat = analysis_context(snap, self._transcript_text(snap))
                 force = bool(payload.get("force", False))
+                urgent = payload.get("urgent") is True
                 COPILOT.bind_meeting(snap["meeting_id"])
-                if not COPILOT.should_analyze(context, force):
+                if not COPILOT.should_analyze(context, force, urgent):
                     self._json({"ok": True, "skipped": True})
                     return
                 scope = REPOSITORIES.resolve(

@@ -366,7 +366,7 @@ class RecordingRoutesTests(unittest.TestCase):
             "FRAMES", "ARCHIVE", "COPILOT", "REPOSITORIES", "PLANS", "JOURNAL", "MEETING_CHAT", "UPDATES",
             "RECOGNITION_GUARD", "interface_preferences", "fact_check_state", "repository_count")}
         with mock.patch.multiple(server, RECORDING_CONTROL=FakeControl(), **stubs), \
-                mock.patch.object(server, "annotated_snapshot", return_value={"meeting_id": "m1", "meeting": ""}), \
+                mock.patch.object(server, "annotated_snapshot", return_value={"meeting_id": "m1", "meeting": "", "segments": []}), \
                 mock.patch.object(server.Handler, "_json", capture):
             httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
             threading.Thread(target=httpd.serve_forever, daemon=True).start()
