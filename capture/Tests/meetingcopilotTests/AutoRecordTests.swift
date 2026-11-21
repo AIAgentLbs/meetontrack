@@ -225,7 +225,7 @@ struct NoCallAudioStopTests {
                     active: true, names: ["Google Chrome"], families: ["com.google.Chrome"],
                     allHolders: ["Google Chrome"])
             },
-            now: { clock }, skipped: { _ in false })
+            now: { clock }, skipped: { _ in false }, notifyMicrophoneMissing: {})
         controller.currentSession = { session }
         controller.stopRecording = { stops.append($0); session = nil }
         controller.startRecording = { _, _ in starts += 1 }
@@ -256,7 +256,8 @@ struct NoCallAudioStopTests {
                         active: true, names: ["zoom.us"], families: ["us.zoom.xos"], allHolders: ["zoom.us"])
                 },
                 now: { clock },
-                skipped: { _ in skip })
+                skipped: { _ in skip },
+                notifyMicrophoneMissing: {})
             controller.startRecording = { _, _ in starts += 1 }
 
             controller.tick()
@@ -268,6 +269,36 @@ struct NoCallAudioStopTests {
                 #expect(controller.lastDecision
                     == localised("skipped: chosen in MeetOnTrack", "пропуск: выбрано в MeetOnTrack"))
             }
+        }
+    }
+
+    @Test("An automatic start without microphone access notifies once and still records")
+    @MainActor
+    func testDeniedMicrophoneNotifiesOnAutoStart() {
+        for state in [SetupPermissions.State.denied, .granted] {
+            var clock = Date(timeIntervalSince1970: 1_800_000_000)
+            var starts = 0
+            var notices = 0
+            var settings = Config.AutoRecordSettings()
+            settings.startDelay = 10
+            let controller = AutoRecordController(
+                settings: settings, calendar: nil, loadSettings: { settings },
+                checkMic: { _ in
+                    MicActivityMonitor.Result(
+                        active: true, names: ["zoom.us"], families: ["us.zoom.xos"], allHolders: ["zoom.us"])
+                },
+                now: { clock },
+                skipped: { _ in false },
+                microphone: { state },
+                notifyMicrophoneMissing: { notices += 1 })
+            controller.startRecording = { _, _ in starts += 1 }
+
+            controller.tick()
+            clock.addTimeInterval(settings.startDelay + 5)
+            controller.tick()
+
+            #expect(starts == 1)
+            #expect(notices == (state == .denied ? 1 : 0))
         }
     }
 
@@ -290,7 +321,8 @@ struct NoCallAudioStopTests {
                     allHolders: active ? ["zoom.us"] : [])
             },
             now: { clock },
-            skipped: { $0 >= start.addingTimeInterval(-5 * 60) && $0 < end })
+            skipped: { $0 >= start.addingTimeInterval(-5 * 60) && $0 < end },
+            notifyMicrophoneMissing: {})
         controller.startRecording = { _, _ in starts += 1 }
 
         while clock <= end.addingTimeInterval(10 * 60) {
@@ -364,7 +396,8 @@ struct ManualStopAutoRecordTests {
                 )
             },
             now: { clock.date },
-            skipped: { _ in false }
+            skipped: { _ in false },
+            notifyMicrophoneMissing: {}
         )
         controller.startRecording = { _, _ in onStart() }
         return controller

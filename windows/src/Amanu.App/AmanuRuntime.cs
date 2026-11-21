@@ -90,9 +90,13 @@ public sealed class AmanuRuntime : IAsyncDisposable
         };
         coordinator.AutomaticStartFailed += (_, failure) =>
         {
-            Notify(T("Couldn't start recording", "Не удалось начать запись"),
-                failure.Error.Message + " " + T($"Trying again in {(int)failure.RetryIn.TotalSeconds} s.", $"Повторю через {(int)failure.RetryIn.TotalSeconds} с."),
-                NotificationKind.Error);
+            var retry = T($"Trying again in {(int)failure.RetryIn.TotalSeconds} s.", $"Повторю через {(int)failure.RetryIn.TotalSeconds} с.");
+            if (MicrophoneAccess.Read() is not (MicrophoneAccess.State.Allowed or MicrophoneAccess.State.Unknown))
+                Notify(T("Not recording your voice: no microphone access", "Ваш голос не записывается: нет доступа к микрофону"),
+                    retry, NotificationKind.Error, MicrophoneAccess.OpenSettings);
+            else
+                Notify(T("Couldn't start recording", "Не удалось начать запись"),
+                    failure.Error.Message + " " + retry, NotificationKind.Error);
         };
         processing.StatusChanged += (_, status) =>
         {
@@ -203,7 +207,8 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public event EventHandler<string>? LiveStatusChanged;
     /// <summary>Settings or their problems changed — here or in the file.</summary>
     public event EventHandler? SettingsChanged;
-    public event EventHandler<(string Title, string Message, NotificationKind Kind)>? NotificationRequested;
+    /// <summary>A banner to show; <c>Click</c> is what clicking it does, null for the recordings window.</summary>
+    public event EventHandler<(string Title, string Message, NotificationKind Kind, Action? Click)>? NotificationRequested;
 
     /// <summary>
     /// Reads the config and settles the interface language before anything shows
@@ -527,8 +532,8 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public Task CompleteSetupAsync(CancellationToken cancellationToken = default) =>
         AtomicFiles.WriteJsonAsync(SetupPath, new { version = 1, completed_at = DateTimeOffset.UtcNow }, cancellationToken);
 
-    public void Notify(string title, string message, NotificationKind kind) =>
-        NotificationRequested?.Invoke(this, (title, message, kind));
+    public void Notify(string title, string message, NotificationKind kind, Action? click = null) =>
+        NotificationRequested?.Invoke(this, (title, message, kind, click));
 
     /// <summary>
     /// The assistant gets one window of its own: an open one comes forward, otherwise the default

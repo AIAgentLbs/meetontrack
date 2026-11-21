@@ -45,6 +45,8 @@ final class AutoRecordController {
     private let checkMic: (Config.AutoRecordSettings) -> MicActivityMonitor.Result
     private let now: () -> Date
     private let skipped: (Date) -> Bool
+    private let microphone: @MainActor () -> SetupPermissions.State
+    private let notifyMicrophoneMissing: @MainActor () -> Void
     private var timer: Timer?
     private var micActiveSince: Date?
     private var micIdleSince: Date?
@@ -76,7 +78,9 @@ final class AutoRecordController {
             MicActivityMonitor.check(callApps: $0.callApps, ignoring: $0.ignoreApps)
         },
         now: @escaping () -> Date = Date.init,
-        skipped: @escaping (Date) -> Bool = { SkipRecording.covers($0) }
+        skipped: @escaping (Date) -> Bool = { SkipRecording.covers($0) },
+        microphone: @escaping @MainActor () -> SetupPermissions.State = SetupPermissions.microphone,
+        notifyMicrophoneMissing: @escaping @MainActor () -> Void = Notifications.microphoneMissing
     ) {
         self.enabled = settings.enabled
         self.calendar = calendar
@@ -84,6 +88,8 @@ final class AutoRecordController {
         self.checkMic = checkMic
         self.now = now
         self.skipped = skipped
+        self.microphone = microphone
+        self.notifyMicrophoneMissing = notifyMicrophoneMissing
     }
 
     func start() {
@@ -186,7 +192,7 @@ final class AutoRecordController {
                     localised("started from calendar: ", "начала по календарю: ") + event.title
                 // The call app usually grabs the mic a moment after the event
                 // starts, so it may be nil here — the calendar carries the name.
-                startRecording?(.calendar, MeetingContext(
+                begin(.calendar, MeetingContext(
                     meeting: event, app: mic.names.first, appFamilies: mic.families))
                 return
             }
@@ -217,8 +223,16 @@ final class AutoRecordController {
         lastDecision = localised(
             "started from mic activity (\(mic.names.first ?? "call app"))",
             "начала по микрофону (\(mic.names.first ?? "приложение звонка"))")
-        startRecording?(.micActivity, MeetingContext(
+        begin(.micActivity, MeetingContext(
             meeting: event, app: mic.names.first, appFamilies: mic.families))
+    }
+
+    /// An automatic start. Without microphone access only the far end is
+    /// recorded, which is still worth keeping, so it starts anyway and the
+    /// person is told; "not asked yet" is left to the system prompt.
+    private func begin(_ trigger: RecordingSession.Trigger, _ context: MeetingContext) {
+        if microphone() == .denied { notifyMicrophoneMissing() }
+        startRecording?(trigger, context)
     }
 
     // MARK: - stop
