@@ -224,9 +224,31 @@ class CallPlans:
                 continue
             if not event_start - timedelta(minutes=15) <= started <= event_end + timedelta(minutes=20):
                 continue
-            matches += [plan for plan in plans
-                        if plan not in matches and self._event_matches(plan, event, started.astimezone().date())]
-        return self._files_first(matches)
+            event_plans = [plan for plan in plans if self._event_matches(plan, event, started.astimezone().date())]
+            matches += [plan for plan in self._files_first(event_plans) if plan not in matches]
+        return matches
+
+    def _file_over_app(self, plan: dict | None, plans: list[dict], transcript: dict) -> dict | None:
+        """A file plan that the agenda shows for an app plan's event replaces the app plan; it was
+        found through the calendar event, so its match is "calendar"."""
+        if not plan or plan.get("written_by") != "app" or not self.calendar:
+            return plan
+        try:
+            day = datetime.fromisoformat(str(transcript["started_at"]).replace("Z", "+00:00")).astimezone().date()
+        except (KeyError, TypeError, ValueError):
+            return plan
+        for event in self.calendar.for_day(day):
+            if event.get("id") != plan["event_id"]:
+                continue
+            try:
+                event_start = datetime.fromisoformat(event["start"])
+            except (KeyError, TypeError, ValueError):
+                return plan
+            file_plan = next((other for other in plans if other.get("written_by") != "app"
+                              and self._event_matches(other, event, day)
+                              and self._near_scheduled_time(other, event_start)), None)
+            return {**file_plan, "_match": "calendar"} if file_plan else plan
+        return plan
 
     @staticmethod
     def _files_first(plans: list[dict]) -> list[dict]:
@@ -339,14 +361,13 @@ class CallPlans:
             return next((plan for plan in plans if plan["id"] == bound_id), None)
         if transcript.get("explicit_boundary") and transcript.get("physical_meeting_id") != meeting_id:
             return None
-        confirmed = next((plan for plan in plans if self._matches(plan, transcript)), None)
-        if confirmed:
-            return confirmed
-        calendar_matches = self._calendar_candidates(plans, transcript)
-        if len(calendar_matches) == 1:
-            return calendar_matches[0]
-        tentative = self._files_first([plan for plan in plans if self._time_fallback(plan, transcript)])
-        return tentative[0] if len(tentative) == 1 else None
+        chosen = next((plan for plan in plans if self._matches(plan, transcript)), None)
+        if not chosen:
+            calendar_matches = self._calendar_candidates(plans, transcript)
+            tentative = self._files_first([plan for plan in plans if self._time_fallback(plan, transcript)])
+            chosen = (calendar_matches[0] if len(calendar_matches) == 1
+                      else tentative[0] if len(tentative) == 1 else None)
+        return self._file_over_app(chosen, plans, transcript)
 
     def snapshot(self, transcript: dict) -> dict | None:
         meeting_id = str(transcript.get("meeting_id") or "")
@@ -362,7 +383,7 @@ class CallPlans:
                 state["meetings"][meeting_id] = {
                     "plan_id": plan["id"], "items": {},
                     "match": "confirmed" if self._matches(plan, transcript)
-                    else "calendar" if calendar_matches else "time-only",
+                    else "calendar" if calendar_matches or plan.get("_match") else "time-only",
                 }
                 self._save(state)
             meeting = state["meetings"][meeting_id]

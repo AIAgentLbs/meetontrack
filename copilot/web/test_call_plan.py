@@ -399,6 +399,35 @@ call_date: 2026-09-29
         named = {**self.meeting, "meeting_id": "live-named", "started_at": "2026-09-29T08:02:00Z"}
         self.assertEqual(plans.snapshot(named)["id"], file_plan_id)
 
+    def test_live_call_matching_only_app_aliases_gets_the_file_plan(self):
+        calendar = calendar_of({"2026-09-29": [{"id": "ev1", "title": "Pilot review",
+                                                "start": "2026-09-29T10:00:00+02:00",
+                                                "end": "2026-09-29T10:30:00+02:00", "link": "",
+                                                "attendees": [{"email": "a@example.com", "name": "Alex Sample"}]}]})
+        plans = CallPlans(self.config, self.state, None, calendar, app_plans=lambda: [APP_PLAN_FOR_EV1])
+        self.assertEqual([(p["id"], p["written_by"]) for p in plans.agenda(NOW)["meetings"][0]["plans"]],
+                         [("sample-2026-09-29", "file")])
+        live = {**self.meeting, "meeting_id": "live", "meeting": "Pilot review", "remote_attendees": [],
+                "started_at": "2026-09-29T08:02:00Z"}
+        snapshot = plans.snapshot(live)
+        self.assertEqual((snapshot["id"], snapshot["match"]), ("sample-2026-09-29", "calendar"))
+
+    def test_file_plan_of_adjacent_meeting_does_not_hide_app_plan(self):
+        active = self._repo({"PREP.md": (
+            "---\ncall_date: 2026-09-29\n---\n# Sales kit: Acme / Alex Sample\n"
+            "## Опросник\n1. Who checks documents?\n")})
+        calendar = calendar_of({"2026-09-29": [
+            {"id": "ev0", "title": "Weekly sync", "start": "2026-09-29T09:30:00+02:00",
+             "end": "2026-09-29T10:00:00+02:00", "link": "",
+             "attendees": [{"email": "a@example.com", "name": "Alex Sample"}]},
+            {"id": "ev1", "title": "Pilot review", "start": "2026-09-29T10:00:00+02:00",
+             "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": []}]})
+        plans = CallPlans(self.root / "absent.json", self.state, active, calendar,
+                          app_plans=lambda: [APP_PLAN_FOR_EV1])
+        generic = {**self.meeting, "meeting_id": "live-generic", "meeting": "Google Chrome Helper",
+                   "remote_attendees": [], "started_at": "2026-09-29T08:02:00Z"}
+        self.assertEqual(plans.snapshot(generic)["id"], APP_PLAN_FOR_EV1["id"])
+
     def test_app_plan_follows_rescheduled_event(self):
         calendar = calendar_of({"2026-09-30": [{"id": "ev1", "title": "Moved call",
                                                 "start": "2026-09-30T15:00:00+02:00",

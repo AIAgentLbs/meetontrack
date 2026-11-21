@@ -53,7 +53,7 @@ def one_line(text: str, limit: int) -> str:
     line = " ".join(next((line for line in str(text or "").splitlines() if line.strip()), "").split())
     if len(line) <= limit:
         return line
-    return line[:limit].rpartition(" ")[0] or line[:limit]
+    return line[:limit + 1].rpartition(" ")[0] or line[:limit]
 
 
 def file_digest(plan: dict) -> dict:
@@ -102,8 +102,10 @@ class MemoWriter:
             if isinstance(value, dict)}
         now = datetime.now().astimezone().isoformat(timespec="seconds")
         for entry in self.events.values():
-            if entry.get("state") == "preparing":  # cut short by a restart: retry once
-                entry.update(state="failed", reason="error", attempts=1, retry_at=now, since=None)
+            if entry.get("state") == "preparing":  # cut short by a restart: one automatic retry at most
+                attempts = int(entry.get("attempts") or 0) + 1
+                entry.update(state="failed", reason="error", attempts=attempts,
+                             retry_at=now if attempts == 1 else None, since=None)
 
     def _update(self, event_id: str, **values) -> None:
         with self.lock:

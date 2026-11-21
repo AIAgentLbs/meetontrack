@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from calendar_meetings import CalendarMeetings
-from memo_writer import MemoWriter, company_from, file_digest, is_external, outside_attendees
+from memo_writer import MemoWriter, company_from, file_digest, is_external, one_line, outside_attendees
 
 
 def person(email, name="", self_=False, resource=False):
@@ -118,6 +118,10 @@ class StoreTests(unittest.TestCase):
         e = writer.events["ev1"]
         self.assertEqual((e["state"], e["reason"], e["attempts"]), ("failed", "error", 1))
         self.assertIsNotNone(e["retry_at"])
+        # The retry was cut short by a restart again: no further automatic retry.
+        writer = self._stored({"ev1": {"state": "preparing", "start": START, "since": START, "attempts": 1}})
+        e = writer.events["ev1"]
+        self.assertEqual((e["state"], e["reason"], e["attempts"], e["retry_at"]), ("failed", "error", 2, None))
 
     def test_old_entries_are_pruned(self):
         old = (NOW - timedelta(days=3)).isoformat(timespec="seconds")
@@ -153,6 +157,8 @@ class StoreTests(unittest.TestCase):
         long = file_digest({"intro": "word " * 60, "items": []})["goal"]
         self.assertLessEqual(len(long), 160)
         self.assertTrue(long.endswith("word"))
+        self.assertEqual(one_line("abc defghi jkl", 10), "abc defghi")  # a space exactly at the limit
+        self.assertEqual(one_line("abc defghij kl", 10), "abc")
 
     def test_memo_for_each_state(self):
         meeting = {"event_id": "ev1", "external": True, "start": START, "title": "Pilot review"}
