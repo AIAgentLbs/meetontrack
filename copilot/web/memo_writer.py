@@ -184,11 +184,11 @@ class MemoWriter:
             and 0 <= attempts <= 100}  # also drops NaN, infinity and huge numbers without raising
         now = datetime.now().astimezone().isoformat(timespec="seconds")
         for entry in self.events.values():
-            if entry.get("state") == "preparing":  # cut short by a restart: one automatic retry at most
+            if entry.get("state") == "preparing":  # cut short by a restart: no trigger left but one retry at most
                 attempts = int(entry.get("attempts") or 0) + 1
                 kept = isinstance(entry.get("plan"), dict) and isinstance(entry.get("digest"), dict)
                 entry.update(state="ready" if kept else "failed", reason="error", attempts=attempts,
-                             retry_at=now if attempts == 1 else None, since=None)
+                             retry_at=now if attempts == 1 else None, since=None, rebuild=False)
 
     def _update(self, event_id: str, **values) -> None:
         with self.lock:
@@ -320,9 +320,7 @@ class MemoWriter:
             ticket = self.ai.resolve("memo")
             if ticket.state != "ready":
                 raise AIChoiceError(ticket.state, ticket.reason)
-            # The attempt is spent on disk before the run, so a restart during it never runs it again:
-            # no retry pending, this choice tried. A `preparing` entry also becomes a counted failure at start.
-            self._update(event_id, retry_at=None, choice_key=ticket.key)
+            self._spend(event_id, ticket, signature)
             reply = self.ai.run("memo", memo_prompt(meeting, sources, language), ticket=ticket, web=False,
                                 timeout=self.AI_TIMEOUT)
             plan, digest = build_plan(event_id, meeting, parse_answer(reply.text, sources), sources, language)
@@ -333,6 +331,13 @@ class MemoWriter:
         self._update(event_id, state="ready", plan=plan, digest=digest, provider=ticket.choice["provider"],
                      model=reply.model or ticket.choice["model"], written_at=stamp, **settled)
         return True
+
+    def _spend(self, event_id: str, ticket, signature: str) -> None:
+        """The only place an attempt is marked spent, written right before the one `ai.run` call. After it no
+        trigger on disk asks for a run: no rebuild, no retry, no waiting choice (reason `error`, the key of
+        this choice), and these sources count as tried for the recheck. A restart during the run therefore
+        never runs it again; a `preparing` entry becomes a counted failure at start (see `__init__`)."""
+        self._update(event_id, rebuild=False, retry_at=None, reason="error", choice_key=ticket.key, signature=signature)
 
     def _fail(self, event_id: str, before: dict, now: datetime, reason: str, signature: str | None = None,
               choice_key: str = "") -> None:

@@ -758,17 +758,22 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(self.writer.events["ev1"]["choice_key"], "k2")
 
     def test_no_failure_path_gathers_or_runs_on_every_tick(self):
-        cases = {"run error": lambda ai, g: setattr(ai, "error", RuntimeError("boom")),
-                 "choice error": lambda ai, g: setattr(ai, "error", ai_providers.AIChoiceError("unavailable", "x")),
-                 "malformed": lambda ai, g: setattr(ai, "answer", "not json"),
-                 "no choice": lambda ai, g: setattr(ai, "state", "needs_choice"),
-                 "gather error": lambda ai, g: g.fail.add("ev1"),
-                 "no sources": lambda ai, g: setattr(g, "result", []), "success": lambda ai, g: None}
+        def rebuild(ai, g, w, error=None):
+            ai.error = error
+            w.rebuild("ev1", self.agenda)
+
+        cases = {"run error": lambda ai, g, w: setattr(ai, "error", RuntimeError("boom")),
+                 "choice error": lambda ai, g, w: setattr(ai, "error", ai_providers.AIChoiceError("unavailable", "x")),
+                 "malformed": lambda ai, g, w: setattr(ai, "answer", "not json"),
+                 "no choice": lambda ai, g, w: setattr(ai, "state", "needs_choice"),
+                 "gather error": lambda ai, g, w: g.fail.add("ev1"),
+                 "no sources": lambda ai, g, w: setattr(g, "result", []), "success": lambda ai, g, w: None,
+                 "rebuild": rebuild, "rebuild error": lambda ai, g, w: rebuild(ai, g, w, RuntimeError("boom"))}
         for n, (name, breaks) in enumerate(cases.items()):
             for restart in (None, "gather", "run"):
                 with self.subTest(case=name, restart=restart):
                     ai, gather, writer = self.fresh(f"spend-{n}-{restart}.json")
-                    breaks(ai, gather)
+                    breaks(ai, gather, writer)
                     current = [writer]
 
                     def restarted():  # the app restarts in the middle of the first gather or run
@@ -783,6 +788,78 @@ class LoopTests(unittest.TestCase):
                         self.tick(EV_START - timedelta(hours=5) + timedelta(minutes=minutes), writer=current[-1])
                     self.assertLessEqual(len(ai.calls), 2)
                     self.assertLessEqual(gather.count, 3)
+
+    def test_a_run_cut_short_by_restarts_is_followed_by_one_retry_at_most(self):
+        """Every way a run is reached: the run is held and the app restarts on a copy of the file taken
+        mid-run, five times in a row. The event gets the interrupted run plus at most one retry."""
+        later = EV_START - timedelta(hours=1, minutes=59)
+
+        def first(ai, g, w):
+            return NOW
+
+        def retry(ai, g, w):
+            ai.error = RuntimeError("boom")
+            w.tick(self.agenda, NOW, idle)
+            return NOW + timedelta(minutes=20)
+
+        def recheck(ai, g, w):
+            w.tick(self.agenda, NOW, idle)
+            g.result = [RAW[0], {**RAW[1], "text": "Agreed a three-week pilot"}]
+            return later
+
+        def rebuild(ai, g, w, memo=True):
+            if memo:
+                w.tick(self.agenda, NOW, idle)
+            w.rebuild("ev1", self.agenda)
+            return NOW + timedelta(minutes=1)
+
+        def choice(ai, g, w, memo=False):
+            if memo:
+                w.tick(self.agenda, NOW, idle)
+                w.rebuild("ev1", self.agenda)
+            ai.error = ai_providers.AIChoiceError("unavailable", "x")
+            w.tick(self.agenda, NOW + timedelta(minutes=1), idle)
+            ai.key = "k2"
+            return NOW + timedelta(minutes=2)
+
+        routes = {"first prepare": first, "retry": retry, "recheck": recheck, "rebuild with memo": rebuild,
+                  "rebuild without memo": lambda ai, g, w: rebuild(ai, g, w, memo=False), "choice change": choice,
+                  "choice change with memo": lambda ai, g, w: choice(ai, g, w, memo=True)}
+        for n, (name, route) in enumerate(routes.items()):
+            for cut_from in (1, 2):  # restart during the first run reached, or only from its retry on
+                with self.subTest(route=name, restart_from_run=cut_from):
+                    folder = self.root / f"route-{n}-{cut_from}"
+                    folder.mkdir()
+                    ai, gather, writer = self.fresh(f"route-{n}-{cut_from}/memos-0.json")
+                    with redirect_stdout(self.out):
+                        start = route(ai, gather, writer)
+                    before = len(ai.calls)
+                    ai.error = RuntimeError("boom")  # every run from here on fails or is cut short
+                    current, restarts = [writer], []
+
+                    def restart():
+                        path = folder / f"memos-{len(current)}.json"
+                        path.write_bytes(current[-1].path.read_bytes())  # what the disk held at the crash
+                        current.append(MemoWriter(path, ai, gather, lambda: self.lang))
+
+                    def cut():
+                        if len(ai.calls) - before >= cut_from and len(restarts) < 5:
+                            restarts.append(1)
+                            restart()
+
+                    ai.on_run = cut
+                    when = start
+                    for batch in range(5):
+                        for step in range(4):
+                            self.tick(when, writer=current[-1])
+                            when += timedelta(minutes=10)
+                        if len(restarts) < 5:  # a restart with no run in flight too
+                            restarts.append(1)
+                            restart()
+                    self.assertIn(len(ai.calls) - before, (1, 2))  # the route did reach a run
+                    self.assertEqual(len(restarts), 5)
+                    if name in ("rebuild with memo", "choice change with memo", "recheck"):
+                        self.assertEqual(len(current[-1].plans()), 1)
 
     def test_failed_run_keeps_an_earlier_memo_on_screen(self):
         self.ai.error = RuntimeError("boom")
@@ -856,6 +933,27 @@ class LoopTests(unittest.TestCase):
         restarted_ai.key = "k2"
         fresh = self.restart_during(NOW + timedelta(minutes=2), restarted_ai)
         self.assertEqual(fresh.plans(), [plan])
+
+    def test_restart_during_a_choice_change_run_without_a_memo_shows_an_error(self):
+        self.ai.error = ai_providers.AIChoiceError("unavailable", "x")
+        self.tick(NOW)
+        self.ai.key, self.ai.error = "k2", None
+        restarted_ai = FakeAI(json.dumps(GOOD))
+        restarted_ai.key = "k2"
+        self.ai.gate, self.ai.entered = threading.Event(), threading.Event()
+        worker = threading.Thread(target=self.tick, args=(NOW + timedelta(minutes=1),))
+        worker.start()
+        try:
+            self.assertTrue(self.ai.entered.wait(5))
+            copy = self.root / "crash.json"
+            copy.write_bytes(self.writer.path.read_bytes())
+            fresh = MemoWriter(copy, restarted_ai, FakeGather(RAW), lambda: self.lang)
+        finally:
+            self.ai.gate.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        memo = fresh.memo_for(self.agenda["meetings"][0], [], NOW)
+        self.assertEqual((memo["state"], memo["reason"]), ("failed", "error"))
 
     def test_restart_during_a_rebuild_keeps_the_earlier_memo_shown(self):
         self.tick(NOW)
