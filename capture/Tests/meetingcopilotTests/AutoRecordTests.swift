@@ -271,6 +271,47 @@ struct NoCallAudioStopTests {
         }
     }
 
+    @Test("A skipped call stays skipped while it runs over, and the next hold records")
+    @MainActor
+    func testSkippedCallStaysSkippedWhileItRunsOver() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let end = start.addingTimeInterval(30 * 60)
+        var clock = start.addingTimeInterval(-2 * 60)
+        var active = true
+        var starts = 0
+        var settings = Config.AutoRecordSettings()
+        settings.startDelay = 10
+        settings.stopDelay = 15
+        let controller = AutoRecordController(
+            settings: settings, calendar: nil, loadSettings: { settings },
+            checkMic: { _ in
+                MicActivityMonitor.Result(
+                    active: active, names: active ? ["zoom.us"] : [], families: active ? ["us.zoom.xos"] : [],
+                    allHolders: active ? ["zoom.us"] : [])
+            },
+            now: { clock },
+            skipped: { $0 >= start.addingTimeInterval(-5 * 60) && $0 < end })
+        controller.startRecording = { _, _ in starts += 1 }
+
+        while clock <= end.addingTimeInterval(10 * 60) {
+            controller.tick()
+            clock.addTimeInterval(5)
+        }
+        #expect(starts == 0)
+
+        active = false
+        for _ in 0..<5 {
+            controller.tick()
+            clock.addTimeInterval(5)
+        }
+        active = true
+        for _ in 0..<3 {  // held for exactly startDelay on the third tick; no session is faked, so stop there
+            controller.tick()
+            clock.addTimeInterval(5)
+        }
+        #expect(starts == 1)
+    }
+
     @Test("The skip file covers a call from five minutes before it starts until it ends")
     func testSkipFileWindow() throws {
         let folder = FileManager.default.temporaryDirectory

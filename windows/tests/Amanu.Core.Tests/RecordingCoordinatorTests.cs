@@ -250,6 +250,26 @@ public sealed class RecordingCoordinatorTests
     }
 
     [Fact]
+    public async Task A_skipped_call_stays_skipped_while_it_runs_over()
+    {
+        using var root = new TemporaryDirectory();
+        var end = Started.AddMinutes(30);
+        var coordinator = Coordinator(root.Path, new InspectableCapture(),
+            at => at >= Started.AddMinutes(-5) && at < end);
+
+        var at = Started.AddMinutes(-2);
+        for (; at <= end.AddMinutes(10); at = at.AddSeconds(5))
+            await coordinator.ObserveAsync(Observation(at, "Zoom.exe"));
+        Assert.False(coordinator.State.IsRecording);
+
+        await coordinator.ObserveAsync(Released(at));
+        await coordinator.ObserveAsync(Released(at.AddSeconds(16)));
+        await coordinator.ObserveAsync(Observation(at.AddSeconds(30), "Zoom.exe"));
+        await coordinator.ObserveAsync(Observation(at.AddSeconds(42), "Zoom.exe"));
+        Assert.True(coordinator.State.IsRecording);
+    }
+
+    [Fact]
     public async Task A_skipped_call_still_records_by_hand()
     {
         using var root = new TemporaryDirectory();

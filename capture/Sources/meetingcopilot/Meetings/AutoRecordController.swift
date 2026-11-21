@@ -50,6 +50,9 @@ final class AutoRecordController {
     private var micIdleSince: Date?
     private var handledEventIDs = Set<String>()
     private var standingDownUntilCallEnds = false
+    /// A start was skipped while the mic was held; that call stays skipped,
+    /// even past its scheduled end, until the call app lets go of the mic.
+    private var skippingUntilCallEnds = false
     private var lastCalendarCheck = Date.distantPast
     private var currentEventEnd: Date?
 
@@ -162,7 +165,12 @@ final class AutoRecordController {
 
         // The person chose in MeetOnTrack not to record this call. Manual
         // starts never come through here, so they still work.
-        if skipped(now) {
+        if skippingUntilCallEnds, !mic.active,
+           (micIdleSince.map { now.timeIntervalSince($0) } ?? 0) > settings.stopDelay {
+            skippingUntilCallEnds = false
+        }
+        if skippingUntilCallEnds || skipped(now) {
+            if mic.active { skippingUntilCallEnds = true }
             lastDecision = localised("skipped: chosen in MeetOnTrack", "пропуск: выбрано в MeetOnTrack")
             return
         }
