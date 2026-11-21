@@ -51,6 +51,7 @@ class RecorderProbeTests(unittest.TestCase):
     def test_windows_registry_rules(self):
         cases = (
             ({('HKLM', STORE): 'Deny', ('HKCU', STORE): 'Allow'}, 'denied'),
+            ({('HKCU', STORE): 'Deny'}, 'denied'),
             ({('HKCU', STORE): 'Allow', ('HKCU', STORE + r'\NonPackaged'): 'Deny'}, 'denied'),
             ({}, 'unknown'),
             ({('HKCU', STORE): 'Allow', ('HKCU', STORE + r'\NonPackaged'): 'Allow'}, 'granted'),
@@ -61,6 +62,14 @@ class RecorderProbeTests(unittest.TestCase):
                                       read_registry=lambda hive, path, values=values: values.get((hive, path)))
                 self.assertEqual(probe.snapshot(),
                                  {'microphone': expected, 'call_audio': 'unknown', 'skip_recording': True})
+
+    def test_windows_unreadable_machine_key_is_unknown(self):
+        def read(hive, path):
+            if hive == 'HKLM':
+                raise PermissionError(5, 'Access is denied')
+            return 'Allow'
+        probe = RecorderProbe(self.binary, run=fake_run('{}'), os_name='nt', read_registry=read)
+        self.assertEqual(probe.snapshot()['microphone'], 'unknown')
 
     def test_windows_skip_recording_from_record_status(self):
         calls = []
@@ -141,6 +150,21 @@ class RouteTests(unittest.TestCase):
             status, payload = self.request('POST', '/api/permissions/open', {'which': 'microphone'})
         self.assertEqual((status, json.loads(payload)), (200, {'ok': True}))
         opener.assert_called_once_with('microphone')
+
+    def test_open_failure_is_generic(self):
+        with mock.patch.object(server, 'open_settings', side_effect=OSError('secret detail')):
+            status, payload = self.request('POST', '/api/permissions/open', {'which': 'microphone'})
+        self.assertEqual((status, json.loads(payload)), (500, {'ok': False, 'error': 'open_failed'}))
+
+    def test_recorder_running_is_cached(self):
+        server._RECORDER_RUNNING = None
+        self.addCleanup(setattr, server, '_RECORDER_RUNNING', None)
+        with mock.patch.object(server.os, 'name', 'posix'), \
+                mock.patch.object(server.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                    [], 0, stdout='', stderr='')) as run:
+            self.assertFalse(server.recorder_running())
+            self.assertFalse(server.recorder_running())
+        self.assertEqual(run.call_count, 1)
 
     def test_recorder_states(self):
         for value, expected in ((True, 'running'), (None, 'unknown')):

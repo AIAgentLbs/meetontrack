@@ -22,7 +22,7 @@ def _windows_registry(hive: str, path: str) -> str | None:
     try:
         with winreg.OpenKey(getattr(winreg, "HKEY_LOCAL_MACHINE" if hive == "HKLM" else "HKEY_CURRENT_USER"), path) as key:
             value = winreg.QueryValueEx(key, "Value")[0]
-    except OSError:  # missing key or value, or no access
+    except FileNotFoundError:  # missing key or value; no access raises
         return None
     return value if isinstance(value, str) else None
 
@@ -51,17 +51,22 @@ class RecorderProbe:
 
     def _macos(self) -> dict:
         answer = self._json("permissions")
-        state = lambda key: answer.get(key) if answer.get(key) in STATES else "unknown"
+
+        def state(key: str) -> str:
+            return answer[key] if answer.get(key) in STATES else "unknown"
+
         return {"microphone": state("microphone"), "call_audio": state("call_audio"),
                 "skip_recording": answer.get("skip_recording") is True}
 
     def _windows(self) -> dict:
         """Same rule as windows/src/Amanu.App/Access.cs MicrophoneAccess.Read; loopback needs no permission."""
-        user = self.read_registry("HKCU", MIC_STORE)
-        if "Deny" in (self.read_registry("HKLM", MIC_STORE), user, self.read_registry("HKCU", MIC_STORE + r"\NonPackaged")):
-            microphone = "denied"
+        try:
+            user = self.read_registry("HKCU", MIC_STORE)
+            values = (self.read_registry("HKLM", MIC_STORE), user, self.read_registry("HKCU", MIC_STORE + r"\NonPackaged"))
+        except OSError:  # a key that cannot be read, as Access.cs answers Unknown
+            microphone = "unknown"
         else:
-            microphone = "unknown" if user is None else "granted"
+            microphone = "denied" if "Deny" in values else "unknown" if user is None else "granted"
         return {"microphone": microphone, "call_audio": "unknown",
                 "skip_recording": self._json("record", "status").get("skip_recording") is True}
 
@@ -72,6 +77,9 @@ def open_settings(which: str, os_name: str = os.name, opener=None) -> None:
     if target is None:
         raise ValueError("Unknown permission.")
     if opener is None:
-        opener = os.startfile if os_name == "nt" else (
-            lambda url: subprocess.run(["/usr/bin/open", url], check=True, timeout=10))
+        opener = os.startfile if os_name == "nt" else _open_mac
     opener(target)
+
+
+def _open_mac(url: str) -> None:
+    subprocess.run(["/usr/bin/open", url], check=True, timeout=10)

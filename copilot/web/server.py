@@ -28,6 +28,7 @@ import hidden_consoles
 hidden_consoles.install()  # before any helper starts: no console windows on Windows
 from archive import MeetingArchive
 from permissions import RecorderProbe, open_settings
+from skip_recording import SkipRecording
 from analysis_rebuild import WINDOW as ANALYSIS_WINDOW, AnalysisRebuilds, chunk_key, transcript_chunks, transcript_signature
 from canonical_transcript import canonical_segments
 from meeting_boundaries import MeetingBoundaries, BoundaryConflict, BoundaryUnavailable
@@ -79,6 +80,7 @@ UPDATES = ReleaseUpdates(HOME / ".config/meeting-copilot/updates.json", installe
                          recording=capture_recording,
                          data_dir=HOME / ".local/share/meeting-copilot")
 TRANSCRIPT_FILE = HOME / ".local/share/meeting-copilot/meeting-copilot-live.json"
+SKIP_RECORDING_FILE = TRANSCRIPT_FILE.with_name("skip-recording.json")
 SESSION_FILE = HOME / ".config/meeting-copilot/SESSION.md"
 MANIFEST_FILE = HOME / ".config/meeting-copilot/repos.json"
 ACTIVE_REPOS_FILE = HOME / ".config/meeting-copilot/active-repos.json"
@@ -2467,6 +2469,7 @@ ASK формулируй как одну короткую реплику, кот
 
 TRANSCRIPT = TranscriptState()
 PERMISSIONS = RecorderProbe(RECOGNITION_GUARD.binary)
+SKIPS = SkipRecording(SKIP_RECORDING_FILE)
 PLANS = CallPlans(PREPARATIONS_FILE, CALL_PLAN_STATE_FILE, ACTIVE_REPOS_FILE,
                  CalendarMeetings(enabled=lambda: "calendar" in GOOGLE_CONTEXT.enabled_sources()))
 TRANSLATIONS = LiveTranslation(lambda text: AI.run("live_translation", text, timeout=90).text)
@@ -2781,18 +2784,37 @@ class AnnotationCache:
 ANNOTATED_CACHE = AnnotationCache()
 
 
+_RECORDER_RUNNING: tuple[float, bool | None] | None = None  # (monotonic time, answer), kept 5 s
+
+
 def recorder_running() -> bool | None:
     """Whether the recorder app is running, from the process list; None when that can't be told.
     The app is the binary with no subcommand (or `run`); `stt-options`, `process` and the other
-    one-shot commands share its path but record nothing."""
+    one-shot commands share its path but record nothing. Cached 5 s: the UI polls it."""
+    global _RECORDER_RUNNING
     if os.name == "nt":
         return None  # ponytail: Windows liveness unknown, add a tasklist check when its banner needs it
+    cached = _RECORDER_RUNNING
+    if cached and time.monotonic() - cached[0] < 5:
+        return cached[1]
     try:
         listing = subprocess.run(["/bin/ps", "-axo", "args="], capture_output=True, text=True, timeout=5).stdout
     except (OSError, subprocess.SubprocessError):
-        return None
+        listing = None
     app = str(RECOGNITION_GUARD.binary)
-    return any(line.strip() == app or line.startswith((app + " run", app + " -psn")) for line in listing.splitlines())
+    answer = None if listing is None else any(
+        line.strip() == app or line.startswith((app + " run", app + " -psn")) for line in listing.splitlines())
+    _RECORDER_RUNNING = (time.monotonic(), answer)
+    return answer
+
+
+def agenda_payload(now=None) -> dict:
+    """The agenda with the calendar's state, whether the recorder honours "do not record", and each choice."""
+    agenda = PLANS.agenda(now)
+    agenda["calendar_state"] = PLANS.calendar.state() if PLANS.calendar else "tool_missing"
+    agenda["skip_recording_supported"] = PERMISSIONS.snapshot()["skip_recording"]
+    agenda["meetings"] = [{**meeting, "skip_recording": SKIPS.skipped(meeting)} for meeting in agenda["meetings"]]
+    return agenda
 
 
 def annotated_snapshot():
@@ -3045,7 +3067,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif path == "/api/agenda":
             # Today's and tomorrow's meetings with their memos; not part of the 2.5 s state poll.
-            self._json({"ok": True, **PLANS.agenda()})
+            self._json({"ok": True, **agenda_payload()})
         elif path == "/api/repositories":
             self._json({"ok": True, **REPOSITORIES.catalog()})
         elif path == "/api/projects":
@@ -3151,8 +3173,26 @@ class Handler(BaseHTTPRequestHandler):
                     subprocess.run(["/usr/bin/open", str(binary.parents[2])], check=True, timeout=10)
                 self._json({"ok": True})
             elif path == "/api/permissions/open":
-                open_settings(str(payload.get("which") or ""))
-                self._json({"ok": True})
+                try:
+                    open_settings(str(payload.get("which") or ""))
+                except ValueError:
+                    raise
+                except Exception:  # no system error text reaches the page
+                    self._json({"ok": False, "error": "open_failed"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+                else:
+                    self._json({"ok": True})
+            elif path == "/api/agenda/skip-recording":
+                limits = {"event_id": 1024, "start": 64, "end": 64, "title": 300}
+                if not isinstance(payload.get("skip"), bool) or any(
+                        not isinstance(payload.get(field), str) or len(payload[field]) > limit
+                        for field, limit in limits.items()):
+                    raise ValueError("A call needs event_id, start, end, title and skip.")
+                if not PERMISSIONS.snapshot()["skip_recording"]:
+                    self._json({"ok": False, "error": "recorder_cannot_skip"}, HTTPStatus.CONFLICT)
+                else:
+                    SKIPS.set({field: payload[field] for field in limits}, payload["skip"],
+                              datetime.now().astimezone())
+                    self._json({"ok": True})
             elif path == "/api/getting-started/start-recording":
                 run = subprocess.run([str(RECOGNITION_GUARD.binary), "record", "start"],
                                      capture_output=True, text=True, timeout=10, check=False)

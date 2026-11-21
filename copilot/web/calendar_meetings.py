@@ -29,6 +29,11 @@ class CalendarMeetings:
     def available(self) -> bool:
         return bool(self.executable) and (self.enabled is None or bool(self.enabled()))
 
+    def state(self) -> str:
+        if not self.executable:
+            return "tool_missing"
+        return "not_connected" if self.enabled is not None and not self.enabled() else "connected"
+
     def for_day(self, day: date) -> list[dict]:
         if self.enabled is not None and not self.enabled():
             return []
