@@ -88,6 +88,7 @@ const elements = {
 
 const translations = {
   ru: {
+    "home.title": "Ближайшие встречи",
     "meeting.connecting": "Подключение к записи...",
     "status.checking": "Проверка",
     "nav.repositories": "Контекст встречи",
@@ -314,6 +315,7 @@ const translations = {
     "archive.mail_pending": "Автоотправка почты еще не настроена",
   },
   en: {
+    "home.title": "Upcoming meetings",
     "meeting.connecting": "Connecting to the recording...",
     "status.checking": "Checking",
     "nav.repositories": "Meeting context",
@@ -1969,6 +1971,8 @@ async function refreshAgenda() {
   } catch {
     return;
   }
+  window.agendaData = agenda;
+  window.renderShell?.();
   if (agendaMode) renderCallPlan(currentCallPlan, true);
 }
 
@@ -3113,6 +3117,8 @@ async function state() {
     const serverVersion = (data.updates || {}).version || "";
     if (pageVersion && serverVersion && serverVersion !== pageVersion && !pageEdited) return location.reload();
     pageVersion ||= serverVersion;
+    window.appState = data;
+    window.renderShell?.();
     // A change made here while this request ran wins over the older snapshot.
     if (epoch === preferenceEpoch && !preferenceSaves) applyPreferences(data.preferences || {});
     const project = data.project || {};

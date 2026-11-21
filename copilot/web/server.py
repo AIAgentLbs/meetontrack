@@ -2971,6 +2971,10 @@ class Handler(BaseHTTPRequestHandler):
             self._static("getting-started.js", "text/javascript; charset=utf-8")
         elif path == "/speech.js":
             self._static("speech.js", "text/javascript; charset=utf-8")
+        elif path in ("/shell.js", "/home.js"):
+            self._static(path[1:], "text/javascript; charset=utf-8")
+        elif path == "/screens.css":
+            self._static("screens.css", "text/css; charset=utf-8")
         elif path == "/api/stt":
             self._json({"ok": True, "choice": STT.status(), "downloads": STT.downloads(), "retranscribe": STT.jobs(),
                         "check": STT.last_check()})

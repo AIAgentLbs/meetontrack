@@ -1,0 +1,2 @@
+body[data-view="home"] .workspace,
+body[data-view="home"] .meeting-boundary-bar { display: none; }
