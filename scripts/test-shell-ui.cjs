@@ -35,29 +35,53 @@ const errors = [];
       const ago = minutes => new Date(now - minutes * 60000).toISOString();
       const finished = latest => ({ transcript: { meeting_id: 'm1', status: 'finished', latest_at: latest } });
       const liveState = { transcript: { meeting_id: 'm2', status: 'recording', live: true } };
-      const manual = { view: 'home', key: callKey(finished(ago(10))) };
-      return [
-        viewFor(liveState, null, now),
-        viewFor(finished(ago(10)), null, now),
-        viewFor(finished(ago(180)), null, now),
-        viewFor({}, null, now),
-        viewFor(finished(ago(10)), manual, now),
-        viewFor(liveState, manual, now),
-      ];
+      const capture = state => ({ recording_health: { capture: { state, audio_recording: state === 'recording' } },
+        transcript: { meeting_id: 'm3', status: state === 'paused' ? 'paused' : 'recording', live: false, updated_at: ago(20) } });
+      const manual = { view: 'home', key: callKey(finished(ago(10)), now), at: now - 60000 };
+      const manualAfter = minutes => ({ view: 'after', key: callKey(finished(ago(180)), now), at: now - minutes * 60000 });
+      return {
+        live: viewFor(liveState, null, now),
+        finished10m: viewFor(finished(ago(10)), null, now),
+        finished3h: viewFor(finished(ago(180)), null, now),
+        noTranscript: viewFor({}, null, now),
+        manualHome: viewFor(finished(ago(10)), manual, now),
+        manualAfterKeyChanged: viewFor(liveState, manual, now),
+        exactly2h: viewFor(finished(ago(120)), null, now),
+        justOver2h: viewFor(finished(new Date(now - 2 * 3600000 - 1).toISOString()), null, now),
+        finishedNoLatest: viewFor({ transcript: { meeting_id: 'm1', status: 'finished' } }, null, now),
+        // Silence or no live transcription: the recorder's fresh status still means a call.
+        recordingNotLive: viewFor({ transcript: { meeting_id: 'm4', status: 'recording', live: false, updated_at: ago(1) } }, null, now),
+        stalled: viewFor(capture('stalled'), null, now),
+        paused: viewFor(capture('paused'), null, now),
+        // A recorder that crashed: no capture marker, its last "recording" status not rewritten for 10 min.
+        crashed: viewFor({ recording_health: { capture: { state: 'inactive' } },
+          transcript: { meeting_id: 'm5', status: 'recording', live: false, updated_at: ago(10) } }, null, now),
+        // One call keeps one key: speech stopping does not change it.
+        keyHolds: callKey(capture('recording'), now) === callKey({ ...capture('recording'),
+          transcript: { meeting_id: 'm3', status: 'recording', live: true } }, now),
+        manualAfter3h: viewFor(finished(ago(180)), manualAfter(180), now),
+        manualAfter10m: viewFor(finished(ago(180)), manualAfter(10), now),
+      };
     });
-    assert.deepEqual(views, ['call', 'after', 'home', 'home', 'home', 'call']);
+    assert.deepEqual(views, {
+      live: 'call', finished10m: 'after', finished3h: 'home', noTranscript: 'home', manualHome: 'home',
+      manualAfterKeyChanged: 'call', exactly2h: 'after', justOver2h: 'home', finishedNoLatest: 'home',
+      recordingNotLive: 'call', stalled: 'call', paused: 'call', crashed: 'home', keyHolds: true,
+      manualAfter3h: 'home', manualAfter10m: 'after',
+    });
 
     const shown = () => page.evaluate(() => ({
       view: document.body.dataset.view,
       workspace: getComputedStyle(document.querySelector('.workspace')).display !== 'none',
+      boundaryBar: getComputedStyle(document.querySelector('.meeting-boundary-bar')).display !== 'none',
       home: !document.getElementById('home').hidden,
     }));
     await page.waitForFunction(() => window.appState && document.body.dataset.view === 'call');
-    assert.deepEqual(await shown(), { view: 'call', workspace: true, home: false });
+    assert.deepEqual(await shown(), { view: 'call', workspace: true, boundaryBar: true, home: false });
 
     live = false;
     await page.waitForFunction(() => document.body.dataset.view === 'home');
-    assert.deepEqual(await shown(), { view: 'home', workspace: false, home: true });
+    assert.deepEqual(await shown(), { view: 'home', workspace: false, boundaryBar: false, home: true });
     assert.equal(await page.locator('#home-heading').count(), 1);
 
     assert.deepEqual(errors, []);

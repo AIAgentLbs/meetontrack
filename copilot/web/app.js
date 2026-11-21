@@ -3117,10 +3117,10 @@ async function state() {
     const serverVersion = (data.updates || {}).version || "";
     if (pageVersion && serverVersion && serverVersion !== pageVersion && !pageEdited) return location.reload();
     pageVersion ||= serverVersion;
-    window.appState = data;
-    window.renderShell?.();
     // A change made here while this request ran wins over the older snapshot.
     if (epoch === preferenceEpoch && !preferenceSaves) applyPreferences(data.preferences || {});
+    window.appState = data;
+    window.renderShell?.();
     const project = data.project || {};
     window.renderReleaseUpdates(data.updates || {});
     window.renderGettingStartedStatus?.(data);

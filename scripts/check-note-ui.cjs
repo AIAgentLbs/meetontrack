@@ -29,7 +29,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || '/Users/m/.cache/c
         started_at: '2026-10-05T10:00:00Z', latest_at: '2026-10-05T10:02:44Z', segments: [], speakers: [] },
       copilot: { messages: [], busy: false, analysis: { state: 'idle' } }, journal: [], frames: [], meeting_chat: [], project: {},
       // Audio still recording keeps the main screen up; with no call the meeting library opens over it.
-      recording_health: { capture: { audio_recording: true } },
+      recording_health: { capture: { state: 'recording', audio_recording: true } },
     };
     await page.route('**/api/**', async route => {
       if (new URL(route.request().url()).pathname === '/api/preferences') return route.fulfill({ json: { ok: true } });
