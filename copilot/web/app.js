@@ -122,6 +122,7 @@ const translations = {
     "home.action_failed": "Не получилось. Попробуйте еще раз.",
     "home.cannot_skip": "Программа записи не умеет пропускать звонок. Обновите приложение.",
     "home.already_recording": "Запись этого звонка уже идет. Остановить ее можно в программе записи.",
+    "home.previous_call_recording": "Еще идет запись предыдущего звонка, этот звонок попадает в нее. Остановить ее можно в программе записи.",
     "home.more_people": "и еще {n}",
     "home.tool_title": "Нет программы для чтения календаря",
     "home.tool_text": "MeetOnTrack читает Google Календарь через программу gws.",
@@ -152,6 +153,7 @@ const translations = {
     "status.waiting": "Ждет звонка, запись включится сама",
     "status.waiting_at": "Ждет звонка в {time}, запись включится сама",
     "status.waiting_manual": "Ждет звонка",
+    "status.disconnected": "Нет связи с MeetOnTrack, пробуем снова",
     "status.waiting_at_manual": "Ждет звонка в {time}",
     "status.recording": "Запись",
     "status.mic_missing": "Нет доступа к микрофону: запись в {time} не включится",
@@ -423,6 +425,7 @@ const translations = {
     "home.action_failed": "That did not work. Try again.",
     "home.cannot_skip": "The recorder cannot skip a call. Update the app.",
     "home.already_recording": "This call is already being recorded. You can stop it in the recorder.",
+    "home.previous_call_recording": "The previous call is still being recorded and this call is going into it. You can stop it in the recorder.",
     "home.more_people": "and {n} more",
     "home.tool_title": "The calendar reader is not installed",
     "home.tool_text": "MeetOnTrack reads Google Calendar through the gws tool.",
@@ -453,6 +456,7 @@ const translations = {
     "status.waiting": "Waiting for a call, recording starts by itself",
     "status.waiting_at": "Waiting for the {time} call, recording starts by itself",
     "status.waiting_manual": "Waiting for a call",
+    "status.disconnected": "No connection to MeetOnTrack, trying again",
     "status.waiting_at_manual": "Waiting for the {time} call",
     "status.recording": "Recording",
     "status.mic_missing": "No microphone access: the {time} call will not be recorded",
@@ -3779,10 +3783,12 @@ window.matchMedia("(max-width: 600px)").addEventListener("change", () => {
 });
 // Back from System Settings: the permissions may have changed.
 // Coming back to the window reads the state and the permissions fresh. A window covered by System Settings
-// may never turn hidden, so focus counts as coming back too.
+// may never turn hidden, so focus counts as coming back too; both on one return give one read.
+let welcoming = null;
 function welcomeBack() {
+  if (welcoming) return;
   void state();
-  void refreshPermissions(true).then(() => window.renderShell?.());
+  welcoming = refreshPermissions(true).then(() => window.renderShell?.()).finally(() => { welcoming = null; });
 }
 document.addEventListener("visibilitychange", () => document.hidden || welcomeBack());
 addEventListener("focus", welcomeBack);

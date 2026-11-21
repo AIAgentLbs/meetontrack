@@ -21,7 +21,30 @@ const errors = [];
     recording_health: { capture: { audio_recording: live } },
     copilot: { busy: false, analysis: { state: 'idle' }, messages: [] },
   });
+  const serveFile = async route => {
+    const file = new URL(route.request().url()).pathname.slice(1) || 'index.html';
+    if (file.includes('/') || !/\.(html|js|css)$/.test(file)) return route.abort();
+    const type = file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html';
+    return route.fulfill({ contentType: type, body: await fs.readFile(path.join(root, file)) });
+  };
   try {
+    // The first state never comes: once the poll calls the connection failed, Home shows and the bar says so.
+    const lost = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await lost.route('http://shell-ui.test/**', async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname === '/api/state') return route.fulfill({ status: 500, json: { ok: false, error: 'down' } });
+      if (url.pathname.startsWith('/api/')) return route.fulfill({ json: { ok: true } });
+      return serveFile(route);
+    });
+    await lost.addInitScript(() => { localStorage.setItem('meetontrack-started', '1'); localStorage.setItem('meeting-copilot-language', 'ru'); });
+    const lostPage = await lost.newPage();
+    await lostPage.goto('http://shell-ui.test/');
+    await lostPage.waitForFunction(() => document.body.dataset.view === 'home', null, { timeout: 15000 });
+    assert.deepEqual(await lostPage.evaluate(() => ({ home: document.getElementById('home').checkVisibility(),
+      status: document.getElementById('call-status-text').textContent, fail: document.getElementById('call-status-text').classList.contains('fail') })),
+    { home: true, status: 'Нет связи с MeetOnTrack, пробуем снова', fail: true }, 'a state that never comes is not a blank page');
+    await lost.close();
+
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await context.route('http://shell-ui.test/**', async route => {
       const url = new URL(route.request().url());

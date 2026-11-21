@@ -252,12 +252,17 @@ class CallPlans:
         Works with no live call; calendar reads and repository scans are cached by their owners.
         """
         now = now or datetime.now().astimezone()
-        meetings, unscheduled, seen = [], [], set()
+        meetings, unscheduled, seen, failed = [], [], set(), []
         for day in (now.date(), now.date() + timedelta(days=1)):
             noon = datetime.combine(day, time(12)).astimezone().isoformat()
             plans = [plan for plan in self._plans({"started_at": noon}) if self._valid(plan)]
             matched: set[str] = set()
-            for event in (self.calendar.for_day(day) if self.calendar else []):
+            try:
+                events = self.calendar.for_day(day) if self.calendar else []
+            except CalendarUnavailable:
+                events = []
+                failed.append(day.isoformat())  # the day that loaded keeps its rows; Home offers Retry for this one
+            for event in events:
                 try:
                     started, ended = datetime.fromisoformat(event["start"]), datetime.fromisoformat(event["end"])
                 except (KeyError, TypeError, ValueError):
@@ -282,7 +287,7 @@ class CallPlans:
         return {"calendar": bool(self.calendar and self.calendar.available()),
                 "meetings": [{k: v for k, v in item.items() if k != "_sort"}
                              for item in sorted(meetings, key=lambda item: item["_sort"])],
-                "unscheduled_plans": unscheduled}
+                "unscheduled_plans": unscheduled, "failed_days": failed}
 
     @staticmethod
     def _near_scheduled_time(plan: dict, event_start: datetime) -> bool:

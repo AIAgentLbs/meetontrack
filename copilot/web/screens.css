@@ -49,13 +49,18 @@ body:has(#archive-dialog[data-mode="library"]:not([hidden])) #home { display: no
 }
 /* 701-900 px: the status takes its own row under navigation and Menu, so a problem reads whole.
    A problem keeps that row up to 1023 px: a long Russian one with the pill does not fit beside them before 1024. */
+/* With the status on its own row, Menu opens under the whole bar (the sticky bar is its anchor), not over the status. */
 @media (min-width: 701px) and (max-width: 900px) {
   .topbar { flex-wrap: wrap; padding: 8px 24px; }
   .topbar .status { order: 3; flex-basis: 100%; padding-left: 0; border-left: 0; }
+  .topbar .tools { position: static; }
+  .topbar .menu { right: 24px; }
 }
 @media (min-width: 901px) and (max-width: 1023px) {
   .topbar:has(#call-status-text.fail) { flex-wrap: wrap; padding: 8px 24px; }
   .topbar:has(#call-status-text.fail) .status { order: 3; flex-basis: 100%; padding-left: 0; border-left: 0; }
+  .topbar:has(#call-status-text.fail) .tools { position: static; }
+  .topbar:has(#call-status-text.fail) .menu { right: 24px; }
 }
 
 .topbar button, .home button {

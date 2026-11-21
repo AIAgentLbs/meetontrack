@@ -28,11 +28,11 @@ import hidden_consoles
 hidden_consoles.install()  # before any helper starts: no console windows on Windows
 from archive import MeetingArchive
 from permissions import RecorderProbe, open_settings
-from skip_recording import SkipRecording, covers as skip_covers
+from skip_recording import SkipRecording, recording_call
 from analysis_rebuild import WINDOW as ANALYSIS_WINDOW, AnalysisRebuilds, chunk_key, transcript_chunks, transcript_signature
 from canonical_transcript import canonical_segments
 from meeting_boundaries import MeetingBoundaries, BoundaryConflict, BoundaryUnavailable
-from calendar_meetings import CalendarMeetings, CalendarUnavailable
+from calendar_meetings import CalendarMeetings
 from google_context import GoogleContext
 import twenty_crm
 from call_plan import CallPlans
@@ -2810,29 +2810,39 @@ def recorder_running() -> bool | None:
 
 def agenda_payload(now=None) -> dict:
     """The agenda with the calendar's state, whether the recorder honours "do not record", and each choice.
-    A calendar that could not be read is "failed", never an empty day."""
-    try:
-        agenda = PLANS.agenda(now)
-    except CalendarUnavailable:
-        agenda = {"calendar": True, "meetings": [], "unscheduled_plans": [], "calendar_state": "failed"}
+    A calendar day that could not be read is "failed" with the rows of the day that loaded, never an empty day."""
+    agenda = PLANS.agenda(now)
+    if agenda.get("failed_days"):
+        agenda["calendar_state"] = "failed"  # a partial agenda neither clips nor restores stored skips
     else:
         agenda["calendar_state"] = PLANS.calendar.state() if PLANS.calendar else "tool_missing"
-        SKIPS.clip(agenda["meetings"])  # a call booked after a skip ends that skip before it
+        SKIPS.clip(agenda["meetings"])  # a call booked after a skip ends that skip before it; a cancelled one gives it back
     agenda["skip_recording_supported"] = PERMISSIONS.snapshot()["skip_recording"]
     agenda["meetings"] = [{**meeting, "skip_recording": SKIPS.skipped(meeting)} for meeting in agenda["meetings"]]
     return agenda
 
 
+def capture_started() -> datetime | None:
+    """When the running capture began, from the live transcript; None when unknown."""
+    try:
+        started = datetime.fromisoformat(str(TRANSCRIPT.physical_snapshot().get("started_at") or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return started if started.tzinfo else None
+
+
 def auto_record_enabled() -> bool:
-    """Whether the recorder starts by itself, read from the shared settings file with the recorders' own keys and
-    defaults (Config.swift autoRecord, AppSettings.cs AutoRecordSettings): on, and something to start from."""
+    """Whether this platform's recorder starts by itself, read from the shared settings file with the recorders' own
+    keys and defaults (Config.swift autoRecord, AppSettings.cs AutoRecordSettings): on, and something to start from.
+    The Windows recorder starts only from microphone activity; the Mac one also from the calendar."""
     try:
         settings = json.loads(CAPTURE_CONFIG_FILE.read_text()).get("auto_record")
     except (OSError, ValueError, AttributeError):
         settings = None
     settings = settings if isinstance(settings, dict) else {}
     flag = lambda key, default: settings[key] if isinstance(settings.get(key), bool) else default
-    return flag("enabled", True) and (flag("mic_activity", True) or flag("calendar", False))
+    calendar = flag("calendar", False) and sys.platform != "win32"
+    return flag("enabled", True) and (flag("mic_activity", True) or calendar)
 
 
 def annotated_snapshot():
@@ -3209,19 +3219,20 @@ class Handler(BaseHTTPRequestHandler):
                         for field, limit in limits.items()):
                     raise ValueError("A call needs event_id, start, end, title and skip.")
                 meeting = {field: payload[field] for field in limits}
-                now = datetime.now().astimezone()
                 if not PERMISSIONS.snapshot()["skip_recording"]:
                     self._json({"ok": False, "error": "recorder_cannot_skip"}, HTTPStatus.CONFLICT)
-                elif payload["skip"] and skip_covers(meeting, now) and capture_recording():
-                    # The recorders read the file only before they start: a skip cannot stop this recording.
-                    self._json({"ok": False, "error": "already_recording"}, HTTPStatus.CONFLICT)
                 else:
-                    try:
-                        meetings = PLANS.agenda(now)["meetings"]
-                    except CalendarUnavailable:
-                        meetings = []
-                    SKIPS.set(meeting, payload["skip"], now, meetings)
-                    self._json({"ok": True})
+                    agenda = PLANS.agenda(datetime.now().astimezone())
+                    # Checked after the calendar read, right before the write: a recording may have started meanwhile.
+                    # The recorders read the file only before they start, so a skip cannot stop a running recording.
+                    now = datetime.now().astimezone()
+                    running = payload["skip"] and recording_call(meeting, now, capture_started())
+                    if running and capture_recording():
+                        error = "already_recording" if running == "this" else "previous_call_recording"
+                        self._json({"ok": False, "error": error}, HTTPStatus.CONFLICT)
+                    else:
+                        SKIPS.set(meeting, payload["skip"], now, None if agenda.get("failed_days") else agenda["meetings"])
+                        self._json({"ok": True})
             elif path == "/api/getting-started/start-recording":
                 run = subprocess.run([str(RECOGNITION_GUARD.binary), "record", "start"],
                                      capture_output=True, text=True, timeout=10, check=False)

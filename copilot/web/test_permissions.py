@@ -217,5 +217,18 @@ class RouteTests(unittest.TestCase):
                     mock.patch.object(server, 'CAPTURE_CONFIG_FILE', config):
                 self.assertIs(json.loads(self.request('GET', '/api/permissions')[1])['auto_record'], expected)
 
+    def test_auto_record_on_windows_needs_mic_activity(self):
+        # The Windows recorder starts only from microphone activity and has no calendar trigger.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        config = Path(directory.name) / 'config.json'
+        for text, expected in (('{"auto_record": {"mic_activity": false, "calendar": true}}', False),
+                               ('{"auto_record": {"calendar": true}}', True)):
+            config.write_text(text)
+            with self.subTest(text=text), mock.patch.object(server, 'PERMISSIONS', FakeProbe()), \
+                    mock.patch.object(server, 'recorder_running', return_value=True), \
+                    mock.patch.object(server, 'CAPTURE_CONFIG_FILE', config), mock.patch.object(server.sys, 'platform', 'win32'):
+                self.assertIs(json.loads(self.request('GET', '/api/permissions')[1])['auto_record'], expected)
+
 if __name__ == '__main__':
     unittest.main()

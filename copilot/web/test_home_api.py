@@ -90,7 +90,7 @@ class SkipRecordingTests(unittest.TestCase):
         self.assertTrue(self.skips.skipped(call))
         self.assertTrue(self.skips.skipped({**call, 'title': 'Renamed'}))
         self.assertEqual(json.loads(self.path.read_text()), {'version': 1, 'calls': [
-            {'key': 'evt-1', 'event_id': 'evt-1', 'start': call['start'], 'end': call['end']}]})
+            {'key': 'evt-1', 'event_id': 'evt-1', 'start': call['start'], 'end': call['end'], 'scheduled_end': call['end']}]})
         self.assertNotIn('Pilot review', self.path.read_text())
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
         self.skips.set(call, False, NOW)
@@ -135,6 +135,17 @@ class SkipRecordingTests(unittest.TestCase):
         self.assertEqual(self.stored(), {'evt-a': skipped['end']})
         self.skips.set(both, True, NOW - timedelta(hours=1), meetings=[skipped, both])
         self.assertEqual(self.stored(), {'evt-a': skipped['end'], 'evt-b': both['end']})
+
+    def test_a_cancelled_next_call_gives_the_skip_its_full_window_back(self):
+        skipped, following = call('evt-a', NOW), call('evt-b', NOW + timedelta(minutes=20))
+        self.skips.set(skipped, True, NOW - timedelta(hours=1), meetings=[skipped, following])
+        self.assertEqual(self.stored(), {'evt-a': (NOW + timedelta(minutes=15)).isoformat()})
+        self.skips.clip([skipped])  # evt-b was cancelled
+        self.assertEqual(self.stored(), {'evt-a': skipped['end']})
+        # Without the agenda (the calendar could not be read) nothing is clipped or restored.
+        self.skips.clip([skipped, following])
+        self.skips.set(call('evt-c', NOW + timedelta(hours=3)), True, NOW - timedelta(hours=1), meetings=None)
+        self.assertEqual(self.stored()['evt-a'], (NOW + timedelta(minutes=15)).isoformat())
 
     def test_clip_applies_to_a_call_booked_after_the_skip(self):
         skipped = call('evt-a', NOW)
@@ -187,10 +198,12 @@ class FakeSkips:
 
 
 class FailingPlans(FakePlans):
+    """Today was read, tomorrow could not be."""
     calendar = CalendarMeetings(executable='/bin/gws')
 
     def agenda(self, now=None):
-        raise CalendarUnavailable()
+        return {'calendar': True, 'meetings': [meeting('evt-1')], 'unscheduled_plans': [],
+                'failed_days': [(NOW + timedelta(days=1)).date().isoformat()]}
 
 
 class FakeProbe:
@@ -221,11 +234,14 @@ class AgendaRouteTests(unittest.TestCase):
             server.agenda_payload(NOW)
         self.assertEqual([item['event_id'] for item in skips.clipped], ['evt-1', 'evt-2'])
 
-    def test_a_failed_calendar_read_is_not_an_empty_day(self):
-        with mock.patch.object(server, 'PLANS', FailingPlans()), mock.patch.object(server, 'SKIPS', FakeSkips()), \
+    def test_a_failed_calendar_day_is_not_an_empty_day_and_keeps_the_day_that_loaded(self):
+        skips = FakeSkips()
+        with mock.patch.object(server, 'PLANS', FailingPlans()), mock.patch.object(server, 'SKIPS', skips), \
                 mock.patch.object(server, 'PERMISSIONS', FakeProbe(True)):
             payload = server.agenda_payload(NOW)
-        self.assertEqual((payload['calendar_state'], payload['meetings'], payload['unscheduled_plans']), ('failed', [], []))
+        self.assertEqual((payload['calendar_state'], [item['event_id'] for item in payload['meetings']], payload['failed_days']),
+                         ('failed', ['evt-1'], [(NOW + timedelta(days=1)).date().isoformat()]))
+        self.assertIsNone(skips.clipped, 'a partial agenda neither clips nor restores stored skips')
 
     def test_agenda_payload_without_calendar_is_tool_missing(self):
         plans = FakePlans()
@@ -266,13 +282,14 @@ class AgendaRouteTests(unittest.TestCase):
                     self.assertFalse(body['ok'])
             self.assertTrue(skips.skipped(call))
 
-    def skip_route(self, payload, recording, plans=None):
+    def skip_route(self, payload, recording, plans=None, started=None):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         skips = SkipRecording(Path(directory.name) / 'skip-recording.json')
         port = serve(self)
         with mock.patch.object(server, 'SKIPS', skips), mock.patch.object(server, 'PERMISSIONS', FakeProbe(True)), \
-                mock.patch.object(server, 'capture_recording', return_value=recording), \
+                mock.patch.object(server, 'capture_recording', side_effect=recording if callable(recording) else lambda: recording), \
+                mock.patch.object(server, 'capture_started', return_value=started), \
                 mock.patch.object(server, 'PLANS', plans or FakePlans()):
             return request(port, 'POST', '/api/agenda/skip-recording', payload), skips
 
@@ -287,6 +304,36 @@ class AgendaRouteTests(unittest.TestCase):
                                    ({**running, 'skip': False}, True), ({**running, 'skip': True}, False)):
             with self.subTest(payload=payload, recording=recording):
                 self.assertEqual(self.skip_route(payload, recording)[0], (200, {'ok': True}))
+
+    def test_skip_refused_only_for_the_call_that_is_recording(self):
+        now = datetime.now(timezone.utc)
+        soon = meeting('evt-soon', start=now + timedelta(minutes=3))
+        begun = meeting('evt-begun', start=now - timedelta(minutes=2))
+        earlier, own = now - timedelta(minutes=40), now - timedelta(minutes=4)
+        # An earlier call's recording before this call starts: the skip holds for this call's own start.
+        self.assertEqual(self.skip_route({**soon, 'skip': True}, True, started=earlier)[0], (200, {'ok': True}))
+        # The earlier call runs on into this one: this call is going into that recording.
+        self.assertEqual(self.skip_route({**begun, 'skip': True}, True, started=earlier)[0],
+                         (409, {'ok': False, 'error': 'previous_call_recording'}))
+        # The recording started within this call's own window, or its start is unknown: this call.
+        for started in (own, None):
+            with self.subTest(started=started):
+                self.assertEqual(self.skip_route({**begun, 'skip': True}, True, started=started)[0],
+                                 (409, {'ok': False, 'error': 'already_recording'}))
+
+    def test_skip_rechecks_the_capture_after_reading_the_agenda(self):
+        now = datetime.now(timezone.utc)
+        running = meeting('evt-now', start=now - timedelta(minutes=1))
+        capture = {'on': False}
+
+        class Plans(FakePlans):
+            def agenda(self, now=None):
+                capture['on'] = True  # recording starts while the calendar is read
+                return super().agenda(now)
+
+        (answer, skips) = self.skip_route({**running, 'skip': True}, lambda: capture['on'], Plans())
+        self.assertEqual(answer, (409, {'ok': False, 'error': 'already_recording'}))
+        self.assertFalse(skips.skipped(running))
 
     def test_skip_route_clips_against_the_agenda(self):
         now = datetime.now(timezone.utc).replace(microsecond=0)

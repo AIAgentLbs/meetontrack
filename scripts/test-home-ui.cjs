@@ -190,6 +190,22 @@ const checks = {
     await page.evaluate(() => refreshAgenda());
     await page.waitForFunction(() => document.body.dataset.view === 'home' && /идет сейчас|on now/.test(document.querySelector('#home .row.next .soon')?.textContent));
     assert.equal(await row.locator('button.quiet').count(), 0, 'no Do not record for the call being recorded');
+    // An earlier call's recording that runs on into this call: offered, and the server's answer says what happens.
+    page.api.fixture.state.transcript.started_at = new Date(Date.now() - 40 * 60000).toISOString();
+    await page.evaluate(() => refreshAgenda());
+    await row.locator('button.quiet').waitFor();
+    page.api.responses['/api/agenda/skip-recording'] = { status: 409, json: { ok: false, error: 'previous_call_recording' } };
+    await row.locator('button.quiet').click();
+    await page.waitForFunction(() => /предыдущего|previous call/.test(document.querySelector('#home .row.next .row-error')?.textContent));
+    assert.equal(await row.locator('.row-error').innerText(), lang === 'ru'
+      ? 'Еще идет запись предыдущего звонка, этот звонок попадает в нее. Остановить ее можно в программе записи.'
+      : 'The previous call is still being recorded and this call is going into it. You can stop it in the recorder.');
+    delete page.api.responses['/api/agenda/skip-recording'];
+    // An earlier recording before this call starts: Do not record still holds for this call's own start.
+    Object.assign(next, { start: new Date(Date.now() + 3 * 60000).toISOString(), end: new Date(Date.now() + 33 * 60000).toISOString() });
+    await page.evaluate(() => refreshAgenda());
+    await page.waitForFunction(() => /через|in /.test(document.querySelector('#home .row.next .soon')?.textContent));
+    assert.equal(await row.locator('button.quiet').count(), 1, 'Do not record for a call an earlier recording has not reached');
   },
   async preparing(page, lang) {
     const status = page.locator('#home .row.next [role="status"]');
@@ -354,6 +370,16 @@ const checks = {
     await page.locator('#home .empty').waitFor();
     await emptyState(page, lang, [{ ru: 'Не удалось загрузить звонки', en: 'Could not load your calls' },
       { ru: 'Попробуем снова сами, или нажмите Повторить.', en: 'We will keep trying, or press Retry.' }], 1);
+    // Today loaded, tomorrow did not: today's rows stay, tomorrow says it could not be loaded, with Retry.
+    const tomorrow = new Date(Date.now() + 24 * 3600000);
+    const day = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
+    page.api.fixture.agenda = { ...states.ready.agenda, calendar_state: 'failed', failed_days: [day] };
+    await page.evaluate(() => refreshAgenda());
+    await page.locator('#home .row.next').waitFor();
+    const partial = await page.evaluate(() => [...document.querySelectorAll('#home .col > *')].map(node =>
+      node.matches('h2.day') ? 'day' : node.matches('.row') ? 'row' : node.matches('.empty') ? 'failed' : node.tagName));
+    assert.ok(partial.includes('row') && partial.at(-1) === 'failed' && partial.at(-2) === 'day', JSON.stringify(partial));
+    assert.equal(await page.locator('#home .empty button').innerText(), lang === 'ru' ? 'Повторить' : 'Retry');
   },
   async mic_missing(page, lang) {
     await failing(page);
@@ -403,6 +429,15 @@ const checks = {
     });
     assert.deepEqual(wide, { cut: false, pill: true }, 'at 1024 the status is whole, the pill narrower');
     await readableStatus(page, [701, 760, 860, 900, 960, 1024, 1120, 1200], 'problem with the delivery pill');
+    // The status on its own row: Menu opens under the whole bar, not over the status action.
+    for (const width of [760, 960]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.locator('#menu-button').click();
+      const [bar, menuBox, action] = await Promise.all(['.topbar', '#app-menu', '#call-status-action'].map(selector => page.locator(selector).boundingBox()));
+      assert.ok(menuBox.y >= bar.y + bar.height && menuBox.y >= action.y + action.height, `menu under the bar at ${width}`);
+      await page.keyboard.press('Escape');
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
     // 400 px with the delivery pill: the status reads, its action and Menu stay in the window.
     await page.setViewportSize({ width: 400, height: 900 });
     await page.locator('#delivery-alert').waitFor();
@@ -623,9 +658,10 @@ const checks = {
     // A window covered by System Settings may never turn hidden: coming back to it (focus) reads them fresh too.
     page.api.fixture.permissions.microphone = 'granted';
     const focusReads = page.api.permissionReads.length;
-    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.evaluate(() => { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('visibilitychange')); });
     await page.waitForFunction(() => !document.querySelector('#call-status-text').classList.contains('fail'), null, { timeout: 2000 });
-    assert.ok(page.api.permissionReads.slice(focusReads).includes('?fresh=1'), JSON.stringify(page.api.permissionReads));
+    assert.equal(page.api.permissionReads.slice(focusReads).filter(query => query === '?fresh=1').length, 1,
+      `focus and visibilitychange together read once: ${JSON.stringify(page.api.permissionReads)}`);
     assert.equal(page.api.permissionReads[0], '');
   },
   async long(page, lang) {

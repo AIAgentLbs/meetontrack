@@ -252,6 +252,25 @@ call_date: 2026-09-29
         self.assertEqual(result["unscheduled_plans"], [])
         self.assertFalse(self.state.exists())  # The agenda binds nothing to a meeting.
 
+    def test_agenda_keeps_the_day_that_loaded_when_the_other_fails(self):
+        from datetime import datetime
+        from calendar_meetings import CalendarUnavailable
+
+        class FakeCalendar:
+            def available(self):
+                return True
+
+            def for_day(self, day):
+                if str(day) == "2026-09-30":
+                    raise CalendarUnavailable()
+                return [{"title": "Weekly sync", "start": "2026-09-29T11:00:00+02:00", "end": "2026-09-29T11:30:00+02:00",
+                         "link": "", "attendees": [{"email": "a@example.com", "name": "Alex Sample", "self": False}]}]
+
+        plans = CallPlans(self.root / "absent.json", self.state, self._repo({}), FakeCalendar())
+        result = plans.agenda(datetime.fromisoformat("2026-09-29T09:00:00+02:00"))
+        self.assertEqual([item["title"] for item in result["meetings"]], ["Weekly sync"])
+        self.assertEqual(result["failed_days"], ["2026-09-30"])
+
     def test_agenda_orders_by_time_and_ended_event_keeps_its_plan(self):
         active = self._repo({"PREP.md": (
             "---\ncall_date: 2026-09-29\n---\n# Sales kit: Acme / Alex Sample\n"

@@ -57,6 +57,7 @@ function openView(view) {
 // A permission the platform cannot read ("unknown") shows nothing; Start recording never shows without a microphone.
 function callStatus(state, agenda, permissions, now = Date.now()) {
   const action = (id, primary = true) => ({ id, label: t(`action.${id}`), primary });
+  if (stateConnectionFailed && !isLive(state, now)) return { kind: "disconnected", text: t("status.disconnected"), action: null };
   if (isLive(state, now)) {
     const reason = notRecordingReason(state, now);
     return reason ? { kind: "not_recording", text: t("status.not_recording", { reason: t(`status.reason.${reason}`) }), action: null }
@@ -216,7 +217,8 @@ function renderShortcuts() {
 
 function renderShell() {
   // Before the first state answer the view is unknown: show none rather than Home flashing over a live call.
-  if (window.appState === undefined) return;
+  // Once the poll calls the connection failed, Home shows with the bar saying so, never a blank page.
+  if (window.appState === undefined && !stateConnectionFailed) return;
   let manual = null;
   try {
     manual = JSON.parse(localStorage.getItem("meetontrack-view"));
