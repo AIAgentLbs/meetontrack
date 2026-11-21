@@ -3,7 +3,9 @@
 const homeErrors = new Map(); // row key -> message key of a skip or retry that failed
 const homeOpenMemos = new Set(); // row keys whose full memo is open
 const homeBusy = new Set(); // button keys whose POST and agenda refresh are in flight
-const HOME_TOOL_HELP = "https://github.com/AIAgentLbs/meetontrack/blob/main/docs/CONTEXT_SOURCES.md#install-the-calendar-reader-gws";
+// The install step in the page's language (a repo doc; the Russian section has its own anchor).
+const homeToolHelp = () => `https://github.com/AIAgentLbs/meetontrack/blob/main/docs/CONTEXT_SOURCES.md#${
+  uiLanguage === "en" ? "install-the-calendar-reader-gws" : "ru-calendar"}`;
 let homeSignature = "";
 
 const homeKey = meeting => meeting.event_id || `${meeting.start}|${meeting.title}`;
@@ -120,11 +122,27 @@ function homeChooseAI() {
 }
 
 // The calendar is connected in Settings, Google section: open it there with the Calendar checkbox in view.
-function homeConnect() {
+// Connect mail or the calendar: Settings at «Google: почта, календарь, файлы» with that box on screen. Focus goes to
+// the box, or to Connect Google while Google is not connected yet (the box is unusable until then).
+async function homeConnectGoogle(source) {
   document.getElementById("settings-open").click();
   document.getElementById("google-context-settings").open = true;
-  document.querySelector('#google-sources input[value="calendar"]').scrollIntoView({ block: "center" });
+  const box = document.querySelector(`#google-sources input[value="${source}"]`);
+  box.scrollIntoView({ block: "center" });
+  await window.googleLoad;
+  (box.disabled ? document.getElementById("google-connect") : box).focus({ preventScroll: true });
 }
+
+// Connect a folder: the folders dialog (the menu's «Папки с файлами»), focused on Choose folder.
+function homeConnectFolder() {
+  document.getElementById("repo-button").click();
+  document.getElementById("context-folder-choose").focus();
+}
+
+// The bar shows a problem (not recording, no microphone...): its fix is the one filled button on screen.
+const homeProblem = (state, agenda, now) => !["recording", "waiting"].includes(callStatus(state, agenda, window.permissionsData, now).kind);
+// A memo still in progress 5 minutes after it started takes longer than usual.
+const homeLate = (memo, now) => memo?.state === "preparing" && Boolean(memo.since) && now - Date.parse(memo.since) >= 5 * 60000;
 
 // Home without rows: a title, one line and at most one action.
 function homeEmpty(prefix, action, text = [t(`${prefix}_text`)]) {
@@ -190,13 +208,13 @@ function homeMemoBody(markdown, titles, shown) {
 }
 
 // The full memo, part of the row under its actions, and the Open memo button that shows and hides it.
-function homeMemo(plan, memo, title, key, id, primary) {
+function homeMemo(plan, memo, title, key, id, primary, filled = primary) {
   const panel = document.createElement("div");
   panel.className = "memo-details";
   panel.id = id;
   panel.hidden = !homeOpenMemos.has(key);
   const titles = [title, plan.title].filter(Boolean).map(value => homeNorm(value));
-  const shown = [memo.goal, ...(memo.questions || []).slice(0, 3)].map(value => homeNorm(value || "")).filter(Boolean);
+  const shown = [memo.goal, ...(memo.questions || []).slice(0, 3), memo.background].map(value => homeNorm(value || "")).filter(Boolean);
   panel.append(...homeMemoBody(plan.memo_markdown, titles, shown));
   if (plan.talk_track_markdown) panel.append(textNode("h4", "", t("plan.talk_track")), ...homeMemoBody(plan.talk_track_markdown, titles, []));
   // Materials: plain underlined links, like Open the call link.
@@ -208,7 +226,7 @@ function homeMemo(plan, memo, title, key, id, primary) {
   }
   if (links.childElementCount) panel.append(textNode("h4", "", t("plan.links")), links);
   const label = textNode("span", "", "");
-  const button = homeButton("", primary ? "primary" : "", `${key}|memo`, () => toggle(panel.hidden));
+  const button = homeButton("", filled ? "primary" : "", `${key}|memo`, () => toggle(panel.hidden));
   button.setAttribute("aria-controls", id);
   button.append(label);
   if (primary) {
@@ -227,7 +245,7 @@ function homeMemo(plan, memo, title, key, id, primary) {
   return { panel, button, show: () => { toggle(true); links.querySelector("a")?.focus(); } };
 }
 
-function homeRow(meeting, { next, now, supported, id, recording, stale }) {
+function homeRow(meeting, { next, now, supported, id, recording, stale, problem }) {
   const key = homeKey(meeting);
   const memo = meeting.memo || memoFromPlans(meeting);
   const plan = (meeting.plans || []).find(item => item.id === memo.plan_id);
@@ -241,7 +259,7 @@ function homeRow(meeting, { next, now, supported, id, recording, stale }) {
   const actions = document.createElement("div");
   actions.className = "actions";
   // R34: a call that is not being recorded is the bar's; the row keeps its memo actions.
-  const memoView = memo.state === "ready" && plan ? homeMemo(plan, memo, meeting.title, key, id, next) : null;
+  const memoView = memo.state === "ready" && plan ? homeMemo(plan, memo, meeting.title, key, id, next, next && !problem) : null;
 
   if (memo.state === "ready") {
     if (memo.goal) main.append(textNode("p", "goal", t("home.goal", { goal: memo.goal })));
@@ -267,15 +285,17 @@ function homeRow(meeting, { next, now, supported, id, recording, stale }) {
     const status = document.createElement("p");
     status.className = "state";
     status.setAttribute("role", "status");
-    if (memo.since) status.append(textNode("b", "", t("home.preparing_since", { time: homeClock(memo.since) })), ` ${t("home.preparing_note")}`);
-    else status.append(t("home.preparing"));
+    // One format: a bold lead (with the start time when known) and the note, which ages after 5 minutes.
+    status.append(textNode("b", "", memo.since ? t("home.preparing_since", { time: homeClock(memo.since) }) : t("home.preparing")),
+      ` ${t(homeLate(memo, now) ? "home.preparing_late" : "home.preparing_note")}`);
     main.append(status);
   } else if (memo.state === "nothing_found") {
     const status = document.createElement("p");
     status.className = "state";
     status.append(textNode("b", "", t("home.nothing_found")), ` ${t("home.calendar_on")}`);
     main.append(status);
-    actions.append(homeButton(t("home.connect_sources"), "", `${key}|sources`, homeConnect));
+    actions.append(homeButton(t("home.connect_mail"), "", `${key}|mail`, () => homeConnectGoogle("gmail")),
+      homeButton(t("home.connect_folder"), "ql", `${key}|folder`, homeConnectFolder));
   } else if (memo.state === "failed") {
     const reason = ["ai_no_answer", "ai_needs_choice", "timeout", "error"].includes(memo.reason) ? memo.reason : "error";
     const status = document.createElement("p");
@@ -321,7 +341,7 @@ function homeRow(meeting, { next, now, supported, id, recording, stale }) {
   const others = (meeting.attendees || []).filter(person => !person.self);
   for (const person of others.slice(0, 3)) {
     who.append(homeBreakable("b", "", person.name || person.email || ""));
-    const detail = person.company || (person.name ? person.email : "");
+    const detail = person.company || "";  // an e-mail only stands in for a missing name
     if (detail) who.append(homeBreakable("span", "", detail));
   }
   // A long invite shows three people and a count; the whole list stays in the line's tooltip.
@@ -337,7 +357,9 @@ function homeRow(meeting, { next, now, supported, id, recording, stale }) {
 
 function renderHome(agenda, state, now = Date.now()) {
   const home = document.getElementById("home");
-  const meetings = (agenda?.meetings || []).filter(meeting => Date.parse(meeting.end) > now);
+  // Calls only: a solo block (lunch, focus time) is not a row unless it carries a plan.
+  const meetings = (agenda?.meetings || []).filter(meeting => Date.parse(meeting.end) > now
+    && (homeIsCall(meeting) || Boolean(meeting.plans?.length)));
   const unscheduled = agenda?.unscheduled_plans || [];
   const next = nextMeeting(agenda, now);
   // Not loaded at all, or the calendar could not be read: never shown as an empty day.
@@ -345,8 +367,9 @@ function renderHome(agenda, state, now = Date.now()) {
   const recording = isLive(state, now);
   // A refresh failed after rows loaded: they stay, marked with the time they were read.
   const stale = Boolean(agenda && window.agendaFailed);
+  const problem = homeProblem(state, agenda, now);
   const signature = JSON.stringify([uiLanguage, new Date(now).toDateString(), Boolean(agenda), failed, agenda?.calendar_state,
-    stale && window.agendaLoadedAt,
+    stale && window.agendaLoadedAt, problem, meetings.map(meeting => homeLate(meeting.memo, now)),
     meetings, unscheduled, agenda?.skip_recording_supported, [...homeErrors], recording, agenda?.failed_days]);
   if (signature === homeSignature) {
     // Same rows: only the time left changes, in place, so focus, scroll and an open memo stay.
@@ -380,9 +403,9 @@ function renderHome(agenda, state, now = Date.now()) {
   if (failed && !failedDays.length) {
     column.append(loadFailed());
   } else if (calendar === "tool_missing") {
-    column.append(homeEmpty("home.tool", Object.assign(externalLink(t("home.tool_link"), HOME_TOOL_HELP), { className: "ql" })));
+    column.append(homeEmpty("home.tool", Object.assign(externalLink(t("home.tool_link"), homeToolHelp()), { className: "ql" })));
   } else if (calendar === "not_connected") {
-    column.append(homeEmpty("home.calendar_off", homeButton(t("home.calendar_connect"), "primary", "empty|connect", homeConnect)));
+    column.append(homeEmpty("home.calendar_off", homeButton(t("home.calendar_connect"), "primary", "empty|connect", () => homeConnectGoogle("calendar"))));
   } else if (agenda && !meetings.length && !unscheduled.length) {
     // Past calls are in the top bar, or in the menu where the bar has no room for them (up to 700 px).
     column.append(homeEmpty("home.empty", null, [textNode("span", "by-wide", t("home.empty_text_wide")),
@@ -394,7 +417,7 @@ function renderHome(agenda, state, now = Date.now()) {
     const title = homeDayTitle(meeting.start, now);
     if (title !== day) column.append(textNode("h2", "day", (day = title)));
     column.append(homeRow(meeting, { next: meeting === next, now, supported: agenda.skip_recording_supported, id: `home-memo-${index++}`,
-      recording, stale }));
+      recording, stale, problem }));
   }
   failedDays.forEach(failedDay);
   if (unscheduled.length) {

@@ -54,7 +54,23 @@ reads the calendar. It never changes an event.
    its [authentication guide](https://github.com/googleworkspace/cli#authentication)
    describes.
 3. Reopen MeetOnTrack. If Home then says the calendar is not connected, click
-   **Connect the calendar** and tick **Google Calendar** in the Google section.
+   **Connect the calendar** and tick **Calendar** in the **Google: mail, calendar, files** section.
+
+<a id="ru-calendar"></a>
+## Программа для чтения календаря (по-русски)
+
+Главный экран MeetOnTrack берет сегодняшние и завтрашние звонки из Google Календаря через
+небольшую программу от Google, `gws` (Google Workspace CLI). MeetOnTrack только читает
+календарь и никогда не меняет события.
+
+1. Установите `gws` по [инструкции](https://github.com/googleworkspace/cli#installation).
+   Через Homebrew пакет называется `googleworkspace-cli`. Пакет Homebrew с именем `gws` -
+   это другая программа.
+2. Войдите в `gws` под тем Google-аккаунтом, чей календарь нужен MeetOnTrack, как описано
+   в [инструкции по входу](https://github.com/googleworkspace/cli#authentication).
+3. Перезапустите MeetOnTrack. Если главный экран пишет, что календарь не подключен,
+   нажмите **Подключить календарь** и отметьте **Календарь** в разделе
+   **Google: почта, календарь, файлы**.
 
 ## Regression checks
 

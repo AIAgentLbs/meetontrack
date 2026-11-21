@@ -74,7 +74,7 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
   // macOS still records the call audio without the microphone (only the owner's voice is lost); Windows does not start.
   if (next && mic) {
     return { kind: "mic_missing", text: t(permissions.platform === "macos" ? "status.mic_missing_mac" : "status.mic_missing", { time }),
-      action: action("open_mic") };
+      short: t("status.mic_missing_short"), action: action("open_mic") };
   }
   if (next && permissions?.call_audio === "denied") {
     return { kind: "mic_missing", text: t("status.call_audio_missing", { time }), action: action("open_call_audio") };
@@ -200,7 +200,13 @@ document.addEventListener("keydown", event => {
   const plain = !shortcut.record && (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey);
   if (plain || event.target.closest?.(`input, textarea, select, [contenteditable]${shortcut.kbd === "↵" ? ', button, a, summary, [role="button"]' : ""}`)) return;
   const control = shortcut.control();
-  if (control && !control.disabled) control.click();
+  if (!control || control.disabled) return;
+  control.click();
+  // ↵ leaves focus on the memo's button, so ↵ again folds it (this ↵ must not also press the button it lands on).
+  if (shortcut.kbd === "↵") {
+    event.preventDefault();
+    control.focus();
+  }
 });
 
 // The menu lists the shortcuts that work now, each as an item doing the same thing. Rebuilt only when that

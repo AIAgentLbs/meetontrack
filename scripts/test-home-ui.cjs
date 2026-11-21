@@ -145,8 +145,10 @@ const checks = {
     assert.equal(await page.locator('#home article.row > h3.mtitle').count(), 3);
     // The call link opens in a new tab and leaks nothing.
     const link = row.locator('.actions a.ql');
-    assert.deepEqual([await link.getAttribute('href'), await link.getAttribute('target'), await link.getAttribute('rel')],
-      ['https://example.com/call/evt-ready', '_blank', 'noopener noreferrer']);
+    assert.deepEqual([await link.innerText(), await link.getAttribute('href'), await link.getAttribute('target'), await link.getAttribute('rel')],
+      [lang === 'ru' ? 'Перейти в звонок' : 'Join the call', 'https://example.com/call/evt-ready', '_blank', 'noopener noreferrer']);
+    // An e-mail shows only for someone with neither a name nor a company.
+    assert.deepEqual(await texts(page, '#home .row .who'), ['Anna Petrova\nExample LLC', 'Oleg Ivanov', 'nina@example.org']);
     // Keyboard: the row's controls follow one another in Tab order, as they read.
     const order = await row.evaluate(node => [...node.querySelectorAll('a, button')].filter(item => item.checkVisibility())
       .map(item => item.textContent.replace('↵', '').trim()));
@@ -206,18 +208,20 @@ const checks = {
     });
     assert.equal(memo.toggles, 0, 'no inner disclosure: Open memo is the only toggle');
     assert.equal(memo.box, false, 'no box of its own inside the row');
-    assert.deepEqual(memo.headings, ['Questions', 'Background', lang === 'ru' ? 'Материалы' : 'Materials']);
+    // «Откуда это: 2 источника» lands on a section of the same name.
+    assert.deepEqual(memo.headings, ['Questions', 'Background', lang === 'ru' ? 'Источники' : 'Sources']);
     assert.deepEqual(memo.type, ['16px/600/none']);
     // The goal and the three questions are already in the digest above: the memo goes on from the fourth.
     assert.doesNotMatch(memo.text, /Agree on the|What budget|Who signs off|Which part of the proposal|Pilot review/);
     assert.deepEqual(memo.items, ['A fourth question that the digest leaves out?']);
-    assert.match(memo.text, /The last proposal went out a week ago/);
+    assert.doesNotMatch(memo.text, /The last proposal went out a week ago/, 'the background line is in the digest already');
+    assert.match(memo.text, /See the thread/);
     assert.doesNotMatch(memo.text, /https?:|\(|\*\*/, 'no raw URL or Markdown marks');
     assert.deepEqual(memo.links, [
       ['example.org', 'https://example.org/history', '_blank', 'noopener noreferrer', false],
       ['Proposal', 'https://example.com/proposal', '_blank', 'noopener noreferrer', true],
       ['Notes', 'https://example.org/notes', '_blank', 'noopener noreferrer', true]]);
-    // The materials look like Open the call link.
+    // The sources look like Join the call.
     const look = selector => page.locator(selector).first().evaluate(node => ['textDecorationLine', 'fontWeight', 'fontSize', 'color']
       .map(key => getComputedStyle(node)[key]).join(' '));
     assert.equal(await look('#home .row.next .memo-details a.ql'), await look('#home .row.next .actions a.ql'));
@@ -227,29 +231,65 @@ const checks = {
     assert.match(await toggle.innerText(), lang === 'ru' ? /^Открыть мемо/ : /^Open memo/);
   },
   async preparing(page, lang) {
-    const status = page.locator('#home .row.next [role="status"]');
-    assert.match(await status.innerText(), lang === 'ru' ? /с \d\d:\d\d,/ : /since \d\d:\d\d,/);
     assert.equal(await page.locator('#home .row.next .actions button', { hasText: /Открыть мемо|Open memo/ }).count(), 0);
-    // No start time known: one sentence-case line.
-    assert.equal(await rowOf(page, 'Example LLC sync').locator('.state').innerText(),
-      lang === 'ru' ? 'Мемо готовится, обычно 2-3 минуты.' : 'Memo in progress, usually 2-3 minutes.');
+    // One format on every row: the same bold lead (its start time when known) and the same note.
+    // Past 5 minutes the note says it takes longer than usual.
+    const lines = await page.locator('#home .row .state').evaluateAll(nodes => nodes.filter(node => node.closest('.row')
+      .querySelector('.mtitle').textContent !== 'First talk about the pilot').map(node => [node.querySelector('b')?.textContent, node.textContent]));
+    const [late, fresh] = await page.evaluate(() => window.agendaData.meetings.slice(0, 2).map(item => homeClock(item.memo.since)));
+    assert.deepEqual(lines, lang === 'ru' ? [
+      [`Мемо готовится с ${late},`, `Мемо готовится с ${late}, дольше обычного. Появится здесь само.`],
+      [`Мемо готовится с ${fresh},`, `Мемо готовится с ${fresh}, обычно 2-3 минуты. Появится здесь само.`],
+      ['Мемо готовится,', 'Мемо готовится, обычно 2-3 минуты. Появится здесь само.']] : [
+      [`Memo in progress since ${late},`, `Memo in progress since ${late}, longer than usual. It will appear here by itself.`],
+      [`Memo in progress since ${fresh},`, `Memo in progress since ${fresh}, usually 2-3 minutes. It will appear here by itself.`],
+      ['Memo in progress,', 'Memo in progress, usually 2-3 minutes. It will appear here by itself.']]);
+    // The note ages on the 30 s tick without a poll: a fresh row turns late once it passes 5 minutes.
+    await page.evaluate(() => { window.agendaData.meetings[1].memo.since = new Date(Date.now() - 6 * 60000).toISOString(); });
+    await page.evaluate(() => renderHome(window.agendaData, window.appState));
+    assert.match(await page.locator('#home .row .state').nth(1).innerText(), /дольше обычного|longer than usual/);
   },
-  async nothing_found(page) {
-    const button = page.locator('#home .row.next .actions button', { hasText: /почт.*пап|mail.*folder/i });
-    assert.equal(await button.count(), 1);
-    await button.click();
-    await page.locator('#settings-panel').waitFor({ state: 'visible' });
-    assert.equal(await page.evaluate(() => document.querySelector('#project-dialog').open), false);
-    const calendarBox = await page.locator('#google-sources input[value="calendar"]').evaluate(node => {
+  // R37: each label names its destination, and the destination carries the same name.
+  async nothing_found(page, lang) {
+    const row = page.locator('#home .row.next');
+    assert.deepEqual(await row.locator('.actions > *').evaluateAll(nodes => nodes.map(node => [node.textContent, node.className])),
+      lang === 'ru' ? [['Подключить почту', ''], ['Подключить папку', 'ql'], ['Перейти в звонок', 'ql']]
+        : [['Connect mail', ''], ['Connect a folder', 'ql'], ['Join the call', 'ql']]);
+    const onScreen = selector => page.locator(selector).evaluate(node => {
       const box = node.getBoundingClientRect();
       return node.checkVisibility() && box.top >= document.querySelector('.topbar').getBoundingClientRect().bottom && box.bottom <= innerHeight;
     });
-    assert.equal(calendarBox, true, 'the Calendar checkbox is on screen in Settings');
+    // Connect mail: Settings at the Google section, named after mail, with the Mail box on screen.
+    // Google not connected yet: focus goes to Connect Google, the step that makes the Mail box usable.
+    await row.locator('.actions button', { hasText: /^(Подключить почту|Connect mail)$/ }).click();
+    await page.locator('#settings-panel').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.activeElement?.id === 'google-connect');
+    assert.equal(await page.locator('#google-context-settings > summary').innerText(),
+      lang === 'ru' ? 'Google: почта, календарь, файлы' : 'Google: mail, calendar, files');
+    assert.equal(await page.locator('#google-sources label', { has: page.locator('input[value="gmail"]') }).innerText(),
+      lang === 'ru' ? 'Почта (Gmail)' : 'Mail (Gmail)');
+    assert.equal(await onScreen('#google-sources input[value="gmail"]'), true, 'the Mail box is on screen');
+    assert.doesNotMatch(await page.locator('#google-context-settings').innerText(), /LLM|A1:Z80|−90/);
+    await page.locator('#settings-close').click();
+    // Google connected: focus goes to the Mail box itself.
+    await page.route('**/api/google-context', route => route.fulfill({ json: { ok: true, connected: true, account: 'me@example.com', sources: {} } }));
+    await row.locator('.actions button', { hasText: /^(Подключить почту|Connect mail)$/ }).click();
+    await page.waitForFunction(() => document.activeElement?.matches('#google-sources input[value="gmail"]'));
+    await page.locator('#settings-close').click();
+    // Connect a folder: the folders dialog, titled as the menu item, focused on Choose folder; usable without a recording.
+    await row.locator('.actions a.ql, .actions button.ql').filter({ hasText: /^(Подключить папку|Connect a folder)$/ }).click();
+    await page.waitForFunction(() => document.getElementById('project-dialog').open && document.activeElement?.id === 'context-folder-choose');
+    assert.equal(await page.locator('#project-dialog h2').innerText(), lang === 'ru' ? 'Папки с файлами' : 'File folders');
+    await page.waitForFunction(() => !/Загружаю|Loading/.test(document.getElementById('project-help').textContent));
+    assert.equal(await page.locator('#project-help').innerText(), lang === 'ru'
+      ? 'Проект для звонка можно выбрать, когда идет запись. Папки подключаются в любое время.'
+      : 'You can choose a project for the call while it is recorded. Folders can be connected at any time.');
+    assert.doesNotMatch(await page.locator('#project-dialog').innerText(), /—|Контекст этой встречи|Context for this meeting/);
   },
   async failed(page, lang) {
     const row = page.locator('#home .row.next');
     const line = await row.locator('.state').innerText();
-    assert.match(line, lang === 'ru' ? /Мемо не получилось: ИИ не ответил\./ : /The memo could not be made: the AI did not answer\./);
+    assert.match(line, lang === 'ru' ? /Мемо не получилось: ИИ не ответил\./ : /Memo not ready: the AI did not answer\./);
     assert.match(line, lang === 'ru' ? /Ничего делать не нужно, попробуем снова в \d\d:\d\d\./ : /Nothing to do, we will try again at \d\d:\d\d\./);
     // No AI chosen: nothing will retry by itself, so no promise of a retry.
     const choice = await rowOf(page, 'Pilot follow-up').locator('.state').innerText();
@@ -260,7 +300,7 @@ const checks = {
       [lang === 'ru' ? 'Выбрать ИИ' : 'Choose the AI']);
     // Nothing to do here: one quiet Retry now link at most, no Check the AI, then the call's own actions.
     assert.deepEqual(await row.locator('.actions > *').evaluateAll(nodes => nodes.map(node => [node.textContent, node.className])),
-      lang === 'ru' ? [['Повторить сейчас', 'ql'], ['Открыть ссылку на звонок', 'ql']] : [['Retry now', 'ql'], ['Open the call link', 'ql']]);
+      lang === 'ru' ? [['Повторить сейчас', 'ql'], ['Перейти в звонок', 'ql']] : [['Retry now', 'ql'], ['Join the call', 'ql']]);
     // A second click while the POST is in flight posts nothing more.
     let release;
     page.api.responses['/api/memo/rebuild'] = new Promise(resolve => { release = resolve; });
@@ -328,10 +368,12 @@ const checks = {
       'Who signs off the purchase?', 'Which part of the proposal matters most now?']);
     assert.match(await row.locator('.bg').innerText(), /(2 источника|2 sources)$/);
     assert.match(await rowOf(page, 'Pilot follow-up').locator('.state').innerText(), /О собеседнике|Nothing about this contact/);
-    assert.equal(await rowOf(page, 'Focus time').locator('.state, .goal').count(), 0);
+    // A solo block without a plan is not a call: no row. One that carries a plan stays.
+    assert.equal(await rowOf(page, 'Focus time').count(), 0);
+    assert.equal(await rowOf(page, 'Example LLC sync').count(), 1);
     const unscheduled = rowOf(page, 'Contract draft review');
     assert.equal(await unscheduled.count(), 1);
-    assert.match(await page.locator('#home h2').last().innerText(), /Подготовка без события|Preparation without/);
+    assert.match(await page.locator('#home h2').last().innerText(), /^(Подготовка без даты|Preparation without a date)$/);
     const lefts = await Promise.all([unscheduled, row].map(item => item.locator('.mtitle').evaluate(node => node.getBoundingClientRect().left)));
     assert.equal(lefts[0], lefts[1], 'an unscheduled title sits in the title column');
     await unscheduled.locator('button', { hasText: /Открыть мемо|Open memo/ }).click();
@@ -438,18 +480,22 @@ const checks = {
   async calendar_off_with_plans(page, lang) {
     // One calendar block, then the plans without an event under their own heading.
     assert.deepEqual(await page.locator('#home .col > *').evaluateAll(nodes => nodes.map(node => node.className)), ['empty', 'day', 'row']);
-    assert.match(await page.locator('#home h2.day').innerText(), /^(Подготовка без события|Preparation without)/);
+    assert.match(await page.locator('#home h2.day').innerText(), /^(Подготовка без даты|Preparation without a date)$/);
     assert.equal(await rowOf(page, 'Contract draft review').count(), 1);
     assert.equal(await page.locator('#home .empty button, #home .empty a').count(), 1);
   },
   async tool_missing(page, lang) {
     const block = await emptyState(page, lang, [
       { ru: 'Нет программы для чтения календаря', en: 'The calendar reader is not installed' },
-      { ru: 'Для чтения Google Календаря нужна программа Google Workspace CLI.', en: 'Reading Google Calendar needs the Google Workspace CLI.' }], 1);
+      { ru: 'Чтобы читать Google Календарь, нужна одна небольшая программа от Google.', en: 'To read Google Calendar, MeetOnTrack needs one small program from Google.' }], 1);
     const link = block.locator('a.ql');
     assert.deepEqual([await link.innerText(), await link.getAttribute('href'), await link.getAttribute('target'), await link.getAttribute('rel')],
       [lang === 'ru' ? 'Как ее установить' : 'How to install it',
-        'https://github.com/AIAgentLbs/meetontrack/blob/main/docs/CONTEXT_SOURCES.md#install-the-calendar-reader-gws', '_blank', 'noopener noreferrer']);
+        `https://github.com/AIAgentLbs/meetontrack/blob/main/docs/CONTEXT_SOURCES.md#${lang === 'ru' ? 'ru-calendar' : 'install-the-calendar-reader-gws'}`,
+        '_blank', 'noopener noreferrer']);
+    // The Russian step exists in the repo doc under that anchor.
+    const doc = fs.readFileSync(path.join(__dirname, '../docs/CONTEXT_SOURCES.md'), 'utf8');
+    assert.match(doc, /<a id="ru-calendar"><\/a>\n## [^\n]*[А-я]/);
   },
   async no_meetings(page, lang) {
     await emptyState(page, lang, [{ ru: 'Больше звонков сегодня и завтра нет', en: 'No more calls today or tomorrow' },
@@ -522,7 +568,20 @@ const checks = {
     // macOS (this fixture): the call audio is still recorded, only the owner's voice is lost.
     const text = lang === 'ru' ? `Нет доступа к микрофону: ваш голос в звонке в ${time} не запишется`
       : `No microphone access: your voice in the ${time} call will not be recorded`;
-    assert.equal(await page.locator('#call-status-text').innerText(), text);
+    await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text, text);
+    // Up to 480 px the bar says it short and whole: the button names the fix.
+    await page.setViewportSize({ width: 400, height: 900 });
+    await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text,
+      lang === 'ru' ? 'Нет доступа к микрофону' : 'No microphone access');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text, text);
+    // The bar's fix is the one filled button: the row's Open memo is outlined, and ↵ still opens it.
+    const memo = page.locator('#home .row.next .actions button[aria-controls]');
+    assert.equal(await memo.getAttribute('class'), '');
+    await page.evaluate(() => document.activeElement.blur());
+    await page.keyboard.press('Enter');
+    assert.equal(await memo.getAttribute('aria-expanded'), 'true');
+    await memo.click();
     const action = page.locator('#call-status-action');
     assert.equal(await action.innerText(), lang === 'ru' ? 'Открыть настройки микрофона' : 'Open microphone settings');
     assert.equal(await action.evaluate(node => node.classList.contains('primary')), true);
@@ -560,7 +619,7 @@ const checks = {
     await pill.waitFor();
     // Windows (this fixture): a denied microphone means the recording does not start.
     const time = await nextClock(page);
-    assert.equal(await page.locator('#call-status-text').innerText(), lang === 'ru'
+    await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text, lang === 'ru'
       ? `Нет доступа к микрофону: запись в ${time} не включится` : `No microphone access: the ${time} call will not be recorded`);
     for (const width of [1440, 1024, 960, 760, 400]) {
       await page.setViewportSize({ width, height: 900 });
@@ -690,7 +749,9 @@ const checks = {
     const row = page.locator('#home .row.next');
     const actions = await row.locator('.actions > *').evaluateAll(nodes => nodes.map(node => [node.textContent.replace('↵', ''), node.className]));
     assert.deepEqual(actions, lang === 'ru'
-      ? [['Открыть мемо', 'primary'], ['Открыть ссылку на звонок', 'ql']] : [['Open memo', 'primary'], ['Open the call link', 'ql']]);
+      ? [['Открыть мемо', ''], ['Перейти в звонок', 'ql']] : [['Open memo', ''], ['Join the call', 'ql']]);
+    // One filled button on screen while the bar shows a problem: the memo is outlined and keeps its ↵.
+    assert.equal(await row.locator('.actions button[aria-controls] kbd').innerText(), '↵');
     assert.equal(await page.locator('#home').getByText(fix).count(), 0, 'the fix is not repeated in the row');
     // The bar's fix posts once while it is in flight.
     let release;
@@ -718,18 +779,19 @@ const checks = {
       return [shown[0].tagName, getComputedStyle(shown[0]).borderTopStyle];
     });
     assert.deepEqual(first, ['BUTTON', 'none']);
-    assert.equal(await page.locator('#repo-button small').innerText(),
-      lang === 'ru' ? 'папки, Google Диск и Git-проекты' : 'folders, Google Drive and Git projects');
+    // One name for the menu item and the dialog it opens; no tool words in the subtitle.
+    assert.deepEqual([await page.locator('#repo-button .mi > span').innerText(), await page.locator('#repo-button small').innerText()],
+      lang === 'ru' ? ['Папки с файлами', 'на компьютере и в Google Диске'] : ['File folders', 'on this computer and in Google Drive']);
     assert.equal(await page.locator('#menu-notes').isVisible(), false, 'notes belong to a call');
     const shortcuts = await page.locator('#menu-shortcuts [role="menuitem"]').evaluateAll(nodes =>
       nodes.filter(node => node.checkVisibility()).map(node => [node.querySelector('.mi').textContent, node.querySelector('kbd').textContent]));
     const key = await page.evaluate(() => (/Mac/.test(navigator.platform) ? '⌘⇧R' : 'Alt+Shift+R'));
     assert.deepEqual(shortcuts, lang === 'ru'
-      ? [['Открыть мемо следующего звонка', '↵'], ['Начать запись', key], ['Открыть ссылку на звонок', 'J']]
-      : [["Open the next call's memo", '↵'], ['Start recording', key], ['Open the call link', 'J']]);
+      ? [['Открыть мемо следующего звонка', '↵'], ['Начать запись', key], ['Перейти в звонок', 'J']]
+      : [["Open the next call's memo", '↵'], ['Start recording', key], ['Join the call', 'J']]);
     assert.equal(await page.locator('#menu-shortcuts').getAttribute('aria-label'), lang === 'ru' ? 'Клавиши' : 'Keys');
     // A change while the menu is open does not rebuild the list under the focused item.
-    const link = page.locator('#menu-shortcuts [role="menuitem"]', { hasText: /ссылку|link/ });
+    const link = page.locator('#menu-shortcuts [role="menuitem"]', { hasText: /Перейти|Join/ });
     await link.focus();
     await link.evaluate(node => { node.dataset.marked = '1'; });
     page.api.fixture.permissions.microphone = 'denied';
@@ -760,6 +822,12 @@ const checks = {
     const memo = row.locator('.actions button[aria-controls]');
     // Enter on the page opens the next call's memo; Enter in a field or on a button does not.
     await page.evaluate(() => document.activeElement.blur());
+    await page.keyboard.press('Enter');
+    assert.equal(await memo.getAttribute('aria-expanded'), 'true');
+    // Focus moves to the fold button: Enter again folds, and once more opens.
+    assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-controls')), await memo.getAttribute('aria-controls'));
+    await page.keyboard.press('Enter');
+    assert.equal(await memo.getAttribute('aria-expanded'), 'false');
     await page.keyboard.press('Enter');
     assert.equal(await memo.getAttribute('aria-expanded'), 'true');
     // The menu lists only what works now: with the memo open, not Open the next call's memo.

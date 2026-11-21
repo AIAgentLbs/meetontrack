@@ -34,7 +34,7 @@
           <button id="new-meeting-button" type="button" role="menuitem" data-i18n="meeting.new" aria-haspopup="dialog" disabled>Начать новую встречу</button>
           <button id="settings-open" type="button" role="menuitem" aria-expanded="false" aria-controls="settings-panel"><span class="mi"><span data-i18n="shell.settings">Настройки</span><small data-i18n="shell.settings_note">ИИ, распознавание речи, источники, куда отправлять отчет</small></span></button>
           <button id="menu-notes" type="button" role="menuitem" hidden><span class="mi"><span id="menu-notes-title"></span><small data-i18n="shell.notes_note">ваш текст, который учтут подсказки</small></span></button>
-          <button id="repo-button" type="button" role="menuitem" aria-haspopup="dialog"><span class="mi"><span data-i18n="shell.sources">Источники</span><small data-i18n="shell.sources_note">папки, Google Диск и Git-проекты</small></span></button>
+          <button id="repo-button" type="button" role="menuitem" aria-haspopup="dialog"><span class="mi"><span data-i18n="shell.sources">Папки с файлами</span><small data-i18n="shell.sources_note">на компьютере и в Google Диске</small></span></button>
           <button id="getting-started-open" type="button" role="menuitem" data-i18n="shell.getting_started" aria-expanded="false" aria-controls="getting-started">Начало работы</button>
           <button id="updates-notice" type="button" role="menuitem" aria-controls="settings-panel" hidden></button>
           <button id="updates-install" type="button" role="menuitem" hidden></button>
@@ -316,8 +316,8 @@
       <div class="project-dialog-shell">
         <div class="repo-dialog-header">
           <div>
-            <h2 data-i18n="project.choose_title">Контекст этой встречи</h2>
-            <p data-i18n="project.choose_description">Подключите папки и Google Drive для поиска. Выбор Git-проекта ниже действует только для этой встречи; подключенные источники сохраняются до отключения.</p>
+            <h2 data-i18n="project.choose_title">Папки с файлами</h2>
+            <p data-i18n="project.choose_description">Подключите папки на компьютере или Google Диск: в них MeetOnTrack ищет, что известно о собеседнике и теме звонка.</p>
           </div>
           <button class="icon-button" id="project-close" aria-label="Закрыть" data-i18n-aria-label="common.close" type="button">×</button>
         </div>
@@ -333,7 +333,7 @@
         </section>
         <div class="project-options" id="project-options"></div>
         <details class="google-context-settings" id="google-context-settings">
-          <summary data-i18n="google.heading">Google: поиск контекста</summary>
+          <summary data-i18n="google.heading">Google: почта, календарь, файлы</summary>
           <p data-i18n="google.privacy">Выключен по умолчанию. Только чтение. Найденные фрагменты используются в текущем звонке выбранной моделью анализа; при облачной модели покидают компьютер.</p>
           <p id="google-account" role="status" aria-live="polite"></p>
           <div class="google-connection-actions">
@@ -341,13 +341,13 @@
             <button class="quiet-button" id="google-disconnect" type="button" data-i18n="google.disconnect">Отключить Google от MeetOnTrack</button>
             <button class="quiet-button" id="google-check" type="button" data-i18n="google.check">Проверить подключение</button>
           </div>
-          <p data-i18n="google.automatic">После подключения и выбора источников LLM сам формулирует поисковые запросы по вопросу или теме звонка. Репозитории остаются дополнительным источником, а не единственным.</p>
-          <p data-i18n="google.calendar_note">При включении Calendar MeetOnTrack также сопоставляет подготовку с событиями дня звонка.</p>
+          <p data-i18n="google.automatic">После подключения MeetOnTrack сам ищет в выбранных источниках по теме звонка и его участникам.</p>
+          <p data-i18n="google.calendar_note">Если календарь включен, MeetOnTrack сверяет подготовку со звонками этого дня.</p>
           <fieldset id="google-sources">
             <legend data-i18n="google.sources">Где искать</legend>
-            <label><input type="checkbox" value="calendar" /> Google Calendar</label>
-            <label><input type="checkbox" value="gmail" /> Gmail</label>
-            <label><input type="checkbox" value="drive" /> Google Drive</label>
+            <label><input type="checkbox" value="calendar" /> <span data-i18n="google.calendar">Календарь</span></label>
+            <label><input type="checkbox" value="gmail" /> <span data-i18n="google.gmail">Почта (Gmail)</span></label>
+            <label><input type="checkbox" value="drive" /> <span data-i18n="google.drive">Google Диск</span></label>
           </fieldset>
           <button class="quiet-button" type="button" id="google-save" data-i18n="google.save">Сохранить источники</button>
           <details id="google-manual-search">
@@ -358,12 +358,12 @@
             <button class="quiet-button" id="google-search" type="submit" data-i18n="google.search">Найти для текущего звонка</button>
           </form>
           </details>
-          <p data-i18n="google.limits">Calendar: −90/+30 дней. Gmail: до 3 писем за год, заголовки и фрагменты. Drive: до 5 результатов; для первых 2 — фрагменты Google Docs или A1:Z80 первого листа Google Sheets. Другие форматы и ошибки чтения помечаются как «только метаданные». Результаты используются 10 минут; изменение источников очищает их. Отправка отчетов настраивается отдельно.</p>
+          <p data-i18n="google.limits">Календарь: 90 дней назад и 30 вперед. Почта: до 3 писем за год, только заголовки и начало. Google Диск: до 5 файлов, у первых двух берется начало документа или таблицы. Найденное хранится 10 минут и стирается при смене источников. Отправка отчетов настраивается отдельно.</p>
           <p id="google-message" role="status" aria-live="polite"></p>
           <div id="google-results"></div>
         </details>
         <div class="repo-dialog-footer">
-          <span data-i18n="project.local_note">Папки и Google — отдельные источники. Git-репозитории подключать необязательно.</span>
+          <span data-i18n="project.local_note">Папки и Google Диск подключаются отдельно. Git-репозитории необязательны.</span>
           <button class="quiet-button" id="project-edit-repos" type="button" data-i18n="project.edit_repos">Изменить набор репозиториев</button>
         </div>
       </div>

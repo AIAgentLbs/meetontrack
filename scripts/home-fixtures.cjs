@@ -70,8 +70,9 @@ function build(name, lang = 'en') {
     plans: [plan('plan-1', L.review, MEMO_TEXT, LINKS)],
     memo: memo('ready', { goal: L.goal, plan_id: 'plan-1', source_count: 2, questions: L.questions, background: L.background }),
     ...extra });
-  const preparing = (start, id = 'evt-prep') => meeting(id, start, 45, L.supply, [oleg],
-    { memo: memo('preparing', { since: iso(now - 5 * MIN) }) });
+  // Started 2 minutes ago unless told otherwise; past 5 minutes the row says it takes longer than usual.
+  const preparing = (start, id = 'evt-prep', since = now - 2 * MIN) => meeting(id, start, 45, L.supply, [oleg],
+    { memo: memo('preparing', { since: iso(since) }) });
   // Tomorrow at 10:00 local time: always on the next calendar day, so it always crosses midnight.
   const nothing = (start, id = 'evt-nothing') => meeting(id, start, 30, L.first, [nina],
     { memo: memo('nothing_found') });
@@ -80,7 +81,7 @@ function build(name, lang = 'en') {
     meetings: meetings.sort((a, b) => Date.parse(a.start) - Date.parse(b.start)), unscheduled_plans: [], ...extra });
   const agendas = {
     ready: () => agenda([ready(), preparing(now + 120 * MIN), nothing(at10)]),
-    preparing: () => agenda([preparing(now + 40 * MIN), nothing(at10),
+    preparing: () => agenda([preparing(now + 40 * MIN, 'evt-prep', now - 8 * MIN), preparing(now + 60 * MIN, 'evt-prep-fresh'), nothing(at10),
       meeting('evt-prep-3', now + 90 * MIN, 30, L.sync, [anna], { memo: memo('preparing') })]),
     nothing_found: () => agenda([nothing(now + 40 * MIN), preparing(at10, 'evt-prep-2')]),
     failed: () => agenda([
@@ -96,7 +97,10 @@ function build(name, lang = 'en') {
       return agenda([
         strip(ready()),
         strip(meeting('evt-ext', now + 150 * MIN, 30, L.followup, [oleg])),
-        strip(meeting('evt-solo', at10, 60, L.focus, [])),
+        // Solo blocks have no call link: one without a plan is not a Home row, one with a plan is.
+        strip(meeting('evt-solo', at10, 60, L.focus, [], { link: '' })),
+        meeting('evt-solo-plan', at10 + 120 * MIN, 30, L.sync, [], { link: '', plans: [plan('plan-3', L.sync, L.draftText)],
+          memo: memo('ready', { goal: L.draftText, plan_id: 'plan-3' }) }),
       ], { unscheduled_plans: [plan('plan-2', L.draft, L.draftText)] });
     },
     long: () => {
