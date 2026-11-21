@@ -502,6 +502,14 @@ def test_rebuild_route(self):
 
 ---
 
+## Decisions taken on 2026-11-21 (binding, they override the task text above where they differ)
+
+- **No AI chosen.** An entry that failed with `reason = "ai_needs_choice"` does not wait for Rebuild: on every tick the loop calls `ai.resolve("memo")` (no spend) and, when the ticket is ready, runs the meeting as if it had no entry. Add the test `test_needs_choice_runs_as_soon_as_an_ai_is_chosen` to Task 5 (first tick: ticket not ready, state `failed`/`ai_needs_choice`, no `run` call; second tick with a ready ticket: one `run` call, state `ready`).
+- **Memo language.** The saved interface language wins. When none is saved, the language is `ru` if the system locale starts with `ru`, otherwise `en` (Task 6: a small `memo_language()` in `server.py` in place of the inline lambda; test both branches with a patched locale).
+- **A malformed AI answer** is reported as `ai_no_answer`.
+- **Switching the interface language** rebuilds the memo at its 2-hour recheck, through the signature.
+- **Merge note.** Plan 1 routes `GET /api/agenda` through `agenda_payload()` in `server.py`. Whichever plan merges second keeps both: `agenda_payload()` calls `PLANS.agenda(now, memo=MEMOS.memo_for)`.
+
 ## Spec coverage
 
 | Spec line (memo section and Home) | Task |
