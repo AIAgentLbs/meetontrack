@@ -3135,7 +3135,7 @@ class Handler(BaseHTTPRequestHandler):
             self._static("getting-started.js", "text/javascript; charset=utf-8")
         elif path == "/speech.js":
             self._static("speech.js", "text/javascript; charset=utf-8")
-        elif path in ("/shell.js", "/home.js"):
+        elif path in ("/shell.js", "/home.js", "/call.js"):
             self._static(path[1:], "text/javascript; charset=utf-8")
         elif path == "/screens.css":
             self._static("screens.css", "text/css; charset=utf-8")
