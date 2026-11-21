@@ -147,6 +147,24 @@ public sealed class RecordingCoordinatorTests
     }
 
     [Fact]
+    public async Task Only_the_first_failed_start_of_a_call_waits_the_first_retry()
+    {
+        // The Windows app shows the no-microphone banner only for RetryIn == FirstRetry: once per call.
+        using var root = new TemporaryDirectory();
+        var coordinator = Coordinator(root.Path,
+            new InspectableCapture { StartException = new UnauthorizedAccessException("microphone") });
+        var waits = new List<TimeSpan>();
+        coordinator.AutomaticStartFailed += (_, failure) => waits.Add(failure.RetryIn);
+
+        for (var second = 0; second <= 240; second += 5)
+            await coordinator.ObserveAsync(Observation(Started.AddSeconds(second), "Zoom.exe"));
+
+        Assert.True(waits.Count >= 2, string.Join(", ", waits));
+        Assert.Equal(AutoRecordPolicy.FirstRetry, waits[0]);
+        Assert.DoesNotContain(AutoRecordPolicy.FirstRetry, waits.Skip(1));
+    }
+
+    [Fact]
     public async Task A_short_automatic_recording_is_discarded()
     {
         using var root = new TemporaryDirectory();
