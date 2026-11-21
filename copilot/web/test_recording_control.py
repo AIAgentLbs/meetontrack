@@ -114,6 +114,52 @@ class RecordingControlTests(unittest.TestCase):
             control.resume("m1")
         self.assertEqual(control.snapshot()["stopping"]["meeting_id"], "m1")
 
+    def test_resume_is_on_disk_before_the_recorder_resumes(self):
+        # A write failure after the resume must never leave a pending stop that a restart sends.
+        on_disk = []
+
+        def run(argv, **kwargs):
+            if argv[1:] == ["record", "resume"]:
+                on_disk.append(json.loads(self.path.read_text())["stopping"])
+            return SimpleNamespace(returncode=0)
+        control = self.control(run)
+        control.stop("m1")
+        control.resume("m1")
+        self.assertEqual(on_disk, [None])
+        self.now[0] = T0 + 45
+        restarted = self.control(Recorder())
+        restarted.tick()
+        self.assertEqual(restarted.run.calls, [])
+
+    def test_unwritable_resume_does_not_resume(self):
+        run = Recorder()
+        control = self.control(run)
+        control.stop("m1")
+        with mock.patch.object(control, "_save", side_effect=OSError("/Users/someone/.local: denied")):
+            with self.assertRaisesRegex(RuntimeError, "^resume_failed$"):
+                control.resume("m1")
+        self.assertEqual(run.calls, [PAUSE])
+        self.assertEqual(control.snapshot()["stopping"]["meeting_id"], "m1")
+        self.assertEqual(json.loads(self.path.read_text())["stopping"]["meeting_id"], "m1")
+
+    def test_failed_resume_restores_the_pending_stop_on_disk(self):
+        control = self.control(Recorder({RESUME: 1}))
+        control.stop("m1")
+        with self.assertRaisesRegex(RuntimeError, "resume_failed"):
+            control.resume("m1")
+        self.assertEqual(json.loads(self.path.read_text())["stopping"]["meeting_id"], "m1")
+
+    def test_unwritable_stop_stops_at_once(self):
+        # A pending stop that cannot survive a restart would leave the recorder paused for good.
+        run = Recorder()
+        control = self.control(run)
+        with mock.patch.object(control, "_save", side_effect=OSError("/Users/someone/.local: denied")):
+            result = control.stop("m1")
+        self.assertEqual(run.calls, [PAUSE, STOP])
+        self.assertIsNone(result["until"])
+        self.assertIsNone(control.snapshot()["stopping"])
+        self.assertEqual(control.snapshot()["last_stop"]["meeting_id"], "m1")
+
     def test_old_recorder_stops_at_once(self):
         run = Recorder({PAUSE: 64})
         control = self.control(run)

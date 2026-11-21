@@ -138,6 +138,11 @@ undo window.
   runs.
 - A failed recorder command answers 500 `{"ok": false, "error":
   "stop_failed" | "resume_failed"}`; a failed resume keeps the pending stop.
+  The cleared pending stop is written before `record resume` runs, so a
+  restart never stops a resumed call. A state file that cannot be written
+  never shows OS text: a resume answers `resume_failed` and sends nothing; a
+  stop ends the recording at once (`until` null), since a pending stop a
+  restart would forget leaves the recorder paused.
 - `/api/state` gains `recording_control`:
   `{"stopping": {"meeting_id", "stopped_at", "until"} | null,
   "last_stop": {"meeting_id", "stopped_at"} | null}`. Plan 4 reads

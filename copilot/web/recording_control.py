@@ -65,13 +65,20 @@ class RecordingControl:
             if self._command("pause"):
                 until = _iso(datetime.fromisoformat(stopped_at).timestamp() + self.grace)
                 self.stopping = {"meeting_id": meeting_id, "stopped_at": stopped_at, "until": until}
-            elif self._command("stop"):  # a recorder that cannot pause stops for good, no undo
-                until = None
-                self.stopping, self.last_stop = None, {"meeting_id": meeting_id, "stopped_at": stopped_at}
-            else:
-                raise RuntimeError("stop_failed")
-            self._save()
-            return {"stopped_at": stopped_at, "until": until}
+                try:
+                    self._save()
+                    return {"stopped_at": stopped_at, "until": until}
+                except OSError:  # a pending stop a restart would forget leaves the recorder paused: stop now
+                    pass
+            # A recorder that cannot pause (or an unwritable state file) stops for good, no undo.
+            if not self._command("stop"):
+                raise RuntimeError("stop_failed")  # a paused recorder keeps its pending stop in memory
+            self.stopping, self.last_stop = None, {"meeting_id": meeting_id, "stopped_at": stopped_at}
+            try:
+                self._save()
+            except OSError:
+                pass  # nothing pending is lost: the recording has already ended
+            return {"stopped_at": stopped_at, "until": None}
 
     def resume(self, meeting_id: str) -> None:
         if meeting_id != self.current_meeting():
@@ -81,10 +88,20 @@ class RecordingControl:
             if (not pending or pending.get("meeting_id") != meeting_id
                     or self.clock() >= datetime.fromisoformat(pending["until"]).timestamp()):
                 raise ValueError("too_late")
-            if not self._command("resume"):
-                raise RuntimeError("resume_failed")
+            # Cleared on disk before the recorder resumes: a restart must never stop a resumed call.
             self.stopping = None
-            self._save()
+            try:
+                self._save()
+            except OSError:
+                self.stopping = pending
+                raise RuntimeError("resume_failed") from None  # a code, never the OS text with the path
+            if not self._command("resume"):
+                self.stopping = pending
+                try:
+                    self._save()
+                except OSError:
+                    pass  # memory stays authoritative while the server runs
+                raise RuntimeError("resume_failed")
 
     def tick(self) -> None:
         with self.lock:
