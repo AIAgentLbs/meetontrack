@@ -266,9 +266,9 @@ call_date: 2026-09-29
                 return [{"title": "Weekly sync", "start": "2026-09-29T11:00:00+02:00", "end": "2026-09-29T11:30:00+02:00",
                          "link": "", "attendees": [{"email": "a@example.com", "name": "Alex Sample", "self": False}]}]
 
-        # A preparation dated on the day that fails.
+        # A preparation dated on the day that fails, by a plain date: the same day in every time zone.
         self.config.write_text(json.dumps({"version": 1, "plans": [{
-            "id": "sample-2026-09-30", "starts_at": "2026-09-30T10:00:00+02:00", "title": "Sample preparation", "items": []}]}),
+            "id": "sample-2026-09-30", "call_date": "2026-09-30", "title": "Sample preparation", "items": []}]}),
             encoding="utf-8")
         plans = CallPlans(self.config, self.state, self._repo({}), FakeCalendar())
         now = datetime.fromisoformat("2026-09-29T09:00:00+02:00")

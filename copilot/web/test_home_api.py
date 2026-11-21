@@ -281,7 +281,8 @@ class AgendaRouteTests(unittest.TestCase):
         skips = SkipRecording(Path(directory.name) / 'skip-recording.json')
         call = meeting('evt-1', start=datetime.now(timezone.utc) + timedelta(hours=1))
         port = serve(self)
-        with mock.patch.object(server, 'SKIPS', skips), mock.patch.object(server, 'PERMISSIONS', FakeProbe(True)):
+        with mock.patch.object(server, 'SKIPS', skips), mock.patch.object(server, 'PERMISSIONS', FakeProbe(True)), \
+                mock.patch.object(server, 'capture_recording', return_value=False):  # not this machine's recorder
             self.assertEqual(request(port, 'POST', '/api/agenda/skip-recording', {**call, 'skip': True}),
                              (200, {'ok': True}))
             self.assertTrue(skips.skipped(call))

@@ -34,11 +34,6 @@ def is_call(meeting: dict) -> bool:
         or bool(meeting.get("link"))
 
 
-def covers(meeting: dict, now: datetime) -> bool:
-    """The recorders already count `now` as this call."""
-    return _zoned(meeting.get("start")) - LEAD <= now < _zoned(meeting.get("end"))
-
-
 def _clipped(calls: list[dict], meetings, restore: bool) -> list[dict]:
     """Each skip ends five minutes before the next call that is not skipped, so joining that call early records it.
     The end the person chose stays in `scheduled_end`. A shortened skip gets its window back only with `restore`

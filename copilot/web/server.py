@@ -3219,12 +3219,12 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": False, "error": "recorder_cannot_skip"}, HTTPStatus.CONFLICT)
                 else:
                     agenda = PLANS.agenda(datetime.now().astimezone())
+                    state = PLANS.calendar.state() if PLANS.calendar else "tool_missing"
                     # R32: no skip while any recording runs (the recorders read the file only before they start, so
-                    # a skip cannot stop it). Checked after the calendar read, right before the write. Undo stays.
+                    # a skip cannot stop it). Checked last, after every calendar read, right before the write. Undo stays.
                     if payload["skip"] and capture_recording():
                         self._json({"ok": False, "error": "recording_active"}, HTTPStatus.CONFLICT)
                     else:
-                        state = PLANS.calendar.state() if PLANS.calendar else "tool_missing"
                         SKIPS.set(meeting, payload["skip"], datetime.now().astimezone(), agenda["meetings"],
                                   restore=complete_agenda(agenda, state))
                         self._json({"ok": True})
