@@ -428,6 +428,15 @@ call_date: 2026-09-29
                    "remote_attendees": [], "started_at": "2026-09-29T08:02:00Z"}
         self.assertEqual(plans.snapshot(generic)["id"], APP_PLAN_FOR_EV1["id"])
 
+    def test_app_plan_without_event_id_stays_chosen(self):
+        calendar = calendar_of({"2026-09-29": [{"id": "ev1", "title": "Pilot review",
+                                                "start": "2026-09-29T10:00:00+02:00",
+                                                "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": []}]})
+        plans = CallPlans(self.config, self.state, None, calendar)
+        plan = {key: value for key, value in APP_PLAN_FOR_EV1.items() if key != "event_id"}
+        live = {**self.meeting, "meeting_id": "live", "started_at": "2026-09-29T08:02:00Z"}
+        self.assertIs(plans._file_over_app(plan, [plan], live), plan)
+
     def test_app_plan_follows_rescheduled_event(self):
         calendar = calendar_of({"2026-09-30": [{"id": "ev1", "title": "Moved call",
                                                 "start": "2026-09-30T15:00:00+02:00",

@@ -3,6 +3,10 @@ the memo the app wrote for each of them in `memos.json`."""
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
+import re
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -14,6 +18,10 @@ from twenty_crm import PUBLIC_DOMAINS
 # Calendar addresses of rooms and groups: never a participant.
 NOT_PEOPLE = ("resource.calendar.google.com", "group.calendar.google.com")
 GENERIC_SECOND_LABELS = {"co", "com", "org", "net", "gov", "ac"}
+# Title words never searched alone; the last row holds connecting words a title often carries.
+GENERIC_WORDS = frozenset("""call meeting sync weekly daily review intro catch update demo
+встреча звонок созвон синк обзор демо
+with from about между после перед""".split())
 
 
 def _domain(email: object) -> str:
@@ -68,6 +76,70 @@ def file_digest(plan: dict) -> dict:
     return {"goal": goal, "questions": questions[:3], "background": "", "source_count": 1}
 
 
+def search_words(meeting: dict) -> dict:
+    """What to look for, taken from the event alone: outside names and e-mails, their company, title words."""
+    people = outside_attendees([a for a in meeting.get("attendees") or [] if isinstance(a, dict)])
+    emails = list(dict.fromkeys(e for a in people if (e := str(a.get("email") or "").strip().lower())))
+    names = list(dict.fromkeys(n for a in people if (n := " ".join(str(a.get("name") or "").split()))))
+    title = re.findall(r"[^\W\d_]{4,}", str(meeting.get("title") or "").casefold())
+    return {"names": names, "emails": emails, "company": next((c for e in emails if (c := company_from(e))), ""),
+            "title": [word for word in dict.fromkeys(title) if word not in GENERIC_WORDS][:6]}
+
+
+def folder_sources(hits: list[dict], words: dict, limit: int = 4) -> list[dict]:
+    """Context folder hits that name a participant or the company; any hit when the event has neither."""
+    from call_plan import _normal  # call_plan imports this module
+    strong = [w for name in words["names"] for w in _normal(name).split() if len(w) >= 3]
+    strong += [_normal(words["company"])] if words["company"] else []
+    kept = [hit for hit in hits if not strong or any(w in _normal(str(hit.get("text") or "")) for w in strong)]
+    return [{"kind": "folder", "label": f"{hit.get('path')}:{hit.get('line')}"[:200],
+             "text": str(hit.get("text") or "")[:1200]} for hit in kept[:limit]]
+
+
+def past_reports(archive, words: dict, before: datetime, limit: int = 3) -> list[dict]:
+    """Call reports from before the meeting with the same people (or, without a participant list, the
+    company or two title words), newest first, each as its first three overview points."""
+    from call_plan import _normal
+    names = {name for name in map(_normal, words["names"]) if name}
+    company = _normal(words["company"])
+    before = before if before.tzinfo else before.astimezone()  # an all-day event starts at a bare date
+    found = []
+    for path in archive.archive_root.glob("*/meeting.json"):
+        snapshot = _json(path, {})
+        if not isinstance(snapshot, dict):
+            continue
+        title, started = str(snapshot.get("meeting") or ""), str(snapshot.get("started_at") or "")
+        try:
+            when = datetime.fromisoformat(started.replace("Z", "+00:00"))
+            when = when if when.tzinfo else when.astimezone()
+        except ValueError:
+            continue
+        if when >= before:
+            continue
+        listed = _json(path.parent / "participants.json", None)
+        if listed is not None:
+            people = listed.get("participants") if isinstance(listed, dict) else None
+            hit = any(isinstance(p, dict) and _normal(str(p.get("name") or "")) in names for p in people or [])
+        else:
+            heading = f" {_normal(title)} "
+            hit = bool(company) and f" {company} " in heading or sum(f" {w} " in heading for w in words["title"]) >= 2
+        if hit:
+            found.append((when, path.parent.name, title, started))
+    sources = []
+    for _, meeting_id, title, started in sorted(found, reverse=True):
+        points = (((archive.detail(meeting_id) or {}).get("overview") or {}).get("points") or [])[:3]
+        if text := "; ".join(str(point) for point in points if point):
+            sources.append({"kind": "report", "label": f"{title} {started[:10]}"[:200], "text": text[:1200]})
+        if len(sources) == limit:
+            break
+    return sources
+
+
+def source_signature(sources: list[dict], language: str) -> str:
+    rows = sorted((s["kind"], s["label"], s["text"]) for s in sources)
+    return hashlib.sha256(json.dumps([language, rows], ensure_ascii=False).encode()).hexdigest()[:16]
+
+
 def _time(value: object) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(str(value))
@@ -99,7 +171,8 @@ class MemoWriter:
         events = payload.get("events") if isinstance(payload, dict) else None
         self.events: dict[str, dict] = {
             key: value for key, value in (events if isinstance(events, dict) else {}).items()
-            if isinstance(value, dict)}
+            if isinstance(value, dict) and isinstance(attempts := value.get("attempts", 0), (int, float))
+            and math.isfinite(attempts)}
         now = datetime.now().astimezone().isoformat(timespec="seconds")
         for entry in self.events.values():
             if entry.get("state") == "preparing":  # cut short by a restart: one automatic retry at most

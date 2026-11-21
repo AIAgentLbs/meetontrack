@@ -231,7 +231,7 @@ class CallPlans:
     def _file_over_app(self, plan: dict | None, plans: list[dict], transcript: dict) -> dict | None:
         """A file plan that the agenda shows for an app plan's event replaces the app plan; it was
         found through the calendar event, so its match is "calendar"."""
-        if not plan or plan.get("written_by") != "app" or not self.calendar:
+        if not plan or plan.get("written_by") != "app" or not plan.get("event_id") or not self.calendar:
             return plan
         try:
             day = datetime.fromisoformat(str(transcript["started_at"]).replace("Z", "+00:00")).astimezone().date()

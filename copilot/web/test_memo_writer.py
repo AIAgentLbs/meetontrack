@@ -1,13 +1,15 @@
 import json
 import subprocess
 import tempfile
+import threading
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 from calendar_meetings import CalendarMeetings
-from memo_writer import MemoWriter, company_from, file_digest, is_external, one_line, outside_attendees
+from memo_writer import (MemoWriter, company_from, file_digest, folder_sources, is_external, one_line,
+                         outside_attendees, past_reports, search_words, source_signature)
 
 
 def person(email, name="", self_=False, resource=False):
@@ -209,6 +211,180 @@ class StoreTests(unittest.TestCase):
                              file_digest(file_plan))
         with self.subTest("no event id, no file hit"):
             self.assertEqual(memo(event_id="")["state"], "none")
+
+
+    def test_corrupt_store_loads_empty_and_bad_entries_are_dropped(self):
+        self.path.write_text("[1, 2]", encoding="utf-8")
+        self.assertEqual(MemoWriter(self.path, FakeAI(), lambda m: [], lambda: "en").events, {})
+        self.path.write_text("{not json", encoding="utf-8")
+        self.assertEqual(MemoWriter(self.path, FakeAI(), lambda m: [], lambda: "en").events, {})
+        writer = self._stored({"ok": {"state": "preparing", "start": START, "attempts": 0},
+                               "text": "not an entry", "bad": {"state": "preparing", "attempts": "many"},
+                               "list": {"state": "failed", "attempts": [1]}})
+        self.assertEqual(list(writer.events), ["ok"])
+        self.assertEqual(writer.events["ok"]["state"], "failed")
+
+
+MEETING_ATTENDEES = [person("me@example.org", self_=True), person("anna@example-llc.com", "Anna Petrova")]
+WORDS = {"names": ["Anna Petrova"], "emails": ["anna@example-llc.com"], "company": "example-llc",
+         "title": ["pilot", "example"]}
+BEFORE = datetime.fromisoformat("2026-11-25T10:00:00+01:00")
+
+
+class FakeArchive:
+    def __init__(self, root, points):
+        self.archive_root, self.points, self.details = root, points, []
+
+    def detail(self, meeting_id):
+        self.details.append(meeting_id)
+        return {"overview": {"points": self.points.get(meeting_id, [])}}
+
+
+def archived(root, meeting_id, title, started_at, participants=None):
+    folder = root / meeting_id
+    folder.mkdir(parents=True)
+    (folder / "meeting.json").write_text(json.dumps({"meeting": title, "started_at": started_at}), encoding="utf-8")
+    if participants is not None:
+        (folder / "participants.json").write_text(
+            json.dumps({"participants": [{"name": name} for name in participants]}), encoding="utf-8")
+
+
+class SourceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_search_words_come_from_the_event(self):
+        words = search_words({"title": "Pilot review with Example LLC", "attendees": MEETING_ATTENDEES})
+        self.assertEqual(words, WORDS)
+        self.assertEqual(search_words({"title": "Weekly sync call", "attendees": []}),
+                         {"names": [], "emails": [], "company": "", "title": []})
+
+    def test_folder_hits_need_a_strong_word(self):
+        hits = [{"path": "/f/a.md", "line": 3, "text": "Pilot notes for Anna Petrova"},
+                {"path": "/f/b.md", "line": 9, "text": "pilot of something else"},
+                {"path": "/f/c.md", "line": 1, "text": "Example LLC signed the pilot"}]
+        sources = folder_sources(hits, WORDS)
+        self.assertEqual([s["label"] for s in sources], ["/f/a.md:3", "/f/c.md:1"])
+        self.assertEqual(sources[0], {"kind": "folder", "label": "/f/a.md:3", "text": "Pilot notes for Anna Petrova"})
+        # An event with neither a name nor a company keeps every hit, up to the limit.
+        loose = {**WORDS, "names": [], "company": ""}
+        self.assertEqual(len(folder_sources(hits * 3, loose)), 4)
+
+    def test_past_reports_by_participants_then_title(self):
+        archived(self.root, "m1", "m1-title catch-up", "2026-11-20T09:00:00+01:00", ["Anna  Petrova"])
+        archived(self.root, "m2", "m2-title Pilot review Example", "2026-11-10T09:00:00Z")
+        archived(self.root, "m3", "m3-title Weekly review", "2026-11-18T09:00:00+01:00")
+        archived(self.root, "m4", "m4-title Pilot review Example", "2026-11-25T10:00:00+01:00", ["Anna Petrova"])
+        archived(self.root, "m5", "m5-title Pilot Example", "2026-11-19T09:00:00+01:00", ["Someone Else"])
+        archive = FakeArchive(self.root, {key: ["Point one", "Point two", "Point three", "Point four"]
+                                          for key in ("m1", "m2", "m3", "m4", "m5")})
+        sources = past_reports(archive, WORDS, BEFORE)
+        self.assertEqual([s["label"].split(" ")[0] for s in sources], ["m1-title", "m2-title"])
+        self.assertEqual(sources[1], {"kind": "report", "label": "m2-title Pilot review Example 2026-11-10",
+                                      "text": "Point one; Point two; Point three"})
+        self.assertNotIn("m4", archive.details)  # at or after the meeting: never read
+
+    def test_title_match_needs_two_words(self):
+        archived(self.root, "m1", "Pilot", "2026-11-20T09:00:00+01:00")
+        archived(self.root, "m2", "Kickoff example-llc", "2026-11-19T09:00:00+01:00")
+        archive = FakeArchive(self.root, {"m1": ["Point"], "m2": ["Point"]})
+        self.assertEqual([s["label"] for s in past_reports(archive, WORDS, BEFORE)],
+                         ["Kickoff example-llc 2026-11-19"])  # the company word alone is enough
+        self.assertEqual(len(past_reports(archive, WORDS, datetime(2026, 11, 25))), 1)  # an all-day event's start
+
+    def test_report_without_points_is_skipped(self):
+        archived(self.root, "m1", "Pilot review Example", "2026-11-20T09:00:00+01:00")
+        archived(self.root, "m2", "Pilot review Example", "2026-11-19T09:00:00+01:00")
+        archive = FakeArchive(self.root, {"m2": ["Agreed the scope"]})
+        self.assertEqual([s["text"] for s in past_reports(archive, WORDS, BEFORE)], ["Agreed the scope"])
+
+    def test_signature_is_order_free_and_changes_with_text_or_language(self):
+        a, b = {"kind": "crm", "label": "CRM person", "text": "x"}, {"kind": "folder", "label": "/f:1", "text": "y"}
+        self.assertRegex(source_signature([a, b], "en"), r"^[0-9a-f]{16}$")
+        self.assertEqual(source_signature([a, b], "en"), source_signature([b, a], "en"))
+        self.assertNotEqual(source_signature([a, b], "en"), source_signature([a, {**b, "text": "z"}], "en"))
+        self.assertNotEqual(source_signature([a, b], "en"), source_signature([a, b], "ru"))
+
+
+class FakeGoogle:
+    def __init__(self, items, account="me@example.org", change=False):
+        self._lock, self._generation = threading.RLock(), 0
+        self.items, self.account, self.change, self.queries = items, account, change, []
+
+    def enabled_sources(self):
+        return ["calendar", "gmail", "drive"]
+
+    def status(self):
+        return {"auth": "connected", "account": self.account}
+
+    def _preferences(self):
+        return {"account": "me@example.org"}
+
+    def _search_source(self, source, query):
+        self.queries.append((source, query))
+        if self.change:
+            self._generation += 1
+        return {"state": "ok", "items": self.items}
+
+
+MEETING = {"start": "2026-11-25T10:00:00+01:00", "end": "2026-11-25T10:30:00+01:00",
+           "title": "Pilot review with Example LLC", "link": "", "attendees": MEETING_ATTENDEES,
+           "event_id": "ev1", "external": True}
+
+
+class MemoSourcesTests(unittest.TestCase):
+    def setUp(self):
+        import server
+        from types import SimpleNamespace
+        self.server, self.ns = server, SimpleNamespace
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        archived(self.root, "m1", "Pilot review Example", "2026-11-20T09:00:00+01:00")
+        self.archive = FakeArchive(self.root, {"m1": ["Agreed the scope"]})
+        self.searches = []
+
+    def gather(self, google, generations=("same", "same")):
+        folders = iter(generations)
+        local = self.ns(generation=lambda: next(folders),
+                        search=lambda query: self.searches.append(query) or {"items": [
+                            {"path": "/f/a.md", "line": 3, "text": "Notes on Anna Petrova"}]})
+        twenty = self.ns(records=lambda attendees, title="": [{"type": "person", "name": "Anna Petrova"}])
+        with patch.object(self.server, "LOCAL_CONTEXT", local), patch.object(self.server, "GOOGLE_CONTEXT", google), \
+                patch.object(self.server, "TWENTY_CONTEXT", twenty), patch.object(self.server, "ARCHIVE", self.archive):
+            return self.server.memo_sources(MEETING)
+
+    def test_sources_dropped_when_access_changes_mid_gather(self):
+        google = FakeGoogle([{"title": "Intro call", "date": "2026-11-01T10:00:00+01:00", "excerpt": "First talk"}],
+                            change=True)
+        sources = self.gather(google, ("before", "after"))
+        self.assertEqual([s["kind"] for s in sources], ["crm", "report"])
+        self.assertEqual({q[0] for q in google.queries}, {"calendar"})  # never Gmail or Drive
+
+    def test_calendar_history_keeps_only_events_before_the_meeting(self):
+        google = FakeGoogle([{"title": "Intro call", "date": "2026-11-01T10:00:00+01:00", "excerpt": "First talk"},
+                             {"title": "Kickoff", "date": "2026-10-20", "excerpt": ""},
+                             {"title": "Pilot review", "date": "2026-11-25T10:00:00+01:00", "excerpt": "This one"},
+                             {"title": "Follow-up", "date": "2026-12-02T10:00:00+01:00", "excerpt": "Later"}])
+        sources = self.gather(google)
+        self.assertEqual(sources, [
+            {"kind": "folder", "label": "/f/a.md:3", "text": "Notes on Anna Petrova"},
+            {"kind": "crm", "label": "CRM person: Anna Petrova",
+             "text": json.dumps({"type": "person", "name": "Anna Petrova"})},
+            {"kind": "calendar", "label": "Intro call 2026-11-01", "text": "First talk"},
+            {"kind": "calendar", "label": "Kickoff 2026-10-20", "text": ""},
+            {"kind": "report", "label": "Pilot review Example 2026-11-20", "text": "Agreed the scope"}])
+        self.assertEqual(google.queries, [("calendar", "anna@example-llc.com")])
+        self.assertEqual(self.searches, ["Anna Petrova example-llc pilot example"])
+
+    def test_calendar_is_not_read_for_another_account(self):
+        google = FakeGoogle([{"title": "Intro call", "date": "2026-11-01", "excerpt": "x"}], account="b@example.com")
+        self.assertNotIn("calendar", [s["kind"] for s in self.gather(google)])
+        self.assertEqual(google.queries, [])
 
 
 if __name__ == "__main__":

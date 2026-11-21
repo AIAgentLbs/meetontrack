@@ -51,6 +51,7 @@ from ai_providers import AIChoiceError, AIService, SignIns
 from fact_check import FactChecks, extraction_rules, fetch_text, parse_claims, strip_claims, verify as verify_fact, with_speakers
 from stt import STTService
 from local_context import LocalContext
+from memo_writer import folder_sources, past_reports, search_words
 from private_dirs import private_dir
 
 
@@ -2548,6 +2549,18 @@ def twenty_action(meeting_id: str, payload: dict) -> dict:
 SUMMARY_REWRITES = SummaryRewrites(ARCHIVE, lambda prompt: AI.run("summary_rewrite", prompt, timeout=180))
 
 
+def google_sources() -> list[str]:
+    """Enabled Google sources, or none when Google is signed out or on another account than the one chosen:
+    the same account check as the live analysis, never another account's mail or files."""
+    with GOOGLE_CONTEXT._lock:
+        sources = GOOGLE_CONTEXT.enabled_sources()
+    if sources:
+        status, expected = GOOGLE_CONTEXT.status(), GOOGLE_CONTEXT._preferences().get("account", "")
+        if status.get("auth") != "connected" or (expected and expected != status.get("account")):
+            return []
+    return sources
+
+
 def fact_knowledge(row: dict) -> list[dict]:
     """Connected knowledge base excerpts for one claim: context folders, then enabled Google sources."""
     query = row.get("query") or row.get("claim") or ""
@@ -2555,12 +2568,8 @@ def fact_knowledge(row: dict) -> list[dict]:
     found = [{"title": Path(hit["path"]).name, "location": f"{hit['path']}:{hit['line']}", "text": hit["text"]}
              for hit in LOCAL_CONTEXT.search(query)["items"][:5]]
     with GOOGLE_CONTEXT._lock:
-        sources, generation, local = GOOGLE_CONTEXT.enabled_sources(), GOOGLE_CONTEXT._generation, len(found)
-    if sources:  # the same account check as the live analysis: never another account's mail or files
-        status, expected = GOOGLE_CONTEXT.status(), GOOGLE_CONTEXT._preferences().get("account", "")
-        if status.get("auth") != "connected" or (expected and expected != status.get("account")):
-            sources = []
-    for source in sources:
+        generation, local = GOOGLE_CONTEXT._generation, len(found)
+    for source in google_sources():
         try:  # _search_source, not search(): the live analysis keeps its own cached Google results
             hits = GOOGLE_CONTEXT._search_source(source, query).get("items", [])[:3]
         except (OSError, RuntimeError, ValueError):
@@ -2571,6 +2580,41 @@ def fact_knowledge(row: dict) -> list[dict]:
         found += [{"title": hit["title"], "location": hit["url"], "text": hit["excerpt"]}
                   for hit in hits if hit.get("excerpt")]
     return found if folders == LOCAL_CONTEXT.generation() else found[local:]  # a folder disconnected meanwhile
+
+
+def memo_sources(meeting: dict) -> list[dict]:
+    """What the connected sources know about an upcoming meeting's people, searched with words from the
+    event only. Private excerpts stay on this machine; of Google, only the calendar is read."""
+    words = search_words(meeting)
+    sources = []
+    folders = LOCAL_CONTEXT.generation()
+    query = " ".join(words["names"] + [words["company"]] + words["title"]).strip()[:160]
+    found = folder_sources(LOCAL_CONTEXT.search(query)["items"], words) if query else []
+    if folders == LOCAL_CONTEXT.generation():  # a folder disconnected meanwhile: none of its text
+        sources += found
+    for item in TWENTY_CONTEXT.records(words["emails"] + words["names"], str(meeting.get("title") or "")):
+        sources.append({"kind": "crm", "label": f"CRM {item.get('type')}: {item.get('name') or item.get('title') or ''}"[:200],
+                        "text": json.dumps(item, ensure_ascii=False)[:1200]})
+    with GOOGLE_CONTEXT._lock:
+        generation = GOOGLE_CONTEXT._generation
+    if "calendar" in google_sources():
+        history = {}
+        for email in words["emails"][:3]:
+            try:  # _search_source, not search(): the live analysis keeps its own cached Google results
+                hits = GOOGLE_CONTEXT._search_source("calendar", email).get("items", [])
+            except (OSError, RuntimeError, ValueError):
+                continue
+            for hit in hits:
+                date = str(hit.get("date") or "")
+                if date and date < meeting["start"]:
+                    label = f"{hit.get('title') or ''} {date[:10]}"[:200]
+                    history.setdefault(label, {"kind": "calendar", "label": label,
+                                               "text": str(hit.get("excerpt") or "")[:1200]})
+        with GOOGLE_CONTEXT._lock:
+            if generation == GOOGLE_CONTEXT._generation:  # access changed mid-search: none of it
+                sources += list(history.values())[:3]
+    sources += past_reports(ARCHIVE, words, datetime.fromisoformat(meeting["start"]))
+    return sources[:12]
 
 
 def fact_source(raw: str) -> tuple[str, str | None]:

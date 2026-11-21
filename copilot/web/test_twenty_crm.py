@@ -3,6 +3,7 @@
 import io
 import json
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta
@@ -391,6 +392,21 @@ class TwentyClientTests(unittest.TestCase):
         fake.fail = {("GET", "/people"): "auth_expired"}
         context.reset()
         self.assertIn("expired", context.augment("m-1", ["ann@example.com"]))
+
+    def test_records_do_not_replace_live_cache(self):
+        fake = FakeCRM([person("p-1", "anna@example-llc.com", first="Anna", last="Petrova")])
+        client = self.client(fake)
+        context = TwentyContext(lambda: client)
+        context._results = {"live": (time.monotonic(), "cached")}
+        items = context.records(["anna@example-llc.com"], "Pilot review")
+        self.assertIn({"type": "person", "name": "Anna Petrova"}, items)
+        self.assertEqual(context._results, {"live": (context._results["live"][0], "cached")})
+        self.assertEqual(TwentyContext(lambda: None).records(["anna@example-llc.com"]), [])
+        fake.fail = {("GET", "/people"): "auth_expired"}
+        self.assertEqual(context.records(["anna@example-llc.com"]), [])
+        fake.fail = {}
+        with patch.object(context, "_collect", side_effect=lambda *args: context.reset() or [{"type": "person"}]):
+            self.assertEqual(context.records(["anna@example-llc.com"]), [])  # Settings changed while reading
 
     def test_cli_reads_key_from_stdin_only(self):
         with patch("sys.stdin", io.StringIO(KEY + "\n")), patch.object(TwentyClient, "_request",
