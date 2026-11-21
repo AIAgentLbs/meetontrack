@@ -20,6 +20,7 @@ import threading
 import time
 import uuid
 import webbrowser
+import xml.parsers.expat
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -2636,7 +2637,7 @@ def apple_language() -> str:
                 found = plistlib.load(file)
             languages = found.get("AppleLanguages") if isinstance(found, dict) else None
             first = languages[0] if isinstance(languages, list) and languages else ""
-        except (OSError, ValueError):  # missing, unreadable or not a plist
+        except (OSError, ValueError, xml.parsers.expat.ExpatError):  # missing, unreadable or not a plist
             first = ""
         _APPLE_LANGUAGE[:] = [time.monotonic(), first if isinstance(first, str) else ""]
     return _APPLE_LANGUAGE[1]

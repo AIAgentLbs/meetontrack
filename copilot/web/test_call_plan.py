@@ -15,6 +15,7 @@ APP_PLAN_FOR_EV1 = {
     "memo_markdown": "# Pilot review\nAgree the pilot scope.",
 }
 NOW = datetime.fromisoformat("2026-09-29T09:00:00+02:00")
+EXTERNAL = [{"email": "me@example.org", "self": True}, {"email": "anna@example-llc.com", "name": "Anna Petrova"}]
 
 
 def calendar_of(events_by_day):
@@ -351,7 +352,7 @@ call_date: 2026-09-29
 
     def test_app_plan_is_third_source_matched_by_event_id(self):
         same = {"title": "Pilot review", "start": "2026-09-29T10:00:00+02:00",
-                "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": []}
+                "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": EXTERNAL}
         calendar = calendar_of({"2026-09-29": [{**same, "id": "ev1"}, {**same, "id": "ev2"}]})
         plans = CallPlans(self.root / "absent.json", self.state, None, calendar,
                           app_plans=lambda: [APP_PLAN_FOR_EV1])
@@ -365,7 +366,7 @@ call_date: 2026-09-29
     def test_agenda_memo_gets_the_item_and_its_raw_hits(self):
         calendar = calendar_of({"2026-09-29": [{"id": "ev1", "title": "Pilot review",
                                                 "start": "2026-09-29T10:00:00+02:00",
-                                                "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": []}]})
+                                                "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": EXTERNAL}]})
         plans = CallPlans(self.root / "absent.json", self.state, None, calendar,
                           app_plans=lambda: [APP_PLAN_FOR_EV1])
         calls = []
@@ -421,7 +422,7 @@ call_date: 2026-09-29
              "end": "2026-09-29T10:00:00+02:00", "link": "",
              "attendees": [{"email": "a@example.com", "name": "Alex Sample"}]},
             {"id": "ev1", "title": "Pilot review", "start": "2026-09-29T10:00:00+02:00",
-             "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": []}]})
+             "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": EXTERNAL}]})
         plans = CallPlans(self.root / "absent.json", self.state, active, calendar,
                           app_plans=lambda: [APP_PLAN_FOR_EV1])
         generic = {**self.meeting, "meeting_id": "live-generic", "meeting": "Google Chrome Helper",
@@ -440,17 +441,68 @@ call_date: 2026-09-29
     def test_app_plan_follows_rescheduled_event(self):
         calendar = calendar_of({"2026-09-30": [{"id": "ev1", "title": "Moved call",
                                                 "start": "2026-09-30T15:00:00+02:00",
-                                                "end": "2026-09-30T15:30:00+02:00", "link": "", "attendees": []}]})
+                                                "end": "2026-09-30T15:30:00+02:00", "link": "", "attendees": EXTERNAL}]})
         plans = CallPlans(self.root / "absent.json", self.state, None, calendar,
                           app_plans=lambda: [APP_PLAN_FOR_EV1])
         result = plans.agenda(NOW)
         self.assertEqual([p["id"] for p in result["meetings"][0]["plans"]], [APP_PLAN_FOR_EV1["id"]])
         self.assertEqual(result["unscheduled_plans"], [])
 
+    def test_bound_app_plan_survives_the_memo_store_pruning_it(self):
+        current = [APP_PLAN_FOR_EV1]
+        plans = CallPlans(self.root / "absent.json", self.state, app_plans=lambda: list(current))
+        live = {**self.meeting, "meeting_id": "live", "remote_attendees": ["Anna Petrova"],
+                "started_at": "2026-09-29T08:02:00Z"}
+        bound = plans.snapshot(live)
+        self.assertEqual(bound["id"], APP_PLAN_FOR_EV1["id"])
+        current.clear()  # two days later the memo writer prunes the entry
+        self.assertEqual(plans.snapshot(live), bound)
+
+    def test_exact_meeting_link_binds_the_app_plan_and_ambiguity_binds_none(self):
+        one = {**APP_PLAN_FOR_EV1, "meeting_link": "https://meet.example.com/one"}
+        two = {**APP_PLAN_FOR_EV1, "id": "app-fedcba9876543210", "event_id": "ev2",
+               "meeting_link": "https://meet.example.com/two"}
+        plans = CallPlans(self.root / "absent.json", self.state, app_plans=lambda: [one, two])
+        live = {**self.meeting, "meeting": "Pilot review", "remote_attendees": ["Anna Petrova"],
+                "started_at": "2026-09-29T08:02:00Z"}
+        linked = {**live, "meeting_id": "linked", "meeting_link": "https://meet.example.com/two/"}
+        self.assertEqual(plans.snapshot(linked)["id"], two["id"])
+        self.assertIsNone(plans.snapshot({**live, "meeting_id": "ambiguous"}))
+        self.assertNotIn("ambiguous", json.loads(self.state.read_text())["meetings"])
+
+    def test_file_plan_hours_away_does_not_hide_the_app_plan_of_the_live_call(self):
+        self.config.write_text(json.dumps({"version": 1, "plans": [{
+            "id": "afternoon", "starts_at": "2026-09-29T15:00:00+02:00", "title_aliases": ["Pilot review"],
+            "title": "Afternoon", "items": [{"id": "q1", "kind": "question", "text": "Who signs off?"}]}]}),
+            encoding="utf-8")
+        calendar = calendar_of({"2026-09-29": [{"id": "ev1", "title": "Pilot review",
+                                                "start": "2026-09-29T10:00:00+02:00",
+                                                "end": "2026-09-29T10:30:00+02:00", "link": "",
+                                                "attendees": EXTERNAL}]})
+        plans = CallPlans(self.config, self.state, None, calendar, app_plans=lambda: [APP_PLAN_FOR_EV1])
+        self.assertEqual([p["id"] for p in plans.agenda(NOW)["meetings"][0]["plans"]], [APP_PLAN_FOR_EV1["id"]])
+        generic = {**self.meeting, "meeting_id": "live-generic", "meeting": "Google Chrome Helper",
+                   "remote_attendees": [], "started_at": "2026-09-29T08:02:00Z"}
+        self.assertEqual(plans.snapshot(generic)["id"], APP_PLAN_FOR_EV1["id"])
+
+    def test_app_plan_of_an_event_that_became_internal_is_hidden(self):
+        internal = [{"email": "me@example.org", "self": True}, {"email": "kate@example.org", "name": "Kate Example"}]
+        calendar = calendar_of({"2026-09-29": [{"id": "ev1", "title": "Pilot review",
+                                                "start": "2026-09-29T10:00:00+02:00",
+                                                "end": "2026-09-29T10:30:00+02:00", "link": "",
+                                                "attendees": internal}]})
+        plans = CallPlans(self.root / "absent.json", self.state, None, calendar, app_plans=lambda: [APP_PLAN_FOR_EV1])
+        hits = []
+        meeting = plans.agenda(NOW, memo=lambda item, found: hits.append(found) or {})["meetings"][0]
+        self.assertEqual((meeting["plans"], hits), ([], [[]]))
+        live = {**self.meeting, "meeting_id": "live", "remote_attendees": ["Anna Petrova"],
+                "started_at": "2026-09-29T08:02:00Z"}
+        self.assertIsNone(plans.snapshot(live))
+
     def test_preparations_json_untouched(self):
         calendar = calendar_of({"2026-09-29": [{"id": "ev1", "title": "Pilot review",
                                                 "start": "2026-09-29T10:00:00+02:00",
-                                                "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": []}]})
+                                                "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": EXTERNAL}]})
         plans = CallPlans(self.config, self.state, None, calendar, app_plans=lambda: [APP_PLAN_FOR_EV1])
         before = (self.config.read_bytes(), self.config.stat().st_mtime_ns)
         plans.agenda(NOW)

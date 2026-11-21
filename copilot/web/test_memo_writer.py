@@ -55,7 +55,7 @@ class DetectionTests(unittest.TestCase):
     def test_company_from_domain(self):
         self.assertEqual(company_from("anna@example-llc.com"), "example-llc")
         self.assertEqual(company_from("anna@sales.example.co.uk"), "example")
-        self.assertEqual(company_from("a@mail.hp.com"), "hp")
+        self.assertEqual(company_from("a@mail.xq.com"), "xq")
         self.assertEqual(company_from(""), "")
         self.assertEqual(company_from("not-an-email"), "")
 
@@ -762,13 +762,19 @@ class LoopTests(unittest.TestCase):
             ai.error = error
             w.rebuild("ev1", self.agenda)
 
+        def shown_waiting(ai, g, w):  # a memo is shown, its last run wanted another AI, one is chosen now
+            w._update("ev1", state="ready", plan=dict(APP_PLAN), digest={"goal": "x", "questions": []},
+                      reason="ai_needs_choice", choice_key="k0", start=self.agenda["meetings"][0]["start"])
+            g.result = []
+
         cases = {"run error": lambda ai, g, w: setattr(ai, "error", RuntimeError("boom")),
                  "choice error": lambda ai, g, w: setattr(ai, "error", ai_providers.AIChoiceError("unavailable", "x")),
                  "malformed": lambda ai, g, w: setattr(ai, "answer", "not json"),
                  "no choice": lambda ai, g, w: setattr(ai, "state", "needs_choice"),
                  "gather error": lambda ai, g, w: g.fail.add("ev1"),
                  "no sources": lambda ai, g, w: setattr(g, "result", []), "success": lambda ai, g, w: None,
-                 "rebuild": rebuild, "rebuild error": lambda ai, g, w: rebuild(ai, g, w, RuntimeError("boom"))}
+                 "rebuild": rebuild, "rebuild error": lambda ai, g, w: rebuild(ai, g, w, RuntimeError("boom")),
+                 "shown memo waits for a choice, sources gone": shown_waiting}
         for n, (name, breaks) in enumerate(cases.items()):
             for restart in (None, "gather", "run"):
                 with self.subTest(case=name, restart=restart):
@@ -1017,15 +1023,58 @@ class LoopTests(unittest.TestCase):
 
     def test_rebuild_forces_one_run_with_same_sources(self):
         self.tick(NOW)
+        plan = self.writer.plans()[0]
         self.writer.rebuild("ev1", self.agenda)
         self.assertEqual(self.writer.memo_for(self.agenda["meetings"][0], [])["state"], "preparing")
         self.assertTrue(self.writer.wake.is_set())
-        self.assertEqual(self.writer.plans(), [])
+        self.assertEqual(self.writer.plans(), [plan])  # the live call keeps the memo until it is replaced
         self.tick(NOW)
         self.tick(NOW)
         self.assertEqual(len(self.ai.calls), 2)
         e = self.writer.events["ev1"]
         self.assertEqual((e["state"], e["rebuild"]), ("ready", False))
+
+    def test_rebuild_that_runs_out_of_time_keeps_the_last_memo(self):
+        self.tick(NOW)
+        plan = self.writer.plans()[0]
+        self.writer.rebuild("ev1", self.agenda)
+        self.tick(NOW + timedelta(minutes=1), busy=lambda: True)  # a call holds the loop until the meeting starts
+        self.assertEqual(self.writer.plans(), [plan])
+        self.tick(EV_START + timedelta(minutes=1))
+        e = self.writer.events["ev1"]
+        self.assertEqual((e["state"], e["rebuild"], e["since"], e["reason"], e["plan"]), ("ready", False, None, "", plan))
+        self.assertEqual(self.writer.plans(), [plan])
+        self.assertEqual(json.loads(self.writer.path.read_text())["events"]["ev1"]["state"], "ready")
+        self.assertEqual(len(self.ai.calls), 1)
+
+    def test_no_run_once_the_meeting_has_started(self):
+        self.agenda["meetings"].append(meeting("ev2", EV_START + timedelta(hours=1)))
+        later = [NOW]
+        self.writer.clock = lambda: later[0]
+
+        def slow_gather():  # the first gather lasts until both meetings have started
+            later[0] = EV_START + timedelta(hours=2)
+
+        self.gather.on_call = slow_gather
+        self.tick(NOW)
+        self.assertEqual((self.ai.calls, self.gather.seen, self.writer.events), ([], ["ev1"], {}))
+
+    def test_a_call_that_starts_while_the_ai_is_resolved_spends_nothing(self):
+        live, resolve = [], self.ai.resolve
+        self.ai.resolve = lambda purpose="": (live.append(True), resolve(purpose))[1]
+        self.tick(NOW, busy=lambda: bool(live))
+        self.assertEqual((self.ai.calls, self.writer.events), ([], {}))
+        self.ai.resolve = resolve
+        self.tick(NOW + timedelta(minutes=1))
+        self.assertEqual((len(self.ai.calls), self.writer.events["ev1"]["state"]), (1, "ready"))
+
+    def test_memo_of_an_event_that_became_internal_is_hidden(self):
+        self.tick(NOW)
+        internal = {**self.agenda["meetings"][0], "external": False}
+        memo = self.writer.memo_for(internal, [self.writer.plans()[0]], NOW)
+        self.assertEqual((memo["state"], memo["plan_id"], memo["goal"]), ("none", "", ""))
+        file_plan = {**APP_PLAN, "id": "p1", "written_by": "file"}
+        self.assertEqual(self.writer.memo_for(internal, [file_plan], NOW)["written_by"], "file")
 
     def test_rebuild_rejects_unknown_internal_or_file_meetings(self):
         agenda = {"meetings": [meeting("int", EV_START, external=False),
@@ -1234,7 +1283,8 @@ class MemoLanguageTests(unittest.TestCase):
             self.assertEqual(self.server.memo_language(), "ru")
             self.server._APPLE_LANGUAGE[0] = float("-inf")
             # Missing, broken or odd preferences fall back to the system locale.
-            for content in (None, b"not a plist", b'<?xml version="1.0"?><plist><array/></plist>'):
+            for content in (None, b"not a plist", b'<?xml version="1.0"?><plist><array/></plist>',
+                            b'<?xml version="1.0"?><plist><dict>'):
                 self.plist.unlink(missing_ok=True)
                 if content is not None:
                     self.plist.write_bytes(content)

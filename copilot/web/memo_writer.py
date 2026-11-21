@@ -156,6 +156,11 @@ def _time(value: object) -> datetime | None:
     return parsed if parsed.tzinfo else None
 
 
+def _kept(entry: dict) -> bool:
+    """The entry still holds the last memo written for it."""
+    return isinstance(entry.get("plan"), dict) and isinstance(entry.get("digest"), dict)
+
+
 NEW_ENTRY = {
     "state": "", "start": "", "since": None, "reason": "", "retry_at": None, "attempts": 0,
     "rebuild": False, "rechecked": False, "signature": "", "language": "", "provider": "", "model": "",
@@ -176,6 +181,7 @@ class MemoWriter:
         self.lock = threading.Lock()
         self.run_lock = threading.Lock()
         self.wake = threading.Event()
+        self.clock = lambda: datetime.now().astimezone()
         payload = _json(path, {})
         events = payload.get("events") if isinstance(payload, dict) else None
         self.events: dict[str, dict] = {
@@ -186,8 +192,7 @@ class MemoWriter:
         for entry in self.events.values():
             if entry.get("state") == "preparing":  # cut short by a restart: no trigger left but one retry at most
                 attempts = int(entry.get("attempts") or 0) + 1
-                kept = isinstance(entry.get("plan"), dict) and isinstance(entry.get("digest"), dict)
-                entry.update(state="ready" if kept else "failed", reason="error", attempts=attempts,
+                entry.update(state="ready" if _kept(entry) else "failed", reason="error", attempts=attempts,
                              retry_at=now if attempts == 1 else None, since=None, rebuild=False)
 
     def _update(self, event_id: str, **values) -> None:
@@ -237,11 +242,14 @@ class MemoWriter:
             return
         try:
             upcoming = self._upcoming(agenda, now)
-            with self.lock:  # left the agenda, stopped being external, or got a file plan
-                stale = [key for key, entry in self.events.items()
-                         if entry.get("state") == "preparing" and key not in upcoming]
-            for event_id in stale:
-                self._drop(event_id)
+            with self.lock:  # left the agenda, started, stopped being external, or got a file plan
+                stale = {key: _kept(entry) for key, entry in self.events.items()
+                         if entry.get("state") == "preparing" and key not in upcoming}
+            for event_id, kept in stale.items():  # a rebuild that never ran keeps the last memo
+                if kept:
+                    self._update(event_id, state="ready", rebuild=False, since=None, reason="")
+                else:
+                    self._drop(event_id)
             for event_id, (start, meeting) in sorted(upcoming.items(), key=lambda item: item[1][0]):
                 with self.lock:
                     entry = dict(self.events.get(event_id) or {})
@@ -282,6 +290,8 @@ class MemoWriter:
         stamp = now.isoformat(timespec="seconds")
         if busy():
             return False
+        if self._started(start, now):  # an earlier event of this tick took until the start
+            return True
         shown = isinstance(before.get("plan"), dict) and before.get("state") == "ready"
         if not recheck and not shown:  # an earlier memo stays on screen while a retry runs
             self._update(event_id, state="preparing", since=stamp, start=str(meeting.get("start") or ""))
@@ -300,37 +310,45 @@ class MemoWriter:
             self._update(event_id, rechecked=True)
             if signature == before.get("signature"):
                 return True
-        if not sources and shown:  # sources can be gone for a while: the earlier memo stays
+        if not sources and shown:  # sources can be gone for a while: the earlier memo stays, any wait ends
             if not recheck:
-                self._update(event_id, retry_at=None)
+                self._update(event_id, retry_at=None, reason="")
             return True
         settled = {"since": None, "reason": "", "attempts": 0, "rebuild": False, "retry_at": None,
                    "signature": signature, "language": language, "rechecked": start - now <= self.RECHECK}
         if not sources:
             self._update(event_id, state="nothing_found", plan=None, **settled)
             return True
-        if busy():
-            if before:
-                self._update(event_id, **before)
-            else:
-                self._drop(event_id)
-            return False
         ticket = reply = None
+        live = started = False
         try:
-            ticket = self.ai.resolve("memo")
-            if ticket.state != "ready":
-                raise AIChoiceError(ticket.state, ticket.reason)
-            self._spend(event_id, ticket, signature)
-            reply = self.ai.run("memo", memo_prompt(meeting, sources, language), ticket=ticket, web=False,
-                                timeout=self.AI_TIMEOUT)
-            plan, digest = build_plan(event_id, meeting, parse_answer(reply.text, sources), sources, language)
+            ticket = self.ai.resolve("memo")  # can block on provider discovery: the call and the start are checked after it
+            live = busy()
+            started = not live and self._started(start, now)
+            if not (live or started):
+                if ticket.state != "ready":
+                    raise AIChoiceError(ticket.state, ticket.reason)
+                self._spend(event_id, ticket, signature)
+                reply = self.ai.run("memo", memo_prompt(meeting, sources, language), ticket=ticket, web=False,
+                                    timeout=self.AI_TIMEOUT)
+                plan, digest = build_plan(event_id, meeting, parse_answer(reply.text, sources), sources, language)
         except Exception as error:
             key = ticket.key if ticket is not None and ticket.state == "ready" else ""
             self._fail(event_id, before, now, _reason(error, replied=reply is not None), signature, key)
             return True
+        if live or started:  # nothing spent: the entry goes back to what it was
+            if before:
+                self._update(event_id, **before)
+            else:
+                self._drop(event_id)
+            return not live
         self._update(event_id, state="ready", plan=plan, digest=digest, provider=ticket.choice["provider"],
                      model=reply.model or ticket.choice["model"], written_at=stamp, **settled)
         return True
+
+    def _started(self, start: datetime, now: datetime) -> bool:
+        """The meeting has started by now; `now` is when the tick began, the clock moves on during it."""
+        return max(now, self.clock()) >= start
 
     def _spend(self, event_id: str, ticket, signature: str) -> None:
         """The only place an attempt is marked spent, written right before the one `ai.run` call. After it no
@@ -346,9 +364,8 @@ class MemoWriter:
         print(f"memo {event_id}: failed {reason}", flush=True)
         attempts = 0 if reason == "ai_needs_choice" else int(before.get("attempts") or 0) + 1
         retry_at = (now + self.RETRY).isoformat(timespec="seconds") if attempts == 1 else None
-        kept = isinstance(before.get("plan"), dict) and isinstance(before.get("digest"), dict)
         tried = {} if signature is None else {"signature": signature}
-        self._update(event_id, state="ready" if kept else "failed", reason=reason, attempts=attempts,
+        self._update(event_id, state="ready" if _kept(before) else "failed", reason=reason, attempts=attempts,
                      retry_at=retry_at, rebuild=False, since=None, choice_key=choice_key, **tried)
 
     def rebuild(self, event_id: str, agenda: dict) -> None:
@@ -373,8 +390,10 @@ class MemoWriter:
 
     def plans(self) -> list[dict]:
         with self.lock:
+            # a rebuild keeps the last memo for the live call until it is replaced
             return [entry["plan"] for entry in self.events.values()
-                    if entry.get("state") == "ready" and isinstance(entry.get("plan"), dict)]
+                    if entry.get("state") == "ready" and isinstance(entry.get("plan"), dict)
+                    or entry.get("state") == "preparing" and _kept(entry)]
 
     def memo_for(self, meeting: dict, hits: list[dict], now: datetime | None = None) -> dict:
         """The agenda `memo` object of one meeting; `hits` are the plans matched to it."""
@@ -383,12 +402,14 @@ class MemoWriter:
             return self._memo("ready", file_digest(file_plan), plan_id=str(file_plan.get("id") or ""),
                               written_by="file")
         event_id = str(meeting.get("event_id") or "")
+        if not event_id or not meeting.get("external"):  # internal or solo now: an earlier memo is not shown
+            return self._memo("none")
         with self.lock:
-            entry = dict(self.events.get(event_id) or {}) if event_id else {}
+            entry = dict(self.events.get(event_id) or {})
         if not entry:
             start = _time(meeting.get("start"))
             future = start is not None and start > (now or datetime.now().astimezone())
-            return self._memo("preparing" if event_id and meeting.get("external") and future else "none")
+            return self._memo("preparing" if future else "none")
         state = entry.get("state")
         if state == "ready":
             plan = entry.get("plan") if isinstance(entry.get("plan"), dict) else {}
