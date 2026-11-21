@@ -22,8 +22,19 @@ async function generic(page, lang, label) {
       && node.getBoundingClientRect().right > width + 0.5).map(node => node.className || node.tagName);
     const clipped = [...home.querySelectorAll('.mtitle, .goal, .asks li, .bg, .who, .state, .time, .soon')]
       .filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.className);
-    return { scroll: document.documentElement.scrollWidth <= width, spill, clipped, text: document.body.innerText };
+    // Link-style actions on one line share one size and line height.
+    const sizes = new Set([...home.querySelectorAll('.actions :is(a.ql, button.ql, button.quiet)')]
+      .map(node => `${getComputedStyle(node).fontSize}/${getComputedStyle(node).lineHeight}`));
+    // An e-mail wraps only after @ or a dot: no text piece of it is split across lines.
+    const range = document.createRange();
+    const torn = [...home.querySelectorAll('.who b, .who span')].filter(node => node.textContent.includes('@'))
+      .flatMap(node => [...node.childNodes].filter(child => child.nodeType === Node.TEXT_NODE && child.textContent.trim()))
+      .filter(child => { range.selectNodeContents(child); return range.getClientRects().length > 1; })
+      .map(child => child.textContent);
+    return { scroll: document.documentElement.scrollWidth <= width, spill, clipped, text: document.body.innerText, sizes: [...sizes], torn };
   });
+  assert.ok(result.sizes.length <= 1, `${label}: link-style actions differ in size: ${result.sizes}`);
+  assert.deepEqual(result.torn, [], `${label}: an e-mail broken inside a piece`);
   assert.equal(result.scroll, true, `${label}: horizontal scroll`);
   assert.deepEqual(result.spill, [], `${label}: content past the window edge`);
   assert.deepEqual(result.clipped, [], `${label}: clipped text`);
@@ -34,6 +45,17 @@ async function generic(page, lang, label) {
 const checks = {
   async ready(page, lang) {
     const row = page.locator('#home .row.next');
+    // The past-calls panel opens only by hand: a fresh Home does not show it.
+    assert.equal(await page.locator('#archive-dialog').isVisible(), false);
+    // Whole hours read without "0 min".
+    assert.deepEqual(await page.evaluate(() => [120, 125].map(minutes =>
+      homeTimeLeft({ start: new Date(Date.now() + minutes * 60000).toISOString() }, Date.now()))),
+    lang === 'ru' ? ['через 2 ч', 'через 2 ч 5 мин'] : ['in 2 h', 'in 2 h 5 min']);
+    // Reading order is time, title, people, digest; at desktop width the people still sit in the right column.
+    assert.deepEqual(await row.evaluate(node => [...node.querySelectorAll('.time, .mtitle, .who, .goal, .actions')].map(item => item.className)),
+      ['time', 'mtitle', 'who', 'goal', 'actions']);
+    const [title, who] = await Promise.all([row.locator('.mtitle').boundingBox(), row.locator('.who').boundingBox()]);
+    assert.ok(who.x >= title.x + title.width && Math.abs(who.y - title.y) < 8, `who beside the title: ${JSON.stringify({ title, who })}`);
     assert.match(await row.locator('.goal').innerText(), /^(Цель|Goal): Agree on the pilot scope/);
     assert.equal(await row.locator('.asks li').count(), 3);
     assert.match(await row.locator('.soon').innerText(), /через 40 мин|in 40 min/);
@@ -44,7 +66,7 @@ const checks = {
     assert.match(headings[0], crosses ? /^(Завтра|Tomorrow), / : /^(Сегодня|Today), /);
     assert.match(headings.at(-1), /^(Завтра|Tomorrow), \S+ \d+ \S+$/);
     // Each meeting is an article titled by its heading, under a day heading.
-    assert.equal(await page.locator('#home article.row > div > h3.mtitle').count(), 3);
+    assert.equal(await page.locator('#home article.row > h3.mtitle').count(), 3);
     // The call link opens in a new tab and leaks nothing.
     const link = row.locator('a.ql');
     assert.deepEqual([await link.getAttribute('href'), await link.getAttribute('target'), await link.getAttribute('rel')],
@@ -98,6 +120,9 @@ const checks = {
     const status = page.locator('#home .row.next [role="status"]');
     assert.match(await status.innerText(), lang === 'ru' ? /с \d\d:\d\d,/ : /since \d\d:\d\d,/);
     assert.equal(await page.locator('#home .row.next .actions button', { hasText: /Открыть мемо|Open memo/ }).count(), 0);
+    // No start time known: one sentence-case line.
+    assert.equal(await rowOf(page, 'Example LLC sync').locator('.state').innerText(),
+      lang === 'ru' ? 'Мемо готовится, обычно 2-3 минуты.' : 'Memo in progress, usually 2-3 minutes.');
   },
   async nothing_found(page) {
     const button = page.locator('#home .row.next .actions button', { hasText: /почт.*пап|mail.*folder/i });
@@ -115,6 +140,20 @@ const checks = {
     const choice = await rowOf(page, 'Pilot follow-up').locator('.state').innerText();
     assert.match(choice, /не выбран ИИ|no AI is chosen/);
     assert.doesNotMatch(choice, /Ничего делать не нужно|Nothing to do/);
+    // Retrying cannot help without a chosen AI: the only action is Check the AI.
+    assert.deepEqual(await rowOf(page, 'Pilot follow-up').locator('.actions button').allInnerTexts(),
+      [lang === 'ru' ? 'Проверить ИИ' : 'Check the AI']);
+    // A second click while the POST is in flight posts nothing more.
+    let release;
+    page.api.responses['/api/memo/rebuild'] = new Promise(resolve => { release = resolve; });
+    const retry = row.locator('button', { hasText: /Повторить|Retry/ });
+    await retry.click();
+    await page.waitForFunction(() => document.querySelector('#home .row.next .actions button:disabled'));
+    assert.equal(await retry.isDisabled(), true);
+    release();
+    await page.waitForFunction(() => !document.querySelector('#home .row.next .actions button:disabled'));
+    delete page.api.responses['/api/memo/rebuild'];
+    page.api.posts.length = 0;
     await Promise.all([page.waitForResponse(response => response.url().endsWith('/api/memo/rebuild')),
       row.locator('button', { hasText: /Повторить|Retry/ }).click()]);
     assert.deepEqual(page.api.posts.filter(item => item.path === '/api/memo/rebuild').map(item => item.body), [{ event_id: 'evt-failed' }]);
@@ -124,7 +163,7 @@ const checks = {
     await row.locator('.row-error').waitFor();
     assert.match(await row.locator('.row-error').innerText(), /^(Не получилось\. Попробуйте еще раз\.|That did not work\. Try again\.)$/);
     assert.match(await row.locator('.state').first().innerText(), /ИИ не ответил|the AI did not answer/);
-    const check = row.locator('button.ql', { hasText: /Проверить ИИ|Check the AI/ });
+    const check = row.locator('button.ql', { hasText: /^(Проверить ИИ|Check the AI)$/ });
     await check.click();
     await page.locator('#getting-started').waitFor({ state: 'visible' });
   },
@@ -133,8 +172,11 @@ const checks = {
     assert.match(await row.locator('.status-text').innerText(), /^(Этот звонок не будет записан|This call will not be recorded)$/);
     assert.equal(await row.locator('button.quiet').count(), 0);
     // A dropped connection on Undo: the row stays skipped and says it did not work.
-    page.api.responses['/api/agenda/skip-recording'] = 'abort';
+    let release;
+    page.api.responses['/api/agenda/skip-recording'] = new Promise(resolve => { release = resolve; });
     await row.locator('button', { hasText: /^(Вернуть|Undo)$/ }).click();
+    assert.equal(await row.locator('button', { hasText: /^(Вернуть|Undo)$/ }).isDisabled(), true);
+    release('abort');
     await row.locator('.row-error').waitFor();
     assert.equal(await row.locator('.status-text').count(), 1);
     delete page.api.responses['/api/agenda/skip-recording'];
@@ -154,9 +196,12 @@ const checks = {
     const unscheduled = rowOf(page, 'Contract draft review');
     assert.equal(await unscheduled.count(), 1);
     assert.match(await page.locator('#home h2').last().innerText(), /Подготовка без события|Preparation without/);
+    const lefts = await Promise.all([unscheduled, row].map(item => item.locator('.mtitle').evaluate(node => node.getBoundingClientRect().left)));
+    assert.equal(lefts[0], lefts[1], 'an unscheduled title sits in the title column');
     await unscheduled.locator('button', { hasText: /Открыть мемо|Open memo/ }).click();
-    assert.match(await page.locator(`#${await unscheduled.locator('button').getAttribute('aria-controls')}`).innerText(),
-      /Check the draft before sending it\./);
+    const panel = page.locator(`#${await unscheduled.locator('button').getAttribute('aria-controls')}`);
+    assert.match(await panel.innerText(), /Check the draft before sending it\./);
+    assert.ok((await panel.boundingBox()).width > 300, 'the opened memo is as wide as the title column');
   },
   async no_skip_support(page) {
     assert.equal(await page.locator('#home .row.next .goal').count(), 1);
@@ -178,6 +223,15 @@ const checks = {
       assert.ok(box.lines <= 2.05 && box.cut, `${selector} clamped to two lines: ${JSON.stringify(box)}`);
     }
     assert.ok((await page.locator('#home .row.next .goal').textContent()).length > 300);
+    // The background keeps two lines too; Where this comes from stays visible after it.
+    const background = await page.locator('#home .row.next .bg').evaluate(node => {
+      const text = node.querySelector('span');
+      const button = node.querySelector('button');
+      return { lines: text.clientHeight / parseFloat(getComputedStyle(text).lineHeight), cut: text.scrollHeight > text.clientHeight + 1,
+        height: getComputedStyle(node).lineHeight, shown: button.checkVisibility() && button.getBoundingClientRect().bottom <= node.getBoundingClientRect().bottom + 1 };
+    });
+    assert.ok(background.lines <= 2.05 && background.cut && background.shown, `.bg clamped, sources shown: ${JSON.stringify(background)}`);
+    assert.equal(parseFloat(background.height), 20.3);
   },
 };
 
@@ -219,6 +273,23 @@ const checks = {
         await page.context().close();
       }
     }
+    // The time left moves on every 30 s without a poll changing anything, and focus stays put.
+    // Page time starts 10 min 15 s before the next call, so 30 s later "11 min" becomes "10 min".
+    const timed = await open(browser, { fixture: 'ready', clock: 29 * 60000 + 45000 });
+    try {
+      const soon = timed.locator('#home .row.next .soon');
+      await soon.waitFor();
+      assert.equal(await soon.innerText(), 'через 11 мин');
+      const button = timed.locator('#home .row.next .actions button[aria-controls]');
+      await button.focus();
+      await button.evaluate(node => { node.dataset.marked = '1'; });
+      await timed.clock.runFor(30000);
+      await timed.waitForFunction(() => document.querySelector('#home .row.next .soon').textContent === 'через 10 мин');
+      assert.equal(await timed.evaluate(() => document.activeElement.dataset.marked), '1');
+    } catch (error) {
+      failures.push(`clock: ${error.message}`);
+    }
+    await timed.context().close();
     assert.deepEqual(failures, []);
     console.log(`Screenshots: ${shots}`);
     console.log('Home UI: rows, memo states, actions, failures, polling keeps focus, 1440/1024/400, light/dark, RU/EN: OK');

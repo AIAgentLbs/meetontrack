@@ -98,12 +98,18 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .day { font-size: 14px; font-weight: 650; color: var(--muted); padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .row + .day { margin-top: 40px; }
-.row { display: grid; grid-template-columns: 104px minmax(0, 1fr) 200px; gap: 4px 24px; padding: 20px 0; border-bottom: 1px solid var(--line); }
+.row { display: grid; grid-template-columns: 104px minmax(0, 1fr) 200px; grid-template-rows: auto 1fr; gap: 0 24px; padding: 20px 0; border-bottom: 1px solid var(--line); }
 .row.next { padding: 28px 0; }
-.row > div:empty, .who:empty { display: none; }
+/* Fixed cells: a row without a time keeps its title, digest and memo in the title column. */
+.row > .when { grid-area: 1 / 1 / 3 / 2; }
+.row > .mtitle { grid-area: 1 / 2; }
+.row > .main { grid-area: 2 / 2; }
+.row > .who { grid-area: 1 / 3 / 3 / 4; }
+.who:empty { display: none; }
 .time { font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.4; }
 .soon { display: inline-block; margin-top: 6px; padding: 3px 8px; border-radius: 4px; background: var(--accent-soft); color: var(--accent-strong); font-size: 14px; font-weight: 650; white-space: nowrap; }
 .mtitle { font-size: 18px; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+/* E-mails wrap at their <wbr> after @ and dots; anywhere is the last resort. */
 .who { color: var(--muted); font-size: 14px; line-height: 1.45; padding-top: 3px; overflow-wrap: anywhere; }
 .who b { display: block; color: var(--text); font-weight: 600; }
 .who b:not(:first-child), .who .more { margin-top: 6px; }
@@ -114,7 +120,9 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
 /* The digest keeps two lines of the goal and of each question; the full text is in the opened memo. */
 .goal, .asks li { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; line-height: 1.45; }
 .asks li::before { content: ""; position: absolute; left: 0; top: 10px; width: 5px; height: 5px; background: var(--muted); border-radius: 1px; }
-.bg { margin-top: 10px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.bg { margin-top: 10px; color: var(--muted); font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+/* Two lines of background at most; Where this comes from sits outside the clamp and stays visible. */
+.bg > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; }
 .state { margin-top: 6px; color: var(--muted); }
 .state b { color: var(--text); font-weight: 600; }
@@ -124,9 +132,11 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
 .fail { display: inline-block; position: relative; padding-left: 16px; font-weight: 600; color: var(--text); white-space: normal; }
 .fail::before { content: ""; position: absolute; left: 1px; top: calc(0.75em - 4px); width: 8px; height: 8px; background: var(--danger); transform: rotate(45deg); }
 .home button.quiet, .home button.ql { border-color: transparent; background: transparent; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
-.home button.quiet { padding: 0; }
+.home button.quiet { padding: 0; border: 0; }
 .home button.ql { min-height: 32px; padding: 0; border: 0; border-radius: 0; font-size: inherit; }
 .home .ql.inline { display: inline; min-height: 0; padding: 7px 0; white-space: normal; text-align: left; }
+/* Link-style actions on one line read at one size. */
+.home .actions :is(a.ql, button.ql, button.quiet) { font-size: 15px; line-height: 1.4; }
 .memo-details { display: grid; gap: 8px; margin-top: 16px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); overflow-wrap: anywhere; }
 .memo-details summary { min-height: 32px; font-weight: 600; cursor: pointer; }
 .memo-details details p { margin: 4px 0; }
@@ -145,11 +155,11 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
   /* One column: time and time left on one line, then title, who, the digest. */
   .home { padding: 24px 0 32px; }
   .home .col { padding: 0 16px; }
-  .row { grid-template-columns: minmax(0, 1fr); }
-  .row > div:first-child { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+  .row { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 4px; }
+  .row > :is(.when, .mtitle, .main, .who) { grid-area: auto; }
+  .row > .when { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+  .row > .when:empty { display: none; }
   .soon { margin-top: 0; }
-  .row > div:nth-child(2) { display: contents; }
-  .row > div:nth-child(2) > * { order: 3; }
-  .row > div:nth-child(2) > .mtitle { order: 1; }
-  .row .who { order: 2; padding-top: 0; }
+  .row > .main { display: contents; }
+  .row .who { padding-top: 0; }
 }

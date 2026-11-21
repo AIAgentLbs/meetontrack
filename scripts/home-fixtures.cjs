@@ -47,7 +47,8 @@ function build(name) {
     meetings: meetings.sort((a, b) => Date.parse(a.start) - Date.parse(b.start)), unscheduled_plans: [], ...extra });
   const agendas = {
     ready: () => agenda([ready(), preparing(now + 120 * MIN), nothing(at10)]),
-    preparing: () => agenda([preparing(now + 40 * MIN), nothing(at10)]),
+    preparing: () => agenda([preparing(now + 40 * MIN), nothing(at10),
+      meeting('evt-prep-3', now + 90 * MIN, 30, 'Example LLC sync', [anna], { memo: memo('preparing') })]),
     nothing_found: () => agenda([nothing(now + 40 * MIN), preparing(at10, 'evt-prep-2')]),
     failed: () => agenda([
       meeting('evt-failed', now + 40 * MIN, 30, 'Supply accounting intro', [oleg],
@@ -73,7 +74,7 @@ function build(name) {
         meeting('evt-long', now + 40 * MIN, 60,
           'Quarterly review of the supply accounting pilot with every regional office and the central procurement team',
           people, { memo: memo('ready', { goal, questions: [Array(6).fill('Which offices will join the pilot first and why').join(', ') + '?'],
-            background: 'A long background line that keeps going '.repeat(4), source_count: 0, plan_id: 'plan-long' }),
+            background: 'A long background line that keeps going '.repeat(8), source_count: 2, plan_id: 'plan-long' }),
           plans: [plan('plan-long', 'Long', MEMO_TEXT)] }),
         nothing(at10),
       ]);
@@ -92,14 +93,15 @@ const states = Object.defineProperties({}, Object.fromEntries(
     .map(name => [name, { enumerable: true, get: () => build(name) }])));
 
 // Serves the real UI files and the fixture. The returned object records POST bodies; a test can set
-// `responses[path]` to {status, json} or 'abort', and `gate` to a promise that holds back /api/agenda.
+// `responses[path]` to {status, json}, 'abort' or a promise of either, and `gate` to a promise that holds back
+// /api/agenda. `clock` installs a fake page clock that many milliseconds ahead of now.
 async function route(context, fixture, origin) {
   const api = { fixture, posts: [], responses: {}, gate: null };
   await context.route(`${origin}/**`, async request => {
     const url = new URL(request.request().url());
     if (request.request().method() === 'POST' && url.pathname.startsWith('/api/')) {
       api.posts.push({ path: url.pathname, body: request.request().postDataJSON() });
-      const answer = api.responses[url.pathname];
+      const answer = await api.responses[url.pathname]; // a promise holds the answer back
       if (answer === 'abort') return request.abort();
       return request.fulfill(answer ? { status: answer.status, json: answer.json } : { json: { ok: true } });
     }
@@ -119,7 +121,7 @@ async function route(context, fixture, origin) {
 }
 
 // A page on Home with the fixture: page.api is the route's recorder, page.errors the script errors.
-async function open(browser, { fixture, width = 1440, scheme = 'light', lang = 'ru', gate = null }) {
+async function open(browser, { fixture, width = 1440, scheme = 'light', lang = 'ru', gate = null, clock = null }) {
   const origin = 'http://home-ui.test';
   const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme, locale: lang });
   const data = states[fixture];
@@ -134,6 +136,7 @@ async function open(browser, { fixture, width = 1440, scheme = 'light', lang = '
   page.api = api;
   page.errors = [];
   page.on('pageerror', error => page.errors.push(String(error.stack || error)));
+  if (clock !== null) await page.clock.install({ time: Date.now() + clock });
   await page.goto(`${origin}/`);
   return page;
 }

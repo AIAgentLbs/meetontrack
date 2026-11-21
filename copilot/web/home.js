@@ -14,6 +14,12 @@ const homeSafeLink = value => {
     return false;
   }
 };
+// An e-mail may wrap after @ or a dot: each piece is its own text node with a <wbr> between.
+function homeBreakable(tag, className, value) {
+  const node = textNode(tag, className, "");
+  String(value).split(/(?<=[@.])/).forEach((part, index) => node.append(...(index ? [document.createElement("wbr")] : []), part));
+  return node;
+}
 const homePlain = line => line.replace(/^(?:[-*+]|\d+[.)])\s+/, "")
   .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|__|`/g, "").trim();
 
@@ -37,8 +43,8 @@ function nextMeeting(agenda, now = Date.now()) {
 function homeTimeLeft(meeting, now) {
   const minutes = Math.ceil((Date.parse(meeting.start) - now) / 60000);
   if (minutes <= 0) return t("home.now");
-  return minutes < 60 ? t("home.in_minutes", { n: minutes })
-    : t("home.in_hours", { h: Math.floor(minutes / 60), m: minutes % 60 });
+  if (minutes < 60) return t("home.in_minutes", { n: minutes });
+  return t(minutes % 60 ? "home.in_hours" : "home.in_hours_whole", { h: Math.floor(minutes / 60), m: minutes % 60 });
 }
 
 function homeDayTitle(start, now) {
@@ -59,12 +65,17 @@ function homeButton(label, className, key, onClick) {
 }
 
 // A skip or retry the server refused leaves the row as it was and adds one line to it.
-async function homeAction(key, path, body) {
+// The button is disabled while its POST is in flight, so a double click posts once.
+async function homeAction(button, key, path, body) {
+  button.disabled = true;
   try {
     await post(path, body);
     homeErrors.delete(key);
   } catch (error) {
     homeErrors.set(key, error.status === 409 && path === "/api/agenda/skip-recording" ? "home.cannot_skip" : "home.action_failed");
+  } finally {
+    button.disabled = false;
+    if (document.activeElement === document.body) button.focus();
   }
   renderHome(window.agendaData, window.appState);
   await refreshAgenda();
@@ -109,11 +120,11 @@ function homeRow(meeting, { next, now, supported, id }) {
   const plan = (meeting.plans || []).find(item => item.id === memo.plan_id);
   const row = document.createElement("article");
   row.className = next ? "row next" : "row";
-  const when = document.createElement("div");
+  const when = textNode("div", "when", "");
   if (meeting.start) when.append(textNode("p", "time", homeClock(meeting.start)));
   if (next) when.append(textNode("span", "soon", homeTimeLeft(meeting, now)));
-  const main = document.createElement("div");
-  main.append(textNode("h3", "mtitle", meeting.title));
+  const title = textNode("h3", "mtitle", meeting.title);
+  const main = textNode("div", "main", "");
   const actions = document.createElement("div");
   actions.className = "actions";
   const memoView = memo.state === "ready" && plan ? homeMemo(plan, key, id, next) : null;
@@ -128,7 +139,8 @@ function homeRow(meeting, { next, now, supported, id }) {
     }
     const sources = memo.source_count > 0 && memoView;
     if (memo.background || sources) {
-      const background = textNode("p", "bg", memo.background ? `${memo.background} ` : "");
+      const background = textNode("p", "bg", "");
+      if (memo.background) background.append(textNode("span", "", memo.background), " ");
       if (sources) {
         const count = memo.source_count;
         const form = new Intl.PluralRules(homeLocale()).select(count);
@@ -141,8 +153,8 @@ function homeRow(meeting, { next, now, supported, id }) {
     const status = document.createElement("p");
     status.className = "state";
     status.setAttribute("role", "status");
-    if (memo.since) status.append(textNode("b", "", t("home.preparing_since", { time: homeClock(memo.since) })), " ");
-    status.append(t("home.preparing_note"));
+    if (memo.since) status.append(textNode("b", "", t("home.preparing_since", { time: homeClock(memo.since) })), ` ${t("home.preparing_note")}`);
+    else status.append(t("home.preparing"));
     main.append(status);
   } else if (memo.state === "nothing_found") {
     const status = document.createElement("p");
@@ -160,9 +172,10 @@ function homeRow(meeting, { next, now, supported, id }) {
     status.append(textNode("span", "fail", t("home.failed", { reason: t(`home.reason.${reason}`) })));
     if (memo.retry_at && reason !== "ai_needs_choice") status.append(` ${t("home.retry_at", { time: homeClock(memo.retry_at) })}`);
     main.append(status);
-    if (meeting.event_id) {
+    // Without a chosen AI a retry cannot succeed: the only way on is Check the AI.
+    if (meeting.event_id && reason !== "ai_needs_choice") {
       actions.append(homeButton(t("home.retry"), "", `${key}|retry`,
-        () => homeAction(key, "/api/memo/rebuild", { event_id: meeting.event_id })));
+        event => homeAction(event.currentTarget, key, "/api/memo/rebuild", { event_id: meeting.event_id })));
     }
     actions.append(homeButton(t("home.check_ai"), "ql", `${key}|ai`, () => document.getElementById("getting-started-open").click()));
   }
@@ -170,7 +183,7 @@ function homeRow(meeting, { next, now, supported, id }) {
   if (next && homeSafeLink(meeting.link)) {
     actions.append(Object.assign(externalLink(t("home.call_link"), meeting.link), { className: "ql" }));
   }
-  const skip = value => () => homeAction(key, "/api/agenda/skip-recording",
+  const skip = value => event => homeAction(event.currentTarget, key, "/api/agenda/skip-recording",
     { event_id: meeting.event_id || "", start: meeting.start, end: meeting.end, title: meeting.title, skip: value });
   if (meeting.skip_recording) {
     actions.append(textNode("span", "status-text", t("home.skipped")));
@@ -192,9 +205,9 @@ function homeRow(meeting, { next, now, supported, id }) {
   who.className = "who";
   const others = (meeting.attendees || []).filter(person => !person.self);
   for (const person of others.slice(0, 3)) {
-    who.append(textNode("b", "", person.name || person.email || ""));
+    who.append(homeBreakable("b", "", person.name || person.email || ""));
     const detail = person.company || (person.name ? person.email : "");
-    if (detail) who.append(textNode("span", "", detail));
+    if (detail) who.append(homeBreakable("span", "", detail));
   }
   // A long invite shows three people and a count; the whole list stays in the line's tooltip.
   if (others.length > 3) {
@@ -202,7 +215,8 @@ function homeRow(meeting, { next, now, supported, id }) {
     more.title = others.map(person => person.name || person.email || "").join(", ");
     who.append(more);
   }
-  row.append(when, main, who);
+  // Reading order: time, title, people, digest; at desktop width the grid puts the people in the right column.
+  row.append(when, title, who, main);
   return row;
 }
 

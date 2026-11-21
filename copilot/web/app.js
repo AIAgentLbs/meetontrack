@@ -92,6 +92,7 @@ const translations = {
     "home.tomorrow": "Завтра, {date}",
     "home.in_minutes": "через {n} мин",
     "home.in_hours": "через {h} ч {m} мин",
+    "home.in_hours_whole": "через {h} ч",
     "home.now": "идет сейчас",
     "home.goal": "Цель: {goal}",
     "home.sources.one": "Откуда это: {n} источник",
@@ -106,6 +107,7 @@ const translations = {
     "home.unskip": "Вернуть",
     "home.preparing_since": "Мемо готовится с {time},",
     "home.preparing_note": "обычно 2-3 минуты. Появится здесь само.",
+    "home.preparing": "Мемо готовится, обычно 2-3 минуты.",
     "home.nothing_found": "О собеседнике в ваших источниках пока ничего нет.",
     "home.calendar_on": "Календарь уже подключен.",
     "home.connect_sources": "Подключить почту и папки с файлами",
@@ -116,7 +118,7 @@ const translations = {
     "home.reason.error": "ошибка при подготовке",
     "home.retry_at": "Ничего делать не нужно, попробуем снова в {time}.",
     "home.retry": "Повторить",
-    "home.check_ai": "Проверить ИИ в настройках",
+    "home.check_ai": "Проверить ИИ",
     "home.action_failed": "Не получилось. Попробуйте еще раз.",
     "home.cannot_skip": "Программа записи не умеет пропускать звонок. Обновите приложение.",
     "home.more_people": "и еще {n}",
@@ -354,6 +356,7 @@ const translations = {
     "home.tomorrow": "Tomorrow, {date}",
     "home.in_minutes": "in {n} min",
     "home.in_hours": "in {h} h {m} min",
+    "home.in_hours_whole": "in {h} h",
     "home.now": "on now",
     "home.goal": "Goal: {goal}",
     "home.sources.one": "Where this comes from: {n} source",
@@ -368,6 +371,7 @@ const translations = {
     "home.unskip": "Undo",
     "home.preparing_since": "Memo in progress since {time},",
     "home.preparing_note": "usually 2-3 minutes. It will appear here by itself.",
+    "home.preparing": "Memo in progress, usually 2-3 minutes.",
     "home.nothing_found": "Nothing about this contact in your sources yet.",
     "home.calendar_on": "The calendar is already connected.",
     "home.connect_sources": "Connect mail and file folders",
@@ -378,7 +382,7 @@ const translations = {
     "home.reason.error": "something went wrong",
     "home.retry_at": "Nothing to do, we will try again at {time}.",
     "home.retry": "Retry",
-    "home.check_ai": "Check the AI in settings",
+    "home.check_ai": "Check the AI",
     "home.action_failed": "That did not work. Try again.",
     "home.cannot_skip": "The recorder cannot skip a call. Update the app.",
     "home.more_people": "and {n} more",
@@ -790,7 +794,6 @@ Object.assign(translations.ru, {
 let archiveMeetings = [];
 let selectedArchiveMeeting = "";
 let libraryCallActive = null;
-let archiveAutomatic = false;
 let archiveRequest = 0;
 let archiveDetailRequest = 0;
 let archiveAbort;
@@ -2556,18 +2559,15 @@ function updateLibraryMode(data) {
     || data.transcript?.live === true || ["recording", "loading", "overloaded"].includes(data.transcript?.status);
   const previous = libraryCallActive;
   libraryCallActive = active;
-  if (previous !== active) {
-    if (!active) void openArchive({automatic: true, focus: false});
-    else if (archiveAutomatic) closeArchive();
-  }
+  // The past calls open only by hand; a call that starts takes the screen back from them.
+  if (active && previous === false && !elements.archiveDialog.hidden) closeArchive();
   setArchiveMode();
 }
 
-async function openArchive({automatic = false, focus = true} = {}) {
-  archiveAutomatic = automatic;
+async function openArchive() {
   elements.archiveDialog.hidden = false;
   setArchiveMode();
-  if (focus) elements.archiveSearch.focus();
+  elements.archiveSearch.focus();
   await refreshArchive();
 }
 
