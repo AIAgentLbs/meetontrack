@@ -2152,6 +2152,7 @@ class CodexSession:
         self.last_error = ""
         self.last_analyzed_fingerprint = ""
         self.last_analyzed_at = 0.0
+        self.analysed_until = ""  # newest transcript time the last started analysis saw
         self.analysis: dict[str, str] = {"state": "idle", "at": "", "message": ""}
         self._load()
 
@@ -2452,7 +2453,7 @@ ASK формулируй как одну короткую реплику, кот
                 self.busy = False
                 self._ticket, self._roots, self._rules = None, (), ""
 
-    def should_analyze(self, transcript: str, force: bool, urgent: bool = False) -> bool:
+    def should_analyze(self, transcript: str, force: bool, urgent: bool = False, latest_at: str = "") -> bool:
         fingerprint = hashlib.sha256(transcript.encode("utf-8")).hexdigest()
         with self.lock:
             if self.busy or not transcript.strip():
@@ -2465,6 +2466,7 @@ ASK формулируй как одну короткую реплику, кот
                     return False
             self.last_analyzed_fingerprint = fingerprint
             self.last_analyzed_at = time.time()
+            self.analysed_until = latest_at
             self._persist_locked()
             return True
 
@@ -3201,7 +3203,7 @@ class Handler(BaseHTTPRequestHandler):
                     "copilot": COPILOT.snapshot(transcript["meeting_id"]),
                     "journal": journal,
                     "heard_question": heard_question(transcript["segments"], journal,
-                                                     analysis_started_at=COPILOT.last_analyzed_at,
+                                                     analysed_until=COPILOT.analysed_until,
                                                      busy=COPILOT.busy, now=time.time()),
                     "fact_checks": fact_check_state(transcript),
                     "meeting_chat": MEETING_CHAT.snapshot(transcript["meeting_id"]),
@@ -3593,7 +3595,7 @@ class Handler(BaseHTTPRequestHandler):
                 force = bool(payload.get("force", False))
                 urgent = payload.get("urgent") is True
                 COPILOT.bind_meeting(snap["meeting_id"])
-                if not COPILOT.should_analyze(context, force, urgent):
+                if not COPILOT.should_analyze(context, force, urgent, str(snap.get("latest_at") or "")):
                     self._json({"ok": True, "skipped": True})
                     return
                 scope = REPOSITORIES.resolve(

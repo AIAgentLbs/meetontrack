@@ -23,8 +23,8 @@ def segment(text: str = QUESTION, ago: float = 5, **extra) -> dict:
     return {"source": "system", "speaker": "Anna Petrova", "text": text, "timestamp": iso(ago), **extra}
 
 
-def heard(segments, journal=(), started=0.0, busy=False):
-    return heard_question(list(segments), list(journal), analysis_started_at=started, busy=busy, now=NOW)
+def heard(segments, journal=(), until="", busy=False):
+    return heard_question(list(segments), list(journal), analysed_until=until, busy=busy, now=NOW)
 
 
 class HeardQuestionTests(unittest.TestCase):
@@ -40,11 +40,25 @@ class HeardQuestionTests(unittest.TestCase):
     def test_captured_question_is_not_heard(self):
         captured = {"category": "INCOMING_QUESTION", "text": "what budget is set for the pilot"}
         self.assertIsNone(heard([segment()], [captured]))
+        self.assertIsNone(heard([segment()], [{"category": "OPEN_QUESTION", "text": QUESTION}]))
+        self.assertIsNotNone(heard([segment()], [{"category": "INCOMING_QUESTION", "text": "?"}]))
+
+    def test_word_match_is_whole_words(self):
+        # "budge" sits inside "budget": not the same words, so the question still waits.
+        part = {"category": "INCOMING_QUESTION", "text": "What budge?"}
+        self.assertIsNotNone(heard([segment()], [part]))
+        longer = {"category": "INCOMING_QUESTION", "text": "So what budget is set for the pilot this year, Anna?"}
+        self.assertIsNone(heard([segment()], [longer]))
 
     def test_heard_question_ends(self):
         self.assertIsNone(heard([segment(ago=121)]))
-        self.assertIsNone(heard([segment()], started=NOW - 2, busy=False))
-        self.assertEqual(heard([segment()], started=NOW - 2, busy=True)["text"], QUESTION)
+        self.assertIsNone(heard([segment()], until=iso(5), busy=False))
+        self.assertEqual(heard([segment()], until=iso(5), busy=True)["text"], QUESTION)
+
+    def test_analysis_before_the_question_reached_the_transcript(self):
+        # The analysis started after the question began (at -5 s) but saw a transcript
+        # whose newest line was older: the question was not in it and still waits.
+        self.assertEqual(heard([segment()], until=iso(10), busy=False)["text"], QUESTION)
 
 
 class AnalysisReplyTests(unittest.TestCase):
@@ -85,6 +99,16 @@ class AnalysisReplyTests(unittest.TestCase):
         for offset, urgent, expected in [(0, False, True), (20, False, False), (20, True, True), (30, True, False)]:
             with mock.patch.object(server.time, "time", return_value=NOW + offset):
                 self.assertEqual(session.should_analyze(f"text {offset} {urgent}", False, urgent=urgent), expected)
+        session.last_error = "failed"
+        with mock.patch.object(server.time, "time", return_value=NOW + 200):
+            self.assertFalse(session.should_analyze("after error", False, urgent=True))
+
+    def test_analysis_records_the_transcript_it_saw(self):
+        session = CodexSession(None)
+        self.assertTrue(session.should_analyze("one", False, latest_at=iso(10)))
+        self.assertEqual(session.analysed_until, iso(10))
+        self.assertFalse(session.should_analyze("one", False, latest_at=iso(1)))  # skipped: unchanged
+        self.assertEqual(session.analysed_until, iso(10))
 
 
 class SoundSettingsTests(unittest.TestCase):

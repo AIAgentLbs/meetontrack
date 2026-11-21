@@ -30,9 +30,13 @@ def _seconds(value: object) -> float | None:
         return None
 
 
-def heard_question(segments: list[dict], journal: list[dict], *, analysis_started_at: float,
+def heard_question(segments: list[dict], journal: list[dict], *, analysed_until: str,
                    busy: bool, now: float) -> dict | None:
-    """The newest recent question from the other side that the analysis has not taken up yet."""
+    """The newest recent question from the other side that the analysis has not taken up yet.
+
+    `analysed_until` is the newest transcript time the last started analysis saw. A question
+    spoken before that analysis started may reach the transcript only after it started, so the
+    start time alone would hide a question the analysis never read."""
     for segment in reversed(segments):
         text = str(segment.get("text") or "").strip()
         if (segment.get("source") != "system" or segment.get("provisional")
@@ -43,12 +47,14 @@ def heard_question(segments: list[dict], journal: list[dict], *, analysis_starte
             continue
         if now - at > HEARD_FOR:
             return None  # segments are in time order: every older question is older still
-        words = _words(text)
+        words = f" {_words(text)} "
         if any(item.get("category") in {"INCOMING_QUESTION", "OPEN_QUESTION"}
-               and (captured := _words(item.get("text"))) and (captured in words or words in captured)
+               and (captured := f" {_words(item.get('text'))} ").strip()
+               and (captured in words or words in captured)  # whole words: spaces on both ends
                for item in journal):
             return None
-        if analysis_started_at > at and not busy:
+        seen = _seconds(analysed_until) if analysed_until else None
+        if seen is not None and seen >= at and not busy:
             return None
         return {"text": text, "speaker": str(segment.get("speaker") or ""), "at": segment.get("timestamp")}
     return None
