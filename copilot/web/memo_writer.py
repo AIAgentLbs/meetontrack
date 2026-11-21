@@ -159,7 +159,7 @@ def _time(value: object) -> datetime | None:
 NEW_ENTRY = {
     "state": "", "start": "", "since": None, "reason": "", "retry_at": None, "attempts": 0,
     "rebuild": False, "rechecked": False, "signature": "", "language": "", "provider": "", "model": "",
-    "written_at": None, "plan": None,
+    "written_at": None, "plan": None, "choice_key": "",
 }
 
 
@@ -236,23 +236,24 @@ class MemoWriter:
             return
         try:
             upcoming = self._upcoming(agenda, now)
-            for meeting in agenda.get("meetings") or []:  # stopped being external, or got a file plan
-                event_id = str(meeting.get("event_id") or "") if isinstance(meeting, dict) else ""
-                with self.lock:
-                    stale = event_id not in upcoming and (self.events.get(event_id) or {}).get("state") == "preparing"
-                if stale:
-                    self._drop(event_id)
+            with self.lock:  # left the agenda, stopped being external, or got a file plan
+                stale = [key for key, entry in self.events.items()
+                         if entry.get("state") == "preparing" and key not in upcoming]
+            for event_id in stale:
+                self._drop(event_id)
             for event_id, (start, meeting) in sorted(upcoming.items(), key=lambda item: item[1][0]):
                 with self.lock:
                     entry = dict(self.events.get(event_id) or {})
                 if entry:
                     entry = self._refresh(event_id, entry, meeting)
                 state, retry = entry.get("state"), moment(entry.get("retry_at"))
-                if state == "failed" and entry.get("reason") == "ai_needs_choice":
-                    if self.ai.resolve("memo").state != "ready":
+                if state in ("failed", "ready") and entry.get("reason") == "ai_needs_choice":
+                    # Runs once a ready choice differs from the one that failed (none when it was not ready).
+                    ticket = self.ai.resolve("memo")
+                    if ticket.state != "ready" or ticket.key == entry.get("choice_key"):
                         continue
                     recheck = False
-                elif not entry or entry.get("rebuild") or state == "failed" and retry is not None and retry <= now:
+                elif not entry or entry.get("rebuild") or retry is not None and retry <= now:
                     recheck = False
                 elif state in ("ready", "nothing_found") and not entry.get("rechecked") and start - now <= self.RECHECK:
                     recheck = True
@@ -280,11 +281,13 @@ class MemoWriter:
         stamp = now.isoformat(timespec="seconds")
         if busy():
             return False
-        if not recheck:
+        shown = isinstance(before.get("plan"), dict) and before.get("state") == "ready"
+        if not recheck and not shown:  # an earlier memo stays on screen while a retry runs
             self._update(event_id, state="preparing", since=stamp, start=str(meeting.get("start") or ""))
         try:
             sources = [{**source, "id": f"S{n}"} for n, source in enumerate(self.gather(meeting), 1)]
             language = str(self.language())
+            signature = source_signature(sources, language)
         except Exception:
             if recheck:  # the memo stays as it is: a recheck gathers once and never forces a run
                 print(f"memo {event_id}: failed error", flush=True)
@@ -292,11 +295,14 @@ class MemoWriter:
             else:
                 self._fail(event_id, before, now, "error")
             return True
-        signature = source_signature(sources, language)
         if recheck:
             self._update(event_id, rechecked=True)
             if signature == before.get("signature"):
                 return True
+        if not sources and shown:  # sources can be gone for a while: the earlier memo stays
+            if not recheck:
+                self._update(event_id, retry_at=None)
+            return True
         settled = {"since": None, "reason": "", "attempts": 0, "rebuild": False, "retry_at": None,
                    "signature": signature, "language": language, "rechecked": start - now <= self.RECHECK}
         if not sources:
@@ -308,7 +314,7 @@ class MemoWriter:
             else:
                 self._drop(event_id)
             return False
-        reply = None
+        ticket = reply = None
         try:
             ticket = self.ai.resolve("memo")
             if ticket.state != "ready":
@@ -317,19 +323,24 @@ class MemoWriter:
                                 timeout=self.AI_TIMEOUT)
             plan, digest = build_plan(event_id, meeting, parse_answer(reply.text, sources), sources, language)
         except Exception as error:
-            self._fail(event_id, before, now, _reason(error, replied=reply is not None))
+            key = ticket.key if ticket is not None and ticket.state == "ready" else ""
+            self._fail(event_id, before, now, _reason(error, replied=reply is not None), signature, key)
             return True
         self._update(event_id, state="ready", plan=plan, digest=digest, provider=ticket.choice["provider"],
                      model=reply.model or ticket.choice["model"], written_at=stamp, **settled)
         return True
 
-    def _fail(self, event_id: str, before: dict, now: datetime, reason: str) -> None:
-        """One automatic retry after the first failure; a missing AI choice waits for the choice instead."""
+    def _fail(self, event_id: str, before: dict, now: datetime, reason: str, signature: str | None = None,
+              choice_key: str = "") -> None:
+        """One automatic retry after the first failure; a missing AI choice waits for another choice instead.
+        An earlier memo stays ready and shown; the signature tried is kept so a recheck does not repeat it."""
         print(f"memo {event_id}: failed {reason}", flush=True)
         attempts = 0 if reason == "ai_needs_choice" else int(before.get("attempts") or 0) + 1
         retry_at = (now + self.RETRY).isoformat(timespec="seconds") if attempts == 1 else None
-        self._update(event_id, state="failed", reason=reason, attempts=attempts, retry_at=retry_at, rebuild=False,
-                     since=None)
+        kept = isinstance(before.get("plan"), dict) and isinstance(before.get("digest"), dict)
+        tried = {} if signature is None else {"signature": signature}
+        self._update(event_id, state="ready" if kept else "failed", reason=reason, attempts=attempts,
+                     retry_at=retry_at, rebuild=False, since=None, choice_key=choice_key, **tried)
 
     def rebuild(self, event_id: str, agenda: dict) -> None:
         now = datetime.now().astimezone()
@@ -463,7 +474,10 @@ def _line(value: object, known: set[str], limit: int) -> dict | None:
         raise ValueError("memo answer has a malformed line")
     cited = list(dict.fromkeys(s for s in value["sources"] if isinstance(s, str) and s in known))
     # The writer cites by itself, and AI text never becomes a heading or a list line.
-    text = one_line(AI_MARKUP.sub("", one_line(value["text"], 10_000)), limit)
+    text = one_line(value["text"], 10_000)
+    while (stripped := AI_MARKUP.sub("", text)) != text:
+        text = stripped
+    text = one_line(text, limit)
     return {"text": text, "sources": cited} if text and cited else None
 
 
