@@ -14,26 +14,35 @@ struct Record: ParsableCommand {
         abstract: "Start or stop recording in the running meetingcopilot."
     )
 
-    @Argument(help: "start, stop, toggle, or resume the current recording's live recognition.")
+    @Argument(help: "start, stop, toggle, pause, or resume the current recording.")
     var action: RecordRequest.Action
 
+    /// Test seam: who answers the request. The real one rings the running app.
+    @MainActor static var ask: (RecordRequest.Action) -> Bool = { RecordRequest.askRunningApp($0) }
+
+    /// No answer exits non-zero: a missing app, or an app older than this CLI
+    /// that ignores an unknown verb, must not read as done. The server's Stop
+    /// relies on it to fall back from `pause` to an immediate stop.
     func run() throws {
-        let answered = MainActor.assumeIsolated { RecordRequest.askRunningApp(action) }
+        let action = action
+        let answered = MainActor.assumeIsolated { Record.ask(action) }
         guard answered else {
-            throw CleanExit.message(
-                "meetingcopilot isn't running. Start it from the Dock, or `launchctl kickstart "
-                    + "gui/$(id -u)/com.aiagentlabs.meeting-copilot`.")
+            FileHandle.standardError.write(Data(
+                ("meetingcopilot isn't running. Start it from the Dock, or `launchctl kickstart "
+                    + "gui/$(id -u)/com.aiagentlabs.meeting-copilot`.\n").utf8))
+            throw ExitCode.failure
         }
     }
 }
 
 /// The same cross-process doorbell `meetingcopilot setup` uses, carrying which of the
-/// three verbs was asked for. Distributed notifications never leave this Mac.
+/// verbs was asked for. Distributed notifications never leave this Mac.
 enum RecordRequest {
     enum Action: String, ExpressibleByArgument, Sendable {
         case start
         case stop
         case toggle
+        case pause
         case resume
     }
 

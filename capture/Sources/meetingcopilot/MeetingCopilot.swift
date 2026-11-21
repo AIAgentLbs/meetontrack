@@ -715,6 +715,10 @@ final class AppController {
         case .start where session == nil: toggle()
         case .stop where session != nil: toggle()
         case .toggle: toggle()
+        case .pause:
+            guard let session, !session.isPaused else { return }
+            session.pause()
+            tick()
         case .resume:
             guard let session else { return }
             if session.isPaused { session.resume() }

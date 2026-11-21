@@ -37,8 +37,13 @@ public static class CopilotControl
                         case "stop":
                             if (!runtime.State.IsRecording) throw new InvalidOperationException("No active recording");
                             await runtime.StopManualAsync(); break;
+                        case "pause":
+                            if (!runtime.State.IsRecording) throw new InvalidOperationException("No active recording");
+                            if (!runtime.State.IsPaused) await runtime.TogglePauseAsync();
+                            break;
                         case "resume":
                             if (!runtime.State.IsRecording) throw new InvalidOperationException("No active recording");
+                            if (runtime.State.IsPaused) await runtime.TogglePauseAsync();
                             await runtime.ResumeRecognitionAsync(); break;
                         case "quit-when-idle":
                             _ = System.Windows.Application.Current.Dispatcher.InvokeAsync(App.QuitWhenIdleAsync); break;
