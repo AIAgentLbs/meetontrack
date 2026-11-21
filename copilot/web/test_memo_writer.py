@@ -1093,5 +1093,123 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(self.out.getvalue(), "memo loop: RuntimeError\n")
 
 
+def calendar_of(events):
+    class FakeCalendar:
+        def available(self):
+            return True
+
+        def for_day(self, day):
+            return [dict(event) for event in events if datetime.fromisoformat(event["start"]).date() == day]
+
+    return FakeCalendar()
+
+
+class MemoRoutesTests(unittest.TestCase):
+    def setUp(self):
+        import http.client
+        import server
+        from http.server import ThreadingHTTPServer
+        self.server, self.http = server, http.client
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        ev_start = NOW + timedelta(hours=3)
+        when = {"start": ev_start.isoformat(timespec="seconds"),
+                "end": (ev_start + timedelta(minutes=30)).isoformat(timespec="seconds")}
+        events = [{**when, "id": "ev1", "title": "Pilot review with Example LLC", "attendees": MEETING_ATTENDEES},
+                  {**when, "id": "ev2", "title": "Team sync", "attendees": [
+                      person("me@example.org", self_=True), person("bob@example.org", "Bob")]}]
+        self.writer = MemoWriter(root / "memos.json", FakeAI(), lambda m: [], lambda: "en")
+        self.writer._update("ev1", state="failed", reason="timeout", start=when["start"], attempts=2)
+        plans = CallPlans(root / "preparations.json", root / "call-plans-state.json", None, calendar_of(events),
+                          app_plans=lambda: server.MEMOS.plans())
+        for target, value in (("PLANS", plans), ("MEMOS", self.writer)):
+            patcher = patch.object(server, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        worker = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        worker.start()
+        self.addCleanup(worker.join, 3)
+        self.addCleanup(self.httpd.server_close)
+        self.addCleanup(self.httpd.shutdown)
+
+    def call(self, method, path, payload=None, origin=None):
+        connection = self.http.HTTPConnection("127.0.0.1", self.httpd.server_port, timeout=3)
+        headers = {"Content-Type": "application/json", **({"Origin": origin} if origin else {})}
+        connection.request(method, path, None if payload is None else json.dumps(payload), headers)
+        response = connection.getresponse()
+        status, raw = response.status, response.read()
+        connection.close()
+        return status, json.loads(raw) if raw.startswith(b"{") else raw
+
+    def get(self, path):
+        return self.call("GET", path)[1]
+
+    def post(self, path, payload, origin=None):
+        return self.call("POST", path, payload, origin)
+
+    def test_agenda_route_returns_contract_fields(self):
+        body = self.get("/api/agenda")
+        self.assertEqual([(m["event_id"], m["external"]) for m in body["meetings"]], [("ev1", True), ("ev2", False)])
+        self.assertEqual(set(body["meetings"][0]["memo"]), MEMO_KEYS)
+        self.assertEqual([m["memo"]["state"] for m in body["meetings"]], ["failed", "none"])
+        self.assertEqual(body["meetings"][0]["memo"]["reason"], "timeout")
+        # The server's plans read the memo writer late: a ready memo becomes a matched app plan.
+        self.writer._update("ev1", state="ready", plan=APP_PLAN)
+        self.assertEqual(self.server.PLANS.app_plans(), [APP_PLAN])
+        self.assertEqual(self.get("/api/agenda")["meetings"][0]["plans"][0]["id"], APP_PLAN["id"])
+
+    def test_rebuild_route(self):
+        self.assertEqual(self.post("/api/memo/rebuild", {"event_id": "ev1"}), (200, {"ok": True}))
+        self.assertEqual(self.get("/api/agenda")["meetings"][0]["memo"]["state"], "preparing")
+        self.assertTrue(self.writer.wake.is_set())
+        for payload in ({"event_id": "ev2"}, {}, {"event_id": ""}, {"event_id": 7}, {"event_id": "x" * 1025},
+                        {"event_id": "unknown"}):
+            status, body = self.post("/api/memo/rebuild", payload)
+            self.assertEqual(status, 400, payload)
+            self.assertFalse(body["ok"])
+            self.assertNotIn("Team sync", body["error"])
+            self.assertNotIn("example.org", body["error"])
+        self.assertEqual(self.post("/api/memo/rebuild", {"event_id": "ev1"}, origin="https://example.test")[0], 403)
+        self.assertEqual(set(self.writer.events), {"ev1"})
+
+    def test_importing_the_server_starts_no_memo_loop(self):
+        self.assertFalse([t for t in threading.enumerate() if t.name == "memo-writer"])
+
+
+class MemoLanguageTests(unittest.TestCase):
+    def setUp(self):
+        import server
+        self.server = server
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.config = Path(temp.name) / "config.json"
+        patcher = patch.object(server, "CAPTURE_CONFIG_FILE", self.config)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_saved_interface_language_wins(self):
+        self.config.write_text(json.dumps({"interface_language": "en"}), encoding="utf-8")
+        with patch("locale.getlocale", return_value=("ru_RU", "UTF-8")):
+            self.assertEqual(self.server.memo_language(), "en")
+        self.config.write_text(json.dumps({"interface_language": "ru"}), encoding="utf-8")
+        with patch("locale.getlocale", return_value=("en_US", "UTF-8")):
+            self.assertEqual(self.server.memo_language(), "ru")
+
+    def test_system_locale_when_nothing_is_saved(self):
+        for found, language in ((("ru_RU", "UTF-8"), "ru"), (("en_US", "UTF-8"), "en"), ((None, None), "en"),
+                                (("C", "UTF-8"), "en")):
+            with patch("locale.getlocale", return_value=found):
+                self.assertEqual(self.server.memo_language(), language, found)
+        with patch("locale.getlocale", side_effect=ValueError("unknown locale: x")):
+            self.assertEqual(self.server.memo_language(), "en")
+
+    def test_memos_writer_uses_the_function(self):
+        self.assertIs(self.server.MEMOS.language, self.server.memo_language)
+        self.assertEqual(self.server.MEMOS_FILE.parent, self.server.TRANSCRIPT_FILE.parent)
+        self.assertEqual(self.server.MEMOS_FILE.name, "memos.json")
+
+
 if __name__ == "__main__":
     unittest.main()

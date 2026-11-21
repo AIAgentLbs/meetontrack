@@ -8,6 +8,7 @@ from functools import lru_cache
 import difflib
 import hashlib
 import json
+import locale
 import mimetypes
 import os
 import re
@@ -51,7 +52,7 @@ from ai_providers import AIChoiceError, AIService, SignIns
 from fact_check import FactChecks, extraction_rules, fetch_text, parse_claims, strip_claims, verify as verify_fact, with_speakers
 from stt import STTService
 from local_context import LocalContext
-from memo_writer import folder_sources, moment, past_reports, search_words
+from memo_writer import MemoWriter, folder_sources, moment, past_reports, search_words
 from private_dirs import private_dir
 
 
@@ -79,6 +80,7 @@ UPDATES = ReleaseUpdates(HOME / ".config/meeting-copilot/updates.json", installe
                          recording=capture_recording,
                          data_dir=HOME / ".local/share/meeting-copilot")
 TRANSCRIPT_FILE = HOME / ".local/share/meeting-copilot/meeting-copilot-live.json"
+MEMOS_FILE = HOME / ".local/share/meeting-copilot/memos.json"
 SESSION_FILE = HOME / ".config/meeting-copilot/SESSION.md"
 MANIFEST_FILE = HOME / ".config/meeting-copilot/repos.json"
 ACTIVE_REPOS_FILE = HOME / ".config/meeting-copilot/active-repos.json"
@@ -2467,7 +2469,8 @@ ASK формулируй как одну короткую реплику, кот
 
 TRANSCRIPT = TranscriptState()
 PLANS = CallPlans(PREPARATIONS_FILE, CALL_PLAN_STATE_FILE, ACTIVE_REPOS_FILE,
-                 CalendarMeetings(enabled=lambda: "calendar" in GOOGLE_CONTEXT.enabled_sources()))
+                 CalendarMeetings(enabled=lambda: "calendar" in GOOGLE_CONTEXT.enabled_sources()),
+                 app_plans=lambda: MEMOS.plans())  # late-bound: MEMOS is defined further down
 TRANSLATIONS = LiveTranslation(lambda text: AI.run("live_translation", text, timeout=90).text)
 FRAMES = MeetingFrames(FRAMES_FILE)
 COPILOT = CodexSession(COPILOT_FILE)
@@ -2619,6 +2622,20 @@ def memo_sources(meeting: dict) -> list[dict]:
     with GOOGLE_CONTEXT._lock:
         changed["calendar"] = google != GOOGLE_CONTEXT._generation
     return [source for kind, sources in found.items() if not changed.get(kind) for source in sources]
+
+
+def memo_language() -> str:
+    """The saved interface language; with none saved, Russian for a Russian system locale, else English."""
+    if saved := interface_preferences(CAPTURE_CONFIG_FILE).get("interface_language"):
+        return saved
+    try:
+        system = locale.getlocale()[0] or ""
+    except ValueError:  # a locale name Python cannot parse
+        system = ""
+    return "ru" if system.startswith("ru") else "en"
+
+
+MEMOS = MemoWriter(MEMOS_FILE, AI, memo_sources, memo_language)
 
 
 def fact_source(raw: str) -> tuple[str, str | None]:
@@ -3082,7 +3099,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif path == "/api/agenda":
             # Today's and tomorrow's meetings with their memos; not part of the 2.5 s state poll.
-            self._json({"ok": True, **PLANS.agenda()})
+            self._json({"ok": True, **PLANS.agenda(memo=MEMOS.memo_for)})
         elif path == "/api/repositories":
             self._json({"ok": True, **REPOSITORIES.catalog()})
         elif path == "/api/projects":
@@ -3506,6 +3523,12 @@ class Handler(BaseHTTPRequestHandler):
                     "speaker": item.get("speaker", ""),
                     "window_title": item.get("window_title", ""),
                 }})
+            elif path == "/api/memo/rebuild":
+                event_id = payload.get("event_id")
+                if not isinstance(event_id, str) or not 0 < len(event_id) <= 1024:
+                    raise ValueError("Send event_id: the calendar event of the memo to write again")
+                MEMOS.rebuild(event_id, PLANS.agenda())  # ValueError (400) unless upcoming, external, no file plan
+                self._json({"ok": True})
             elif path == "/api/refresh":
                 TRANSCRIPT.trigger.set()
                 self._json({"ok": True})
@@ -3799,6 +3822,8 @@ def main() -> None:
     threading.Thread(target=FACT_CHECKS.loop, args=(TRANSCRIPT.stop,), name="fact-checks", daemon=True).start()
     threading.Thread(target=REBUILDS.loop, args=(TRANSCRIPT.stop, lambda: TRANSCRIPT.status in ARCHIVE_BUSY),
                      name="analysis-rebuilds", daemon=True).start()
+    threading.Thread(target=MEMOS.loop, args=(TRANSCRIPT.stop, lambda: capture_recording() or TRANSCRIPT.status in ARCHIVE_BUSY,
+                                              PLANS.agenda), name="memo-writer", daemon=True).start()
     if args.exit_with_parent:
         watch_parent()
     url = f"http://{HOST}:{args.port}"
