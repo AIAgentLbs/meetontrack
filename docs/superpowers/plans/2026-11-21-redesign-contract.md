@@ -92,8 +92,16 @@ Existing fields stay. Each item of `meetings` gains:
 `POST /api/memo/rebuild` with `{"event_id": "..."}` returns `{"ok": true}` and
 puts the meeting into `preparing` (plan 2).
 
-`POST /api/agenda/skip-recording` with `{"event_id": "...", "skip": true}`
-returns `{"ok": true}` (plan 1).
+`POST /api/agenda/skip-recording` with
+`{"event_id": "...", "start": ISO, "end": ISO, "title": "...", "skip": true}`
+returns `{"ok": true}`, or 409 when the recorder cannot honour it (plan 1).
+The choice is stored in `skip-recording.json` in the app data directory and
+matched by the recorders by time window.
+
+The response also gains two top-level fields (plan 1): `calendar_state`
+(`"connected"`, `"not_connected"`, `"tool_missing"`) and
+`skip_recording_supported` (bool; when false the UI shows no "do not record"
+control).
 
 Until plan 2 lands, plan 1 renders from a fake API that returns these fields;
 against the real server a missing `memo` is derived in the front end from the
@@ -103,7 +111,8 @@ existing `plans[]` (`has_memo`), so Home works with either.
 
 ```
 {"microphone": "granted" | "denied" | "unknown",
- "call_audio": "granted" | "denied" | "unknown"}
+ "call_audio": "granted" | "denied" | "unknown",
+ "recorder": "running" | "stopped" | "unknown"}
 ```
 
 `unknown` means the platform cannot tell; the UI then shows nothing.
