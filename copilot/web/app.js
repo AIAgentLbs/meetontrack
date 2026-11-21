@@ -153,6 +153,7 @@ const translations = {
     "call.waiting": "Запись идет. Подсказка появится здесь, когда будет что сказать или спросить.",
     "call.waiting_help": "Свой вопрос можно задать внизу. Весь разговор текстом в «Расшифровке», вопросы и риски на «Доске».",
     "call.paused": "Подсказки на паузе: ИИ не ответил. Запись идет, следующая попытка в {time}.",
+    "call.paused_next": "Подсказки на паузе: ИИ не ответил. Запись идет, следующая попытка будет со следующим анализом.",
     "call.other_lost": "Собеседника не слышно с {time}",
     "call.other_lost_now": "Собеседника не слышно",
     "call.other_lost_text": "Вас слышно. Подсказки по словам собеседника вернутся, когда звук появится.",
@@ -161,7 +162,6 @@ const translations = {
     "call.you_lost_text": "Собеседника слышно. Ваши слова не попадут в расшифровку, пока микрофон не вернется.",
     "action.sound_output": "Выбрать, откуда слушать звонок",
     "call.earlier": "Прошлые подсказки ({n})",
-    "call.earlier_empty": "Прошлых подсказок пока нет.",
     "call.transcript": "Расшифровка",
     "call.board": "Доска",
     "call.ask_placeholder": "Спросить про звонок",
@@ -219,9 +219,9 @@ const translations = {
     "nav.swap_panels": "Поменять панели",
     "common.close": "Закрыть",
     "common.cancel": "Отмена",
-    "transcript.heading": "Ход созвона",
+    "transcript.heading": "Расшифровка",
     "transcript.loading": "Получаю последние реплики",
-    "transcript.tab": "Стенограмма",
+    "transcript.tab": "Расшифровка",
     "transcript.copy": "Копировать диалог",
     "transcript.hide": "Скрыть",
     "transcript.hide_label": "Скрыть расшифровку",
@@ -496,6 +496,7 @@ const translations = {
     "call.waiting": "Recording. A hint appears here when there is something to say or ask.",
     "call.waiting_help": "You can ask your own question below. The whole conversation is in Transcript, questions and risks are on the Board.",
     "call.paused": "Hints paused: the AI did not answer. Recording continues, next try at {time}.",
+    "call.paused_next": "Hints paused: the AI did not answer. Recording continues, the next try comes with the next analysis.",
     "call.other_lost": "The other side is not heard since {time}",
     "call.other_lost_now": "The other side is not heard",
     "call.other_lost_text": "You are heard. Hints on what the other side says come back once their sound does.",
@@ -504,7 +505,6 @@ const translations = {
     "call.you_lost_text": "The other side is heard. Your words are not transcribed until the microphone is back.",
     "action.sound_output": "Choose where to listen to the call from",
     "call.earlier": "Earlier hints ({n})",
-    "call.earlier_empty": "No earlier hints yet.",
     "call.transcript": "Transcript",
     "call.board": "Board",
     "call.ask_placeholder": "Ask about this call",
@@ -562,7 +562,7 @@ const translations = {
     "nav.swap_panels": "Swap panels",
     "common.close": "Close",
     "common.cancel": "Cancel",
-    "transcript.heading": "Live meeting",
+    "transcript.heading": "Transcript",
     "transcript.loading": "Loading the latest utterances",
     "transcript.tab": "Transcript",
     "transcript.copy": "Copy dialogue",
@@ -823,6 +823,8 @@ function plainError(error) {
   if (code) {
     const known = translations[uiLanguage][`error.${code}`];
     if (known && (uiLanguage === "ru" || technical(detail))) return known;
+    // A code with no Russian line: the detail is the server's English, so Russian gets the plain AI failure.
+    if (uiLanguage === "ru") return t("error.AI_FAILED");
     return technical(detail) ? t("error.generic") : detail;
   }
   if (!error?.status && ["TypeError", "TimeoutError", "AbortError"].includes(error?.name)) return t("error.unreachable");
@@ -3351,7 +3353,6 @@ async function state() {
     window.appState = data;
     const project = data.project || {};
     window.renderReleaseUpdates(data.updates || {});
-    window.renderGettingStartedStatus?.(data);
     renderDeliveryHealth(data.delivery || {});
     const scopedRepositories = project.repositories || [];
     const count = repositoryCountLabel(scopedRepositories.length || data.repositories || 0);
@@ -3366,6 +3367,7 @@ async function state() {
     renderTranscript(data.transcript);
     renderRecordingHealth(data.recording_health || {});
     window.renderShell?.();
+    window.renderGettingStartedStatus?.(data); // after the shell: the banner depends on the view (getting-started.js)
     updateLibraryMode(data);
     renderFrames(data.frames || []);
     renderFrameStatus(data.frame_capture || {});

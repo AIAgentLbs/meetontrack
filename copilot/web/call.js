@@ -24,7 +24,27 @@ const callAt = value => {
   return Number.isNaN(at) ? null : at;
 };
 const callLabel = (label, at) => (at === null ? label : t("call.at", { label, time: homeClock(at) }));
-const callAskOrSay = text => t(text.endsWith("?") ? "call.ask" : "call.say");
+// The verb the label says (Ask, Say, Clarify): a line that starts with it loses it, so the verb is said once
+// (ruling 8). The verb comes from the whole line, so a cut never turns Ask into Say (ruling 6).
+const CALL_VERBS = [["ask", "Спросите|Ask"], ["say", "Скажите|Say"], ["clarify", "Уточните|Clarify"]];
+function callLine(raw) {
+  const line = readableAnswer(String(raw || "")).split(CALL_HINT_SPLIT)[0].trim();
+  for (const [verb, words] of CALL_VERBS) {
+    const match = line.match(new RegExp(`^(?:${words})(?=[\\s,:]|$)[\\s,:]*`, "iu"));
+    if (match && match[0].length < line.length) {
+      const rest = line.slice(match[0].length);
+      return { line, verb, rest: rest[0].toLocaleUpperCase() + rest.slice(1) };
+    }
+  }
+  return { line, verb: null, rest: line };
+}
+// The line to say, and the whole line when it was cut, so it can be read in full.
+function callCut(line) {
+  const text = speakable(line);
+  return { text, full: text === line ? "" : line };
+}
+const callVerbLabel = ({ verb, rest }) => t(`call.${verb || (rest.endsWith("?") ? "ask" : "say")}`);
+const callSame = (a, b) => [a, b].map(text => text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "")).reduce((x, y) => x === y);
 
 // Source and detail of a journal hint: the lines after the hint line, then the evidence and the speaker.
 function callParts(raw, item) {
@@ -51,13 +71,15 @@ function hintCandidates(state) {
       const speaker = String(item.speaker || "").trim();
       const label = speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
       hints.push({ kind: "answer", tier: 1, at, label: callLabel(label, at), question: String(item.text || ""),
-        text: speakable(item.reply), ...callParts(item.reply, item) });
+        ...callCut(callLine(item.reply).line), ...callParts(item.reply, item) });
     } else if (item.category === "CONTRADICTION" && open) {
+      const line = callLine(item.text);
       hints.push({ kind: "check", tier: 2, at, label: callLabel(t("call.clarify"), at), question: "",
-        text: speakable(item.text), ...callParts(item.text, item) });
+        ...callCut(line.verb === "clarify" ? line.rest : line.line), ...callParts(item.text, item) });
     } else if (["ASK", "RISK", "OBJECTION"].includes(item.category) && open) {
-      const text = speakable(item.text);
-      hints.push({ kind: "signal", tier: 3, at, label: callLabel(callAskOrSay(text), at), question: "", text, ...callParts(item.text, item) });
+      const line = callLine(item.text);
+      hints.push({ kind: "signal", tier: 3, at, label: callLabel(callVerbLabel(line), at), question: "", ...callCut(line.rest),
+        ...callParts(item.text, item) });
     }
   }
   for (const item of state?.fact_checks?.items || []) {
@@ -66,15 +88,16 @@ function hintCandidates(state) {
     const speaker = String(item.segment?.speaker || item.segment?.speaker_label || "").trim();
     const said = item.quote || item.claim || "";
     const quote = uiLanguage === "ru" ? `«${said}»` : `“${said}”`;
+    const line = callLine(item.fact);
     hints.push({ kind: "check", tier: 2, at, label: callLabel(t("call.clarify"), at), question: "",
-      text: speakable(item.fact), source: speaker ? `${speaker}: ${quote}` : quote, detail: [] });
+      ...callCut(line.verb === "clarify" ? line.rest : line.line), source: speaker ? `${speaker}: ${quote}` : quote, detail: [] });
   }
   const questions = (state?.call_plan?.items || []).filter(item => item.kind === "question");
   const next = questions.findIndex(item => item.status !== "resolved");
   if (next >= 0) {
-    const text = speakable(questions[next].text);
+    const line = callLine(questions[next].text);
     const label = state.call_plan.source_label;
-    hints.push({ kind: "memo", tier: 4, at: null, label: callAskOrSay(text), question: "", text,
+    hints.push({ kind: "memo", tier: 4, at: null, label: callVerbLabel(line), question: "", ...callCut(line.rest),
       source: t("call.from_memo", { n: next + 1 }), detail: label ? [label] : [] });
   }
   return hints;
@@ -86,7 +109,8 @@ function pickHint(state, now) {
   const events = hints.filter(hint => hint.kind !== "memo" && hint.at !== null).sort((a, b) => b.at - a.at);
   const fresh = events.filter(hint => now - hint.at <= (hint.kind === "own" ? OWN_FRESH_MS : HINT_FRESH_MS));
   const current = fresh.sort((a, b) => a.tier - b.tier)[0] || hints.find(hint => hint.kind === "memo") || null;
-  return { current, earlier: events.filter(hint => hint !== current).slice(0, 20) };
+  // A hint that says the current one again (an ASK repeating the memo question) is not listed under it.
+  return { current, earlier: events.filter(hint => hint !== current && !(current && callSame(hint.text, current.text))).slice(0, 20) };
 }
 
 // Is each side heard? Only a stalled track or a lost call-audio warning reads as not heard: silence never does.
@@ -171,7 +195,10 @@ function callSlot(state, current, now) {
   if (callPending && ((own && own.at > callPending.at) || (!requestBusy && !state?.copilot?.busy))) callPending = null;
   if (callPending) return { type: "pending", label: t("call.own"), question: callPending.question };
   if (own) return { type: "own", label: own.label, question: own.question, text: own.text };
-  if (current?.kind === "answer") return { type: "answer", label: current.label, question: current.question, text: current.text };
+  if (current?.kind === "answer") {
+    return { type: "answer", key: callHintKey(current), label: current.label, question: current.question, text: current.text,
+      full: current.full, source: "", detail: [] };
+  }
   const heard = state?.heard_question;
   if (heard?.text) {
     const speaker = String(heard.speaker || "").trim();
@@ -180,8 +207,7 @@ function callSlot(state, current, now) {
   }
   if (current) {
     const key = callHintKey(current);
-    return { type: "hint", key, label: current.label, text: current.text, source: current.source, detail: current.detail,
-      open: callWhereOpen.has(key) };
+    return { type: "hint", key, label: current.label, text: current.text, full: current.full, source: current.source, detail: current.detail };
   }
   const beat = heartbeat(state, now);
   return { type: "waiting", text: t(beat.you.state === "heard" || beat.other.state === "heard" ? "call.waiting_heard" : "call.waiting") };
@@ -200,27 +226,35 @@ function callSlotNodes(slot) {
     nodes.push(actions);
   }
   if (slot.type === "answer" || slot.type === "hint") nodes.push(textNode("p", "hint", slot.text));
-  if (slot.type === "hint" && slot.source) {
-    // The source line is one line; Where this comes from opens it whole, with the rest of the detail.
-    const why = textNode("p", "why", slot.source);
-    const more = document.createElement("div");
-    more.className = "why-more";
-    more.id = "call-why-more";
-    more.append(...[slot.source, ...slot.detail].map(line => textNode("p", "", line)));
-    why.hidden = slot.open;
-    more.hidden = !slot.open;
+  // Where this comes from opens what the slot does not show: the whole hint when it was cut, the whole source line
+  // and the detail. A source that fits on its line with nothing else to show gets no control (callFitWhere).
+  const more = [slot.full, slot.source, ...(slot.detail || [])].filter(Boolean);
+  if ((slot.type === "answer" || slot.type === "hint") && more.length) {
+    const why = slot.source ? textNode("p", "why", slot.source) : null;
+    const box = document.createElement("div");
+    box.className = "why-more";
+    box.id = "call-why-more";
+    box.append(...more.map((line, index) => textNode("p", index === 0 && slot.full ? "why-full" : "", line)));
     const actions = document.createElement("p");
     actions.className = "why-acts";
-    const where = callButton("ql", t(slot.open ? "call.where_hide" : "call.where"), () => {
+    if (!slot.full && !slot.detail?.length) actions.dataset.clip = "";
+    const where = callButton("ql", "", () => {
       if (callWhereOpen.has(slot.key)) callWhereOpen.delete(slot.key);
       else callWhereOpen.add(slot.key);
-      renderCall(window.appState);
-      $("call-slot").querySelector(".why-acts button").focus();
+      show();
     });
-    where.setAttribute("aria-expanded", String(slot.open));
-    where.setAttribute("aria-controls", more.id);
+    where.setAttribute("aria-controls", box.id);
+    // Toggled in place: the live slot is not rebuilt, so the hint is not announced again.
+    const show = () => {
+      const open = callWhereOpen.has(slot.key);
+      if (why) why.hidden = open;
+      box.hidden = !open;
+      where.textContent = t(open ? "call.where_hide" : "call.where");
+      where.setAttribute("aria-expanded", String(open));
+    };
+    show();
     actions.append(where);
-    nodes.push(why, more, actions);
+    nodes.push(...[why, box, actions].filter(Boolean));
   }
   return nodes;
 }
@@ -250,11 +284,14 @@ function renderCall(state) {
 
   const pick = pickHint(state, now);
   callPart("call-slot", callSlot(state, pick.current, now), callSlotNodes);
+  callFitWhere();
 
   // The analysis failed: hints pause until the next try, five minutes after it (F3).
   const analysis = state?.copilot?.analysis;
-  const retry = analysis?.state === "error" ? callAt(analysis.at) : null;
-  const note = retry === null ? null : t("call.paused", { time: homeClock(retry + 300000) });
+  const failed = analysis?.state === "error" ? callAt(analysis.at) : null;
+  const retry = failed === null ? null : failed + 300000;
+  // A retry time that has passed is not shown: the next try comes with the next analysis.
+  const note = retry === null ? null : retry > now ? t("call.paused", { time: homeClock(retry) }) : t("call.paused_next");
   $("call-note").hidden = !note;
   callPart("call-note", note, text => [`${text} `, callButton("ql", t("call.check_ai"), () => $("getting-started-open").click())]);
 
@@ -263,9 +300,10 @@ function renderCall(state) {
   const count = t("call.earlier", { n: earlier.length });
   if (open.textContent !== count) open.textContent = count;
   open.setAttribute("aria-expanded", String(callEarlierOpen));
-  $("call-earlier").hidden = !callEarlierOpen;
+  // Nothing earlier: no Earlier button at all (ruling 4).
+  open.hidden = !earlier.length;
+  $("call-earlier").hidden = !callEarlierOpen || !earlier.length;
   callPart("call-earlier", earlier, list => {
-    if (!list.length) return [textNode("p", "earlier-empty", t("call.earlier_empty"))];
     const items = document.createElement("ul");
     items.append(...list.map(hint => {
       const item = document.createElement("li");
@@ -276,6 +314,15 @@ function renderCall(state) {
     return [items];
   });
 }
+
+// A source with nothing else to open shows Where this comes from only when its line is cut. Measured after every
+// render and on resize; an open source stays open.
+function callFitWhere() {
+  const actions = $("call-slot").querySelector(".why-acts[data-clip]");
+  const why = $("call-slot").querySelector(".why");
+  if (actions && why && !why.hidden) actions.hidden = why.scrollWidth <= why.clientWidth;
+}
+addEventListener("resize", callFitWhere);
 
 // The transcript or the board (and the chat and notes tabs) opened as a panel over the feed. Focus goes to the
 // panel's heading, and back to the control that opened it when the panel closes.
@@ -303,6 +350,11 @@ addEventListener("DOMContentLoaded", () => {
   $("call-transcript-open").addEventListener("click", () => openCallPanel("transcript"));
   $("call-board-open").addEventListener("click", () => openCallPanel("board"));
   $("call-back").addEventListener("click", () => openCallPanel(null));
+  // A tab switched inside a panel: the panel follows it, so the composer rule (F5) holds.
+  document.querySelectorAll("[data-content-view]").forEach(button => button.addEventListener("click", () => {
+    const panel = document.body.dataset.callPanel;
+    if (panel && panel !== "transcript") document.body.dataset.callPanel = button.dataset.contentView;
+  }));
   // The question goes out only when ask() takes it; otherwise it stays in the field (F4).
   $("call-ask").addEventListener("submit", event => {
     event.preventDefault();

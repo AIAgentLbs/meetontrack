@@ -216,6 +216,9 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
 .why { margin-top: 12px; color: var(--muted); font-size: 14px; line-height: 1.45; max-width: 76ch;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .why-more { display: grid; gap: 4px; margin-top: 12px; color: var(--muted); font-size: 14px; line-height: 1.45; max-width: 76ch; overflow-wrap: anywhere; }
+.why-more .why-full { color: var(--text); font-size: 16px; }
+/* The panel moves focus to its heading: the ring shows for keyboard focus only. */
+#transcript-heading:focus:not(:focus-visible) { outline: none; }
 .why-acts { display: flex; gap: 24px; margin-top: 2px; font-size: 14px; }
 .call button.ql { min-height: 32px; padding: 0; border: 0; border-radius: 0; background: none; font-size: inherit; font-weight: 500;
   text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
