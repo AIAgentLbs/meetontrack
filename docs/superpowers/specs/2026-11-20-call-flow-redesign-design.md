@@ -276,6 +276,29 @@ Tomorrow
   button, because sending needs no action.
 - "Send again" in the sent state says what it does before it is pressed: the
   e-mail and Telegram message arrive a second time, the CRM note is updated.
+
+### Carried into the build from the eighth critique
+
+The eighth independent critique scored the mockups Home 30, Call 32, After 30
+of 40, with no P0 or P1. Its P2 and P3 findings are not drawn; they are
+requirements for the real screens:
+
+- Home: "Connect sources" says which sources (calendar is on; mail and files
+  are the ones offered). "Start recording" is not offered while microphone
+  access is missing, only the action that fixes it. A failed memo says
+  whether the person has to do anything ("nothing to do, we retry at HH:MM").
+- Call: the link under a hint is named for what it opens ("Where this comes
+  from"), not "More". A state exists for "hints paused: the AI did not
+  answer", with the retry time, so the person does not wait on an empty
+  feed. Under 700 px the call title stays visible in one line.
+- After: any change to what goes into the report (summary, next steps,
+  removing a board item) holds the send for 30 s, and the send block says
+  "changes" rather than naming one field. While the summary is being
+  refined, its box says so and says that an edit keeps the person's text.
+  The send block states one rule per line. The key label on "Send now" is
+  hidden under 1100 px like other secondary controls. Every "Send again"
+  note has the same wording. "No answer" is shown the same way in both
+  question columns.
 - Column names are generic, so they read right for any call: "Ask the other
   side", "Asked of you", "Risks and objections", "Fact check". A differing
   statement names the speaker and the meeting on both sides.
