@@ -85,18 +85,31 @@ function build(name) {
     tool_missing: () => agenda([], { calendar: false, calendar_state: 'tool_missing', skip_recording_supported: false }),
     no_meetings: () => agenda([]),
     load_failed: () => null, // /api/agenda answers 500
+    mic_missing: () => agenda([ready(), nothing(at10)]),
+    mic_missing_delivery: () => agenda([ready(), nothing(at10)]),
+    // Started 5 minutes ago and still nothing recorded.
+    not_recording: () => agenda([ready({ start: iso(now - 5 * MIN), end: iso(now + 25 * MIN) }), nothing(at10)]),
+    menu_open: () => agenda([ready(), nothing(at10)]),
+    menu_narrow: () => agenda([ready(), nothing(at10)]),
+    keys: () => agenda([ready(), nothing(at10)]),
   };
+  const permissions = { microphone: 'granted', call_audio: 'granted', recorder: 'running',
+    ...{ mic_missing: { microphone: 'denied' }, mic_missing_delivery: { microphone: 'denied' }, not_recording: { recorder: 'stopped' } }[name] };
   const state = { preferences: {}, journal: [], frames: [], project: {}, updates: {},
     delivery: { channels: {}, undelivered: [], notifications: [] },
     transcript: { meeting_id: '', status: 'idle', live: false, segments: [], speakers: [] },
     recording_health: { capture: { state: 'inactive' } }, copilot: { busy: false, analysis: { state: 'idle' }, messages: [] } };
-  return { agenda: agendas[name](), state, permissions: { microphone: 'granted', call_audio: 'granted', recorder: 'running' } };
+  // A report that did not reach its channel: the delivery pill joins the bar.
+  if (name === 'mic_missing_delivery') Object.assign(state.delivery, { channels: { gmail: { configured: true, state: 'sent', issues: [] } },
+    undelivered: [{ meeting_id: 'm9', channels: ['email'], title: 'Pilot review', started_at: iso(now - 24 * 60 * MIN) }] });
+  return { agenda: agendas[name](), state, permissions };
 }
 
 // name -> {agenda, state, permissions}, rebuilt on every read so the times stay relative to now.
 const states = Object.defineProperties({}, Object.fromEntries(
   ['ready', 'preparing', 'nothing_found', 'failed', 'skipped', 'adapter', 'no_skip_support', 'long',
-    'calendar_off', 'calendar_off_with_plans', 'tool_missing', 'no_meetings', 'load_failed']
+    'calendar_off', 'calendar_off_with_plans', 'tool_missing', 'no_meetings', 'load_failed',
+    'mic_missing', 'mic_missing_delivery', 'not_recording', 'menu_open', 'menu_narrow', 'keys']
     .map(name => [name, { enumerable: true, get: () => build(name) }])));
 
 // Serves the real UI files and the fixture. The returned object records POST bodies; a test can set

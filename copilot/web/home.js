@@ -160,7 +160,7 @@ function homeMemo(plan, key, id, primary) {
   return { panel, button, show: () => { toggle(true); links.querySelector("a")?.focus(); } };
 }
 
-function homeRow(meeting, { next, now, supported, id }) {
+function homeRow(meeting, { next, now, supported, id, status }) {
   const key = homeKey(meeting);
   const memo = meeting.memo || memoFromPlans(meeting);
   const plan = (meeting.plans || []).find(item => item.id === memo.plan_id);
@@ -173,7 +173,17 @@ function homeRow(meeting, { next, now, supported, id }) {
   const main = textNode("div", "main", "");
   const actions = document.createElement("div");
   actions.className = "actions";
-  const memoView = memo.state === "ready" && plan ? homeMemo(plan, key, id, next) : null;
+  // A call that is on without a recording: the fix first, Start recording when it can work, then How to fix.
+  const notRecording = next && !meeting.skip_recording && status?.kind === "not_recording";
+  if (notRecording) {
+    const fix = status.action.id;
+    for (const [index, actionId] of [...new Set([fix, ...(fix === "open_mic" ? [] : ["start"])])].entries()) {
+      actions.append(homeButton(t(`action.${actionId}`), index ? "" : "primary", `status|${actionId}`,
+        event => statusAction(event.currentTarget, actionId)));
+    }
+    actions.append(homeButton(t("action.how_to_fix"), "ql", `${key}|fix`, () => document.getElementById("getting-started-open").click()));
+  }
+  const memoView = memo.state === "ready" && plan ? homeMemo(plan, key, id, next && !notRecording) : null;
 
   if (memo.state === "ready") {
     if (memo.goal) main.append(textNode("p", "goal", t("home.goal", { goal: memo.goal })));
@@ -269,8 +279,9 @@ function renderHome(agenda, state, now = Date.now()) {
   const unscheduled = agenda?.unscheduled_plans || [];
   const next = nextMeeting(agenda, now);
   const failed = !agenda && Boolean(window.agendaFailed);
+  const status = callStatus(state, agenda, window.permissionsData, now);
   const signature = JSON.stringify([uiLanguage, new Date(now).toDateString(), Boolean(agenda), failed, agenda?.calendar_state,
-    meetings, unscheduled, agenda?.skip_recording_supported, [...homeErrors]]);
+    meetings, unscheduled, agenda?.skip_recording_supported, [...homeErrors], status.kind, status.action?.id]);
   if (signature === homeSignature) {
     // Same rows: only the time left changes, in place, so focus, scroll and an open memo stay.
     const soon = home.querySelector(".soon");
@@ -298,7 +309,7 @@ function renderHome(agenda, state, now = Date.now()) {
   for (const meeting of meetings) {
     const title = homeDayTitle(meeting.start, now);
     if (title !== day) column.append(textNode("h2", "day", (day = title)));
-    column.append(homeRow(meeting, { next: meeting === next, now, supported: agenda.skip_recording_supported, id: `home-memo-${index++}` }));
+    column.append(homeRow(meeting, { next: meeting === next, now, supported: agenda.skip_recording_supported, id: `home-memo-${index++}`, status }));
   }
   if (unscheduled.length) {
     column.append(textNode("h2", "day", t("plan.unscheduled")));

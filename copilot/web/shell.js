@@ -38,6 +38,145 @@ function openView(view) {
   renderShell();
 }
 
+// One call status for the bar, first rule that matches. `next` is the first meeting not over and not skipped.
+// A permission the platform cannot read ("unknown") shows nothing; Start recording never shows without a microphone.
+function callStatus(state, agenda, permissions, now = Date.now()) {
+  const action = (id, primary = true) => ({ id, label: t(`action.${id}`), primary });
+  if (isLive(state, now)) return { kind: "recording", text: t("status.recording"), action: null };
+  const next = (agenda?.meetings || []).find(meeting => Date.parse(meeting.end) > now && !meeting.skip_recording);
+  const time = next && homeClock(next.start);
+  const mic = permissions?.microphone === "denied";
+  if (next && Date.parse(next.start) + 120000 <= now) {
+    const reason = mic ? "mic" : permissions?.recorder === "stopped" ? "recorder" : "not_detected";
+    return { kind: "not_recording", text: t("status.not_recording", { reason: t(`status.reason.${reason}`) }),
+      action: action({ mic: "open_mic", recorder: "open_recorder", not_detected: "start" }[reason]) };
+  }
+  if (next && mic) return { kind: "mic_missing", text: t("status.mic_missing", { time }), action: action("open_mic") };
+  if (next && permissions?.call_audio === "denied") {
+    return { kind: "mic_missing", text: t("status.call_audio_missing", { time }), action: action("open_call_audio") };
+  }
+  return { kind: "waiting", text: next ? t("status.waiting_at", { time }) : t("status.waiting"), action: mic ? null : action("start", false) };
+}
+
+const currentStatus = () => callStatus(window.appState, window.agendaData, window.permissionsData);
+const STATUS_POSTS = {
+  open_mic: ["/api/permissions/open", { which: "microphone" }],
+  open_call_audio: ["/api/permissions/open", { which: "call_audio" }],
+  open_recorder: ["/api/getting-started/open-recorder", {}],
+  start: ["/api/getting-started/start-recording", {}],
+};
+const MAC = /Mac/.test(navigator.platform);
+const RECORD_KEY = MAC ? "⌘⇧R" : "Alt+Shift+R";
+const keyHint = label => {
+  const node = textNode("kbd", "", label);
+  node.setAttribute("aria-hidden", "true");
+  return node;
+};
+let statusError = null; // {text, state}: a failed status action, shown until the next state poll replaces the state
+
+// A status action from the bar or the Home row: both copies share one busy key, so a double click posts once,
+// and stay disabled until the agenda and permissions are fetched again.
+async function statusAction(button, id) {
+  const key = `status|${id}`;
+  if (homeBusy.has(key)) return;
+  homeBusy.add(key);
+  button.disabled = true;
+  renderShell();
+  try {
+    await post(...STATUS_POSTS[id]);
+  } catch (error) {
+    statusError = { text: plainError(error), state: window.appState };
+  }
+  try {
+    await refreshAgenda();
+  } finally {
+    homeRelease(key);
+    renderShell();
+    if (document.activeElement === document.body && !button.closest("#home")) $("call-status-action").focus();
+  }
+}
+
+function renderStatus(view) {
+  if (statusError && statusError.state !== window.appState) statusError = null;
+  const status = currentStatus();
+  const text = $("call-status-text");
+  const shown = statusError?.text || status.text;
+  if (text.textContent !== shown) text.textContent = shown;
+  text.className = `status-text${status.kind === "recording" ? " rec" : statusError || status.kind !== "waiting" ? " fail" : ""}`;
+  const button = $("call-status-action");
+  button.hidden = !status.action;
+  if (status.action) {
+    const { id, label, primary } = status.action;
+    button.dataset.action = id;
+    button.dataset.key = `status|${id}`;
+    button.disabled = homeBusy.has(button.dataset.key);
+    button.className = primary ? "primary" : "";
+    button.replaceChildren(label);
+    if (id === "start") button.append(keyHint(RECORD_KEY));
+  }
+  $("menu-notes").hidden = view === "home";
+  const transcript = window.appState?.transcript || {};
+  $("menu-notes-title").textContent = t("shell.notes", { title: transcript.display_meeting || transcript.meeting || "" });
+  fitBar();
+}
+
+// A status cut short keeps its whole text in the tooltip. The bar grows to two rows in a narrow window or with
+// a long status; overlays open under it, wherever it ends. Checked on every render and every resize of the bar.
+function fitBar() {
+  const text = $("call-status-text");
+  text.title = text.scrollWidth > text.clientWidth + 1 || text.scrollHeight > text.clientHeight + 1 ? text.textContent : "";
+  document.documentElement.style.setProperty("--bar-h", `${document.querySelector(".topbar").offsetHeight}px`);
+}
+new ResizeObserver(fitBar).observe(document.querySelector(".topbar"));
+
+// Keys. Enter opens the next call's memo, J its link, N skips it (Home only, through the row's own controls);
+// the record key starts recording when the status offers it. None fire in a field, on a button (Enter),
+// or while a dialog, an overlay or the menu is open.
+const homeControl = selector => ($("home").hidden ? null : $("home").querySelector(`.row.next ${selector}`));
+const shortcuts = [
+  { label: "shell.key.memo", kbd: "↵", match: event => event.key === "Enter",
+    control: () => homeControl('.actions button[aria-controls][aria-expanded="false"]') },
+  { label: "action.start", kbd: RECORD_KEY, record: true,
+    match: event => event.code === "KeyR" && event.shiftKey && (MAC ? event.metaKey && !event.altKey : event.altKey && !event.metaKey),
+    control: () => (currentStatus().action?.id === "start" ? $("call-status-action") : null) },
+  { label: "shell.key.join", kbd: "J", match: event => event.code === "KeyJ", control: () => homeControl('.actions a.ql[target="_blank"]') },
+  { label: "shell.key.skip", kbd: "N", match: event => event.code === "KeyN", control: () => homeControl('.actions button.quiet[data-key$="|skip"]') },
+];
+const OVERLAYS = "dialog[open], #settings-panel:not([hidden]), #getting-started:not([hidden]), #archive-dialog:not([hidden]), #app-menu:not([hidden])";
+
+document.addEventListener("keydown", event => {
+  const shortcut = shortcuts.find(item => item.match(event));
+  if (!shortcut || event.repeat || document.querySelector(OVERLAYS)) return;
+  const plain = !shortcut.record && (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey);
+  if (plain || event.target.closest?.(`input, textarea, select, [contenteditable]${shortcut.kbd === "↵" ? ", button, a" : ""}`)) return;
+  if (shortcut.record) event.preventDefault();
+  const control = shortcut.control();
+  if (control && !control.disabled) control.click();
+});
+
+// The menu lists the shortcuts that work now, each as an item doing the same thing. Rebuilt only when that
+// list changes, so a poll never takes focus away from an item.
+let shortcutSignature = "";
+function renderShortcuts() {
+  const ready = shortcuts.filter(item => item.control());
+  const signature = JSON.stringify([uiLanguage, ready.map(item => item.label)]);
+  if (signature === shortcutSignature) return;
+  shortcutSignature = signature;
+  const group = $("menu-shortcuts");
+  group.hidden = !ready.length;
+  group.setAttribute("aria-label", t("shell.keys"));
+  const heading = textNode("p", "menu-label", t("shell.keys"));
+  heading.setAttribute("aria-hidden", "true");
+  group.replaceChildren(heading, ...ready.map(item => {
+    const button = textNode("button", "", "");
+    button.type = "button";
+    button.setAttribute("role", "menuitem");
+    button.append(textNode("span", "mi", t(item.label)), keyHint(item.kbd));
+    button.addEventListener("click", () => item.control()?.click());
+    return button;
+  }));
+}
+
 function renderShell() {
   let manual = null;
   try {
@@ -48,10 +187,9 @@ function renderShell() {
   $("home").hidden = view !== "home";
   if (view === "home") $("nav-home").setAttribute("aria-current", "page");
   else $("nav-home").removeAttribute("aria-current");
-  // ponytail: the bar repeats the recorder's status line; the call status gets its own rules with Task 8.
-  const capture = $("capture-status");
-  $("call-status-text").textContent = (capture.hidden ? $("live-status") : capture).textContent.trim();
   renderHome(window.agendaData, window.appState);
+  renderStatus(view);
+  renderShortcuts();
 }
 
 // The menu: opens on its first item, arrows move, Escape or a click outside closes it.
@@ -63,6 +201,7 @@ function toggleMenu(open) {
   if (!open && menu.contains(document.activeElement)) $("menu-button").focus();
   menu.hidden = !open;
   $("menu-button").setAttribute("aria-expanded", String(open));
+  if (open) renderShortcuts();
   if (open) menuItems()[0]?.focus();
 }
 
@@ -91,5 +230,7 @@ $("menu-nav-home").addEventListener("click", () => openView("home"));
 $("menu-past-calls").addEventListener("click", () => $("archive-button").click());
 $("menu-updates").addEventListener("click", () => $("updates-notice").click());
 $("getting-started-open").addEventListener("click", () => $("settings-panel").hidden || $("settings-close").click());
+$("call-status-action").addEventListener("click", event => statusAction(event.currentTarget, event.currentTarget.dataset.action));
+$("menu-notes").addEventListener("click", () => document.querySelector('[data-content-view="notes"]').click());
 
 renderShell();

@@ -45,6 +45,8 @@
     for (const [id, texts] of Object.entries(labels)) $(id).textContent = texts[en() ? 0 : 1];
     $("startup-record").textContent = recording ? word("Recording is active", "Запись идет") : starting ? word("Waiting for recording…", "Жду начала записи…") : word("Start recording now", "Начать запись сейчас");
     $("startup-record").disabled = recording || starting || current.capture_installed === false;
+    // Without the microphone a recording cannot start: the guide does not offer it (shell.js callStatus).
+    $("startup-record").hidden = window.permissionsData?.microphone === "denied";
     $("startup-audio-status").textContent = !current.capture_installed
       ? word("Recorder not found. Install MeetOnTrack from meetontrack.com.", "Приложение для записи не найдено. Запустите установщик с meetontrack.com.")
       : current.live_enabled

@@ -75,6 +75,64 @@ const errors = [];
       manualAfter3h: 'home', manualAfter10m: 'after',
     });
 
+    // One call status, first rule that matches: live, a call running without a recording, a missing
+    // permission before the next call, else waiting. Start recording is never offered without a microphone.
+    const statuses = await page.evaluate(() => {
+      const now = Date.parse('2026-11-21T12:00:00Z');
+      const at = minutes => new Date(now + minutes * 60000).toISOString();
+      const call = (start, minutes = 30, extra = {}) => ({ event_id: `e${start}`, title: 'Pilot review', start: at(start), end: at(start + minutes), ...extra });
+      const agenda = (...meetings) => ({ meetings });
+      const perms = (microphone = 'granted', call_audio = 'granted', recorder = 'running') => ({ microphone, call_audio, recorder });
+      const live = { transcript: { meeting_id: 'm2', status: 'recording', live: true } };
+      const short = status => [status.kind, status.text, status.action && `${status.action.id}${status.action.primary ? '!' : ''}`];
+      const cases = {
+        live: [live, agenda(call(40)), perms('denied')],
+        liveRunning: [live, agenda(call(-5)), perms('granted', 'granted', 'stopped')],
+        runningMic: [{}, agenda(call(-3)), perms('denied', 'denied', 'stopped')],
+        runningRecorder: [{}, agenda(call(-3)), perms('granted', 'denied', 'stopped')],
+        runningNotDetected: [{}, agenda(call(-3)), perms()],
+        runningUnknown: [{}, agenda(call(-3)), perms('unknown', 'unknown', 'unknown')],
+        startedOneMinuteAgo: [{}, agenda(call(-1)), perms()],
+        runningSkipped: [{}, agenda(call(-3, 30, { skip_recording: true })), perms()],
+        skippedThenNext: [{}, agenda(call(-3, 30, { skip_recording: true }), call(60)), perms('denied')],
+        ended: [{}, agenda(call(-40)), perms('denied', 'denied', 'stopped')],
+        micMissing: [{}, agenda(call(40)), perms('denied', 'denied')],
+        callAudioMissing: [{}, agenda(call(40)), perms('granted', 'denied')],
+        micDeniedNoCall: [{}, agenda(), perms('denied', 'denied', 'stopped')],
+        unknownEverywhere: [{}, agenda(call(40)), perms('unknown', 'unknown', 'unknown')],
+        notLoaded: [{}, null, null],
+        waiting: [{}, agenda(call(40)), perms()],
+      };
+      const result = Object.fromEntries(Object.entries(cases).map(([name, args]) => [name, short(callStatus(...args, now))]));
+      result.time = homeClock(at(40));
+      result.later = homeClock(at(60));
+      result.started = homeClock(at(-1));
+      // Never Start recording with the microphone denied, whatever else holds.
+      result.startWithoutMic = Object.values(cases).filter(([, , permissions]) => permissions?.microphone === 'denied')
+        .some(args => callStatus(...args, now).action?.id === 'start');
+      return result;
+    });
+    const { time, later, started } = statuses;
+    assert.deepEqual(statuses, {
+      time, later, started, startWithoutMic: false,
+      live: ['recording', 'Запись', null],
+      liveRunning: ['recording', 'Запись', null],
+      runningMic: ['not_recording', 'Запись не идет: нет доступа к микрофону', 'open_mic!'],
+      runningRecorder: ['not_recording', 'Запись не идет: программа записи не запущена', 'open_recorder!'],
+      runningNotDetected: ['not_recording', 'Запись не идет: звонок не замечен', 'start!'],
+      runningUnknown: ['not_recording', 'Запись не идет: звонок не замечен', 'start!'],
+      startedOneMinuteAgo: ['waiting', `Ждет звонка в ${started}, запись включится сама`, 'start'],
+      runningSkipped: ['waiting', 'Ждет звонка, запись включится сама', 'start'],
+      skippedThenNext: ['mic_missing', `Нет доступа к микрофону: запись в ${later} не включится`, 'open_mic!'],
+      ended: ['waiting', 'Ждет звонка, запись включится сама', null],
+      micMissing: ['mic_missing', `Нет доступа к микрофону: запись в ${time} не включится`, 'open_mic!'],
+      callAudioMissing: ['mic_missing', `Нет доступа к звуку звонка: запись в ${time} будет без собеседника`, 'open_call_audio!'],
+      micDeniedNoCall: ['waiting', 'Ждет звонка, запись включится сама', null],
+      unknownEverywhere: ['waiting', `Ждет звонка в ${time}, запись включится сама`, 'start'],
+      notLoaded: ['waiting', 'Ждет звонка, запись включится сама', 'start'],
+      waiting: ['waiting', `Ждет звонка в ${time}, запись включится сама`, 'start'],
+    });
+
     const shown = () => page.evaluate(() => ({
       view: document.body.dataset.view,
       workspace: getComputedStyle(document.querySelector('.workspace')).display !== 'none',
@@ -83,6 +141,10 @@ const errors = [];
     }));
     await page.waitForFunction(() => window.appState && document.body.dataset.view === 'call');
     assert.deepEqual(await shown(), { view: 'call', workspace: true, boundaryBar: true, home: false });
+    // In a call the bar says Recording with the accent dot, and has no action in this plan.
+    assert.deepEqual(await page.evaluate(() => [document.querySelector('#call-status-text').textContent,
+      document.querySelector('#call-status-text').classList.contains('rec'), document.querySelector('#call-status-action').hidden]),
+    ['Запись', true, true]);
 
     // Top bar: Home, Past calls, one call status and Menu. The delivery pill joins them only with a problem.
     const barControls = () => page.evaluate(() => [...document.querySelectorAll('.topbar button, .topbar .status')]
@@ -164,7 +226,13 @@ const errors = [];
     // In a call the call's own controls are in the menu.
     assert.equal(await page.locator('#swap-panels').isVisible(), true);
     assert.equal(await page.locator('#new-meeting-button').isVisible(), true);
-    await page.keyboard.press('Escape');
+    // Notes for the call name it and switch the workspace to the notes tab.
+    const notes = page.locator('#menu-notes');
+    assert.equal(await notes.isVisible(), true);
+    assert.equal(await notes.innerText(), 'Заметки к звонку «Pilot review»\nваш текст, который учтут подсказки');
+    await notes.click();
+    assert.equal(await page.locator('[data-content-view="notes"]').getAttribute('aria-selected'), 'true');
+    assert.equal(await page.locator('#app-menu').isVisible(), false);
 
     // Speaker names come after the transcript in tab order.
     assert.ok(await page.evaluate(() => document.querySelector('#transcript')
@@ -196,7 +264,7 @@ const errors = [];
         const menuButton = document.querySelector('#menu-button').getBoundingClientRect();
         return { scroll: document.documentElement.scrollWidth <= innerWidth,
           menu: menuButton.left >= 0 && menuButton.right <= innerWidth,
-          status: document.querySelector('#call-status').getBoundingClientRect().width > 0 };
+          status: document.querySelector('#call-status-text').getBoundingClientRect().width > 0 };
       });
       assert.deepEqual(fit, { scroll: true, menu: true, status: true }, lang);
     }
@@ -209,10 +277,12 @@ const errors = [];
     await page.waitForFunction(() => document.body.dataset.view === 'home');
     assert.deepEqual(await shown(), { view: 'home', workspace: false, boundaryBar: false, home: true });
     assert.equal(await page.locator('#home-heading').count(), 1);
-    // Home has no call: no transcript, panel or new-meeting controls in the menu.
+    // On Home the bar shows the call status, never the transcript's old idle line.
+    await page.waitForFunction(() => document.querySelector('#call-status-text').textContent === 'Ждет звонка, запись включится сама');
+    // Home has no call: no transcript, panel, new-meeting or notes controls in the menu.
     await page.locator('#menu-button').click();
-    assert.deepEqual(await page.evaluate(() => ['transcript-show', 'swap-panels', 'new-meeting-button']
-      .map(id => document.getElementById(id).checkVisibility())), [false, false, false]);
+    assert.deepEqual(await page.evaluate(() => ['transcript-show', 'swap-panels', 'new-meeting-button', 'menu-notes']
+      .map(id => document.getElementById(id).checkVisibility())), [false, false, false, false]);
     await page.keyboard.press('Escape');
 
     assert.deepEqual(errors, []);

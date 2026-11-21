@@ -12,10 +12,17 @@ const shots = fs.mkdtempSync(path.join(os.tmpdir(), 'home-ui-'));
 const scriptErrors = page => page.errors.filter(error => /(shell|home)\.js/.test(error));
 const texts = (page, selector) => page.locator(selector).allInnerTexts();
 const EMPTY = ['calendar_off', 'calendar_off_with_plans', 'tool_missing', 'no_meetings', 'load_failed'];
+const MENU = ['menu_open', 'menu_narrow'];
+const START = /^(Начать запись|Start recording)/;
+const recordKey = page => page.evaluate(() => (/Mac/.test(navigator.platform) ? 'Meta+Shift+R' : 'Alt+Shift+R'));
+const nextClock = page => page.evaluate(() => homeClock(window.agendaData.meetings[0].start));
+const failing = (page, timeout) => page.waitForFunction(() => document.querySelector('#call-status-text').classList.contains('fail'), null, { timeout });
+const visibleKbd = locator => locator.evaluate(node => Boolean(node.querySelector('kbd')?.checkVisibility()));
 const rowOf = (page, title) => page.locator('#home .row', { has: page.locator('.mtitle', { hasText: title }) });
 
 // Rules for every fixture, width, scheme and language.
 async function generic(page, lang, label) {
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const result = await page.evaluate(() => {
     const home = document.getElementById('home');
     const width = innerWidth;
@@ -32,8 +39,18 @@ async function generic(page, lang, label) {
       .flatMap(node => [...node.childNodes].filter(child => child.nodeType === Node.TEXT_NODE && child.textContent.trim()))
       .filter(child => { range.selectNodeContents(child); return range.getClientRects().length > 1; })
       .map(child => child.textContent);
-    return { scroll: document.documentElement.scrollWidth <= width, spill, clipped, text: document.body.innerText, sizes: [...sizes], torn };
+    // The call status stays readable: inside the window, and a line cut short carries the full text in its title.
+    const status = document.getElementById('call-status-text');
+    const action = document.getElementById('call-status-action');
+    const cut = status.scrollWidth > status.clientWidth + 1 || status.scrollHeight > status.clientHeight + 1;
+    const bar = { text: status.textContent, inside: [status, action].filter(node => node.checkVisibility())
+      .every(node => node.getBoundingClientRect().left >= 0 && node.getBoundingClientRect().right <= width + 0.5),
+    titled: !cut || status.title === status.textContent };
+    return { scroll: document.documentElement.scrollWidth <= width, spill, clipped, text: document.body.innerText, sizes: [...sizes], torn, bar };
   });
+  assert.doesNotMatch(result.bar.text, /Нет свежих реплик|No recent utterances|^$/, `${label}: the bar shows the call status`);
+  assert.equal(result.bar.inside, true, `${label}: the call status inside the window`);
+  assert.equal(result.bar.titled, true, `${label}: a cut call status has its full text in the title`);
   assert.ok(result.sizes.length <= 1, `${label}: link-style actions differ in size: ${result.sizes}`);
   assert.deepEqual(result.torn, [], `${label}: an e-mail broken inside a piece`);
   assert.equal(result.scroll, true, `${label}: horizontal scroll`);
@@ -286,6 +303,166 @@ const checks = {
     await page.locator('#home .row.next').waitFor();
     assert.equal(await page.locator('#home .empty').count(), 0);
   },
+  async mic_missing(page, lang) {
+    await failing(page);
+    const time = await nextClock(page);
+    const text = lang === 'ru' ? `Нет доступа к микрофону: запись в ${time} не включится` : `No microphone access: the ${time} call will not be recorded`;
+    assert.equal(await page.locator('#call-status-text').innerText(), text);
+    const action = page.locator('#call-status-action');
+    assert.equal(await action.innerText(), lang === 'ru' ? 'Открыть настройки микрофона' : 'Open microphone settings');
+    assert.equal(await action.evaluate(node => node.classList.contains('primary')), true);
+    // Start recording is nowhere: not in the bar, the rows, the menu or the getting-started guide.
+    assert.equal(await page.getByText(START).filter({ visible: true }).count(), 0);
+    assert.equal(await page.locator('#menu-shortcuts').getByText(START).count(), 0);
+    await page.locator('#menu-button').click();
+    await page.locator('#getting-started-open').click();
+    await page.locator('#startup-audio-status').waitFor();
+    assert.equal(await page.getByText(START).filter({ visible: true }).count(), 0);
+    await page.locator('#getting-started-close').click();
+    // The record shortcut posts nothing.
+    await page.evaluate(() => document.activeElement.blur());
+    await page.keyboard.press(await recordKey(page));
+    await page.waitForTimeout(300);
+    assert.deepEqual(page.api.posts, []);
+    // The action is disabled until its POST and the refresh after it are done: a double click posts once.
+    let release;
+    page.api.responses['/api/permissions/open'] = new Promise(resolve => { release = resolve; });
+    await action.click();
+    assert.equal(await action.isDisabled(), true);
+    release();
+    await page.waitForFunction(() => !document.querySelector('#call-status-action').disabled);
+    assert.deepEqual(page.api.posts.map(item => [item.path, item.body]), [['/api/permissions/open', { which: 'microphone' }]]);
+    // A failure shows one plain line in the bar until the next poll.
+    page.api.responses['/api/permissions/open'] = { status: 500, json: { ok: false, error: 'open_failed' } };
+    await action.click();
+    const generic = await page.evaluate(() => t('error.generic'));
+    await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text, generic);
+    await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text, text, { timeout: 4000 });
+  },
+  async mic_missing_delivery(page, lang) {
+    // 400 px with the delivery pill: the status reads, its action and Menu stay in the window.
+    await page.setViewportSize({ width: 400, height: 900 });
+    await page.locator('#delivery-alert').waitFor();
+    const fit = await page.evaluate(() => {
+      const inside = id => { const box = document.getElementById(id).getBoundingClientRect(); return box.width > 0 && box.left >= 0 && box.right <= innerWidth; };
+      const text = document.getElementById('call-status-text');
+      return { scroll: document.documentElement.scrollWidth <= innerWidth, text: inside('call-status-text'),
+        action: inside('call-status-action'), menu: inside('menu-button'), alert: inside('delivery-alert'),
+        wide: text.getBoundingClientRect().width >= 240,
+        lines: Math.round(text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)) };
+    });
+    // The pill does not take the status's room: the status keeps most of the first row.
+    assert.deepEqual(fit, { scroll: true, text: true, action: true, menu: true, alert: true, wide: true, lines: fit.lines });
+    assert.ok(fit.lines >= 1 && fit.lines <= 2, `status on one or two lines: ${fit.lines}`);
+    // Settings open under the taller bar: their header is not covered.
+    await page.locator('#menu-button').click();
+    await page.locator('#settings-open').click();
+    const [bar, heading] = await Promise.all(['.topbar', '#settings-close'].map(selector => page.locator(selector).boundingBox()));
+    assert.ok(heading.y >= bar.y + bar.height, `settings below the bar: ${JSON.stringify({ bar, heading })}`);
+  },
+  async not_recording(page, lang) {
+    await failing(page);
+    assert.equal(await page.locator('#call-status-text').innerText(),
+      lang === 'ru' ? 'Запись не идет: программа записи не запущена' : 'Not recording: the recorder is not running');
+    const fix = lang === 'ru' ? 'Открыть программу записи' : 'Open the recorder';
+    assert.equal(await page.locator('#call-status-action').innerText(), fix);
+    // The next row puts the fix first, then Start recording, then How to fix; one primary action.
+    const row = page.locator('#home .row.next');
+    const actions = await row.locator('.actions > *').evaluateAll(nodes => nodes.map(node => [node.textContent, node.className]));
+    assert.deepEqual(actions.slice(0, 3), [[fix, 'primary'], [lang === 'ru' ? 'Начать запись' : 'Start recording', ''],
+      [lang === 'ru' ? 'Как исправить' : 'How to fix', 'ql']]);
+    assert.equal(await row.locator('.actions .primary').count(), 1);
+    // The row's fix posts once and disables the bar's copy too.
+    let release;
+    page.api.responses['/api/getting-started/open-recorder'] = new Promise(resolve => { release = resolve; });
+    await row.locator('.actions button.primary').click();
+    assert.equal(await page.locator('#call-status-action').isDisabled(), true);
+    release();
+    await page.waitForFunction(() => !document.querySelector('#call-status-action').disabled);
+    assert.deepEqual(page.api.posts.map(item => item.path), ['/api/getting-started/open-recorder']);
+    await row.locator('.actions button', { hasText: START }).click();
+    await page.waitForFunction(() => !document.querySelector('#home .row.next .actions button:disabled'));
+    assert.deepEqual(page.api.posts.map(item => item.path), ['/api/getting-started/open-recorder', '/api/getting-started/start-recording']);
+    await row.locator('.actions button.ql', { hasText: /^(Как исправить|How to fix)$/ }).click();
+    await page.locator('#getting-started').waitFor({ state: 'visible' });
+  },
+  async menu_open(page, lang) {
+    assert.equal(await page.locator('#app-menu').isVisible(), true);
+    assert.equal(await page.locator('#menu-notes').isVisible(), false, 'notes belong to a call');
+    const shortcuts = await page.locator('#menu-shortcuts [role="menuitem"]').evaluateAll(nodes =>
+      nodes.filter(node => node.checkVisibility()).map(node => [node.querySelector('.mi').textContent, node.querySelector('kbd').textContent]));
+    const key = await page.evaluate(() => (/Mac/.test(navigator.platform) ? '⌘⇧R' : 'Alt+Shift+R'));
+    assert.deepEqual(shortcuts, lang === 'ru'
+      ? [['Открыть мемо следующего звонка', '↵'], ['Начать запись', key], ['Открыть ссылку на звонок', 'J'], ['Не записывать следующий звонок', 'N']]
+      : [["Open the next call's memo", '↵'], ['Start recording', key], ['Open the call link', 'J'], ['Do not record the next call', 'N']]);
+    assert.equal(await page.locator('#menu-shortcuts').getAttribute('aria-label'), lang === 'ru' ? 'Клавиши' : 'Keys');
+    // The items are the shortcuts' actions too: the first opens the next call's memo.
+    await page.locator('#menu-shortcuts [role="menuitem"]').first().click();
+    assert.equal(await page.locator('#app-menu').isVisible(), false);
+    assert.equal(await page.locator('#home .row.next .actions button[aria-controls]').getAttribute('aria-expanded'), 'true');
+  },
+  async menu_narrow(page) {
+    await page.setViewportSize({ width: 400, height: 900 });
+    // The menu keeps its key labels in a narrow window.
+    assert.equal(await visibleKbd(page.locator('#menu-shortcuts [role="menuitem"]').first()), true);
+    assert.equal(await page.locator('.navs').isVisible(), false);
+    assert.equal(await page.locator('#app-menu').isVisible(), true);
+    for (const id of ['menu-nav-home', 'menu-past-calls']) assert.equal(await page.locator(`#${id}`).isVisible(), true, id);
+    const box = await page.locator('#app-menu').boundingBox();
+    assert.ok(box.x >= 0 && box.x + box.width <= 400 && box.y + box.height <= 900, `the menu fits the window: ${JSON.stringify(box)}`);
+  },
+  async keys(page, lang) {
+    const row = page.locator('#home .row.next');
+    const memo = row.locator('.actions button[aria-controls]');
+    // Enter on the page opens the next call's memo; Enter in a field or on a button does not.
+    await page.evaluate(() => document.activeElement.blur());
+    await page.keyboard.press('Enter');
+    assert.equal(await memo.getAttribute('aria-expanded'), 'true');
+    // The menu lists only what works now: with the memo open, not Open the next call's memo.
+    await page.locator('#menu-button').click();
+    assert.equal(await page.locator('#menu-shortcuts').getByText(/мемо|memo/).count(), 0);
+    await page.keyboard.press('Escape');
+    await memo.click();
+    for (const id of ['interface-language', 'question']) {
+      await page.evaluate(id => document.getElementById(id).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })), id);
+    }
+    assert.equal(await memo.getAttribute('aria-expanded'), 'false');
+    // The record shortcut posts Start recording while waiting.
+    page.api.posts.length = 0;
+    await page.evaluate(() => document.activeElement.blur());
+    await Promise.all([page.waitForRequest(request => request.url().endsWith('/api/getting-started/start-recording')),
+      page.keyboard.press(await recordKey(page))]);
+    await page.waitForFunction(() => !document.querySelector('#call-status-action').disabled);
+    assert.deepEqual(page.api.posts.map(item => item.path), ['/api/getting-started/start-recording']);
+    // Not inside an overlay: with settings open nothing fires.
+    await page.locator('#menu-button').click();
+    await page.locator('#settings-open').click();
+    await page.keyboard.press(await recordKey(page));
+    await page.keyboard.press('n');
+    await page.waitForTimeout(300);
+    assert.equal(page.api.posts.length, 1);
+    await page.locator('#settings-close').click();
+    // J opens the call link in a new tab, N skips the next call.
+    await page.context().route('https://example.com/**', route => route.fulfill({ body: 'call' }));
+    await page.evaluate(() => document.activeElement.blur());
+    const [tab] = await Promise.all([page.context().waitForEvent('page'), page.keyboard.press('j')]);
+    assert.equal(tab.url(), 'https://example.com/call/evt-ready');
+    await tab.close();
+    await page.evaluate(() => document.activeElement.blur());
+    await Promise.all([page.waitForRequest(request => request.url().endsWith('/api/agenda/skip-recording')), page.keyboard.press('n')]);
+    assert.equal(page.api.posts.at(-1).body.skip, true);
+    // Key labels: the bar's Start recording shows its key at 1440, not at 1024; Open memo (primary) keeps it at 1024.
+    const start = page.locator('#call-status-action');
+    assert.match(await start.innerText(), START);
+    assert.equal(await visibleKbd(start), true);
+    await page.setViewportSize({ width: 1024, height: 900 });
+    assert.equal(await visibleKbd(start), false);
+    assert.equal(await visibleKbd(memo), true);
+    // Back from System Settings: the permissions are read again at once, not at the next minute's poll.
+    page.api.fixture.permissions.microphone = 'denied';
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await failing(page, 2000);
+  },
   async long(page, lang) {
     // Ten attendees: three by name, then one muted line with the rest, the whole list in its tooltip.
     const who = page.locator('#home .row.next .who');
@@ -333,6 +510,7 @@ const checks = {
         await page.waitForFunction(lang => document.documentElement.lang === lang, lang);
         try {
           await page.locator('#home :is(.row, .empty)').first().waitFor({ timeout: 5000 });
+          if (MENU.includes(fixture)) await page.locator('#menu-button').click();
           for (const width of [1440, 1024, 400]) {
             for (const scheme of ['light', 'dark']) {
               const label = `${fixture}-${width}-${scheme}-${lang}`;

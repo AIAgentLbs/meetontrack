@@ -142,6 +142,26 @@ const translations = {
     "shell.sources": "Источники",
     "shell.getting_started": "Начало работы",
     "shell.updates": "Обновления",
+    "shell.notes": "Заметки к звонку «{title}»",
+    "shell.notes_note": "ваш текст, который учтут подсказки",
+    "shell.keys": "Клавиши",
+    "shell.key.memo": "Открыть мемо следующего звонка",
+    "shell.key.join": "Открыть ссылку на звонок",
+    "shell.key.skip": "Не записывать следующий звонок",
+    "status.waiting": "Ждет звонка, запись включится сама",
+    "status.waiting_at": "Ждет звонка в {time}, запись включится сама",
+    "status.recording": "Запись",
+    "status.mic_missing": "Нет доступа к микрофону: запись в {time} не включится",
+    "status.call_audio_missing": "Нет доступа к звуку звонка: запись в {time} будет без собеседника",
+    "status.not_recording": "Запись не идет: {reason}",
+    "status.reason.mic": "нет доступа к микрофону",
+    "status.reason.recorder": "программа записи не запущена",
+    "status.reason.not_detected": "звонок не замечен",
+    "action.start": "Начать запись",
+    "action.open_mic": "Открыть настройки микрофона",
+    "action.open_call_audio": "Открыть настройки записи звука",
+    "action.open_recorder": "Открыть программу записи",
+    "action.how_to_fix": "Как исправить",
     "language.label": "Язык интерфейса",
     "aria.transcript_view": "Вид левой панели",
     "aria.copilot_view": "Режим правой панели",
@@ -246,7 +266,7 @@ const translations = {
     "age.seconds": "{value} сек назад",
     "age.minutes": "{value} мин назад",
     "age.hours": "{value} ч назад",
-    "status.waiting": "Ожидание записи",
+    "status.waiting_recording": "Ожидание записи",
     "status.live": "Расшифровка идет",
     "status.finished": "Созвон завершен · контекст сохранен",
     "status.model_loading": "Загрузка модели",
@@ -416,6 +436,26 @@ const translations = {
     "shell.sources": "Sources",
     "shell.getting_started": "Getting started",
     "shell.updates": "Updates",
+    "shell.notes": "Notes for the call {title}",
+    "shell.notes_note": "your text the hints take into account",
+    "shell.keys": "Keys",
+    "shell.key.memo": "Open the next call's memo",
+    "shell.key.join": "Open the call link",
+    "shell.key.skip": "Do not record the next call",
+    "status.waiting": "Waiting for a call, recording starts by itself",
+    "status.waiting_at": "Waiting for the {time} call, recording starts by itself",
+    "status.recording": "Recording",
+    "status.mic_missing": "No microphone access: the {time} call will not be recorded",
+    "status.call_audio_missing": "No access to call audio: the {time} call will be recorded without the other side",
+    "status.not_recording": "Not recording: {reason}",
+    "status.reason.mic": "no microphone access",
+    "status.reason.recorder": "the recorder is not running",
+    "status.reason.not_detected": "the call was not detected",
+    "action.start": "Start recording",
+    "action.open_mic": "Open microphone settings",
+    "action.open_call_audio": "Open audio recording settings",
+    "action.open_recorder": "Open the recorder",
+    "action.how_to_fix": "How to fix",
     "language.label": "Interface language",
     "aria.transcript_view": "Left pane view",
     "aria.copilot_view": "Right pane view",
@@ -520,7 +560,7 @@ const translations = {
     "age.seconds": "{value}s ago",
     "age.minutes": "{value}m ago",
     "age.hours": "{value}h ago",
-    "status.waiting": "Waiting for recording",
+    "status.waiting_recording": "Waiting for recording",
     "status.live": "Transcription live",
     "status.finished": "Meeting ended · context retained",
     "status.model_loading": "Loading model",
@@ -1617,7 +1657,7 @@ function renderTranscript(transcript) {
   elements.liveStatus.classList.toggle("error", Boolean(transcript.error || transcript.status === "error"));
   elements.liveStatus.title = ["unavailable", "error"].includes(transcript.status) ? plainError(transcript.status_reason) : "";
   if (transcript.error) {
-    elements.liveStatus.lastChild.textContent = t("status.waiting");
+    elements.liveStatus.lastChild.textContent = t("status.waiting_recording");
   } else if (transcript.live) {
     elements.liveStatus.lastChild.textContent = t("status.live");
   } else if (transcript.status === "finished") {
@@ -2065,15 +2105,24 @@ function memoNodes(plan) {
   return nodes;
 }
 
-// Today's and tomorrow's meetings, polled for Home (home.js renders them). A failed fetch keeps the last
-// agenda; before the first one arrives Home says it could not load them.
+// Microphone, call audio and recorder, for the call status (shell.js). A failed fetch keeps the last answer.
+async function refreshPermissions() {
+  try {
+    window.permissionsData = await getJSON("/api/permissions");
+  } catch {}
+}
+
+// Today's and tomorrow's meetings, polled for Home (home.js renders them), with the permissions. A failed fetch
+// keeps the last agenda; before the first one arrives Home says it could not load them.
 async function refreshAgenda() {
+  const permissions = refreshPermissions();
   try {
     window.agendaData = await getJSON("/api/agenda");
     window.agendaFailed = false;
   } catch {
     window.agendaFailed = true;
   }
+  await permissions;
   window.renderShell?.();
 }
 
@@ -3709,6 +3758,10 @@ window.matchMedia("(max-width: 600px)").addEventListener("change", () => {
   deliverySignature = "";
   renderDeliveryHealth(deliveryHealth);
 });
+// Back from System Settings: the permissions may have changed.
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) void state();
+  if (!document.hidden) {
+    void state();
+    void refreshPermissions().then(() => window.renderShell?.());
+  }
 });
