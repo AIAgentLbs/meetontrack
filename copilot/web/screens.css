@@ -162,6 +162,10 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
 .bg { margin-top: 10px; color: var(--muted); font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
 /* Two lines of background at most; Where this comes from sits outside the clamp and stays visible. */
 .bg > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* R39: with the memo open its row's digest is unclamped, nothing cut, and each line shows its source marks. */
+.row:has(.memo-details:not([hidden])) :is(.goal, .asks li, .bg > span) { display: block; -webkit-line-clamp: none; line-clamp: none; }
+.marks { color: var(--muted); font-size: 14px; font-weight: 400; }
+.row:not(:has(.memo-details:not([hidden]))) .marks { display: none; }
 /* One sources control at a time: with the memo open its sources list is there, so Where this comes from goes. */
 .row:has(.memo-details:not([hidden])) .bg > button.ql, .row:has(.memo-details:not([hidden])) .bg:not(:has(> span)) { display: none; }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; }

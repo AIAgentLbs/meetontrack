@@ -296,15 +296,23 @@ $("menu-nav-home").addEventListener("click", goHome);
 $("menu-past-calls").addEventListener("click", () => $("archive-button").click());
 $("menu-updates").addEventListener("click", () => $("updates-notice").click());
 $("getting-started-open").addEventListener("click", () => $("settings-panel").hidden || $("settings-close").click());
-// The guide opened at one step: the step at its top, focus on its button (or the step's first control).
-function openGuideStep(heading, control) {
-  $("getting-started-open").click();
+// Opens Settings or the guide for a control on the page. WebKit does not focus a clicked button, so the control is
+// passed along as the panel's opener rather than read from the focus.
+let panelOpener = null;
+function openPanel(open, opener) {
+  panelOpener = opener;
+  $(open).click();
+}
+// The guide opened at one step: the step at its top, focus on its button, or on its heading (the AI step's
+// controls are rebuilt when its options load).
+function openGuideStep(heading, control, opener) {
+  openPanel("getting-started-open", opener);
   const step = $(heading);
   step.scrollIntoView({ block: "start" });
-  (control ? $(control) : step.closest(".startup-step").querySelector("button:not([hidden]):not(:disabled), select"))?.focus({ preventScroll: true });
+  (control ? $(control) : step).focus({ preventScroll: true });
 }
 // Every reason How to fix shows for (recorder, microphone, call audio) is the guide's recording step.
-$("call-status-help").addEventListener("click", () => openGuideStep("startup-audio-heading", "startup-recorder"));
+$("call-status-help").addEventListener("click", event => openGuideStep("startup-audio-heading", "startup-recorder", event.currentTarget));
 // Settings and the guide: focus goes to the panel's heading when it opens, Escape closes it, and focus goes back to
 // the control that opened it (a menu item, hidden by then, hands it to Menu). Registered after getting-started.js
 // sets its own handlers, so the panel is already shown when the heading takes focus.
@@ -314,8 +322,12 @@ addEventListener("DOMContentLoaded", () => {
   for (const [panel, open, close, heading] of PANELS) {
     let opener = null;
     $(open).addEventListener("click", () => {
-      opener = document.activeElement === document.body ? null : document.activeElement;
-      if (!$(panel).hidden) $(heading).focus({ preventScroll: true });
+      opener = panelOpener || (document.activeElement === document.body ? null : document.activeElement);
+      panelOpener = null;
+      if ($(panel).hidden) return;
+      // Opened at its top; a deep link (Connect mail, the guide's steps) scrolls on from there.
+      $(panel).scrollTop = 0;
+      $(heading).focus({ preventScroll: true });
     });
     $(close).addEventListener("click", () => returnFocus(opener));
   }

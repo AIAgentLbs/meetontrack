@@ -177,8 +177,10 @@ class GoogleContext:
         return json_payload(result.stdout)
 
     def status(self) -> dict:
+        # The selected delivery profile ("" none, "custom" own OAuth client, "personal"/"work" a gws profile):
+        # Home sends a first-time user to the native OAuth setup unless a gws profile is chosen.
         result = {"sources": self.settings(), "account": "", "auth": "not_connected",
-                  "client_configured": False,
+                  "client_configured": False, "profile": self.delivery_settings.profile() if self.delivery_settings else "",
                   "connected": self.connected(), "login_pending": self._login is not None and self._login.poll() is None}
         native = self._native()
         if native is not None:

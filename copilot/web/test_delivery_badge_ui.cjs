@@ -80,7 +80,7 @@ const auth = { ...healthy, state: 'action_required',
     assert.equal(await page.locator('#archive-dialog').isHidden(), true, 'Auth pill goes straight to settings');
 
     await reload(undelivered(weekly));
-    await pillIs('Отправить отчет снова');
+    await pillIs('Проверить отправку отчета');
     // The pill is a few words; the meeting's title and date are in its tooltip and in the dialog it opens.
     assert.match(await pill.getAttribute('title'), /Отчет по встрече «Weekly sync» от 16 октября не отправлен/);
     const all = await page.evaluate(() => document.body.innerText);
@@ -114,7 +114,7 @@ const auth = { ...healthy, state: 'action_required',
     // MEETONTRACK-93: a resend still sending at the 5-minute deadline may yet arrive: never "Could not send".
     jobReport = null;
     await reload(undelivered(weekly));
-    await pillIs('Отправить отчет снова');
+    await pillIs('Проверить отправку отчета');
     await pill.click();
     await page.locator('#delivery-undelivered button').click();
     while (!heldPoll) await new Promise(resolve => setTimeout(resolve, 50));
@@ -138,7 +138,7 @@ const auth = { ...healthy, state: 'action_required',
 
     language = 'en';
     await reload(undelivered(weekly));
-    await pillIs('Send the report again');
+    await pillIs('Review failed delivery');
     assert.deepEqual(errors, [], 'UI must run without JavaScript errors');
     console.log('PASS: closed failure silent, plural count, auth to settings, named report + one resend, English');
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

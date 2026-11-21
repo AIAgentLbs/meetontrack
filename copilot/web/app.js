@@ -996,7 +996,7 @@ Object.assign(translations.ru, {
   "delivery.dismiss": "Прочитано", "delivery.dismiss_failed": "Не удалось сохранить. Повторите.",
   "delivery.local_note": "Запись и отчет остаются локально. Ошибки доставки не останавливают звонок.",
   "delivery.auth_pill": "{channel}: войдите снова", "delivery.open_settings": "Открыть настройки",
-  "delivery.pill.undelivered": "Отправить отчет снова", "delivery.pill.unsure": "Отчет мог не дойти",
+  "delivery.pill.undelivered": "Проверить отправку отчета", "delivery.pill.unsure": "Отчет мог не дойти",
   "delivery.pill.missing": "Отчет не найден", "delivery.pill.failed": "Отчет не создан",
   "delivery.pill.nopdf": "PDF отчета не создан", "delivery.pill.final": "Отчет ждет расшифровку",
   "delivery.undelivered.title_date": "Отчет по встрече «{title}» от {date} не отправлен",
@@ -1070,7 +1070,7 @@ Object.assign(translations.en, {
   "delivery.dismiss": "Mark as read", "delivery.dismiss_failed": "Could not save. Try again.",
   "delivery.local_note": "Recordings and reports stay locally. Delivery errors do not interrupt the call.",
   "delivery.auth_pill": "{channel}: sign in again", "delivery.open_settings": "Open settings",
-  "delivery.pill.undelivered": "Send the report again", "delivery.pill.unsure": "Report may not have arrived",
+  "delivery.pill.undelivered": "Review failed delivery", "delivery.pill.unsure": "Report may not have arrived",
   "delivery.pill.missing": "Report not found", "delivery.pill.failed": "Report not created",
   "delivery.pill.nopdf": "Report PDF not created", "delivery.pill.final": "Report waits for the transcript",
   "delivery.undelivered.title_date": "Report for “{title}” on {date} was not sent",
@@ -3660,7 +3660,7 @@ Object.assign(translations.ru, {
   "google.save": "Сохранить источники", "google.query": "Участник, компания или тема встречи",
   "google.search": "Найти для текущего звонка", "google.loading": "Подключаю источники…",
   "google.searching": "Ищу контекст…", "google.saved": "Источники сохранены; предыдущие результаты очищены.",
-  "google.limits": "Календарь: 90 дней назад и 30 вперед. Почта: до 3 писем за год, только тема и короткий отрывок письма. Google Диск: до 5 файлов, у первых двух берутся подходящие отрывки документа или начало таблицы. Найденное хранится 10 минут и стирается при смене источников. Отправка отчетов настраивается отдельно.",
+  "google.limits": "Календарь: 90 дней назад и 30 вперед. Почта: до 3 писем за год, только заголовки и короткий отрывок письма. Google Диск: до 5 файлов, у первых двух берутся подходящие отрывки документа или начало таблицы. Найденное хранится 10 минут и стирается при смене источников. Отправка отчетов настраивается отдельно.",
   "google.account": "Подключен Google: {account}", "google.auth": "Сначала подключите свой Google-аккаунт в разделе «Хранение и доставка отчетов», разрешив чтение контекста. Затем подключите поиск здесь и выберите источники.",
   "google.setup": "Чтобы войти в Google, сначала один раз настройте программу gws от Google, это около 5 минут.", "google.setup_link": "Как настроить",
   "google.empty": "Ничего не найдено", "google.partial": "Показана часть результатов",
@@ -3700,12 +3700,12 @@ function googleControls(busy) {
   document.querySelector("#google-disconnect").disabled = busy || !googleConnected;
   document.querySelector("#google-search-form").setAttribute("aria-busy", String(busy));
 }
-// Connected: the account. Not yet: Connect Google's sign-in, or, while sign-in needs a gws OAuth client first,
-// one plain line and the guide, not the client setup words.
+// Connected: the account. Not yet: Connect Google's sign-in; with no profile or the own client, the native OAuth setup
+// under Report storage and delivery (docs/DELIVERY.md); with a named gws profile not signed in, its setup and guide.
 function googleAccountLine(account, pending) {
   if (account.dataset.auth === "connected") account.textContent = t("google.account", {account: account.dataset.account || "gws"});
   else if (pending) account.textContent = t("google.pending");
-  else if (account.dataset.client === "true") account.textContent = t("google.auth");
+  else if (account.dataset.client === "true" || !["personal", "work"].includes(account.dataset.profile)) account.textContent = t("google.auth");
   else account.replaceChildren(`${t("google.setup")} `, externalLink(t("google.setup_link"), homeToolHelp()));
 }
 async function loadGoogleContext() {
@@ -3720,6 +3720,7 @@ async function loadGoogleContext() {
     account.dataset.auth = googleConnected ? "connected" : "not_connected";
     account.dataset.account = data.account || "";
     account.dataset.client = String(data.client_configured === true);
+    account.dataset.profile = data.profile || "";
     googleAccountLine(account, data.login_pending);
   } catch (error) { account.textContent = plainError(error); }
   finally { googleControls(false); }

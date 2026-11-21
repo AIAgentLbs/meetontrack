@@ -118,13 +118,15 @@ function homeRelease(id) {
 }
 
 // Without a chosen AI: the getting-started guide, on its AI step.
-const homeChooseAI = () => openGuideStep("startup-ai-heading");
+const homeChooseAI = event => openGuideStep("startup-ai-heading", null, event.currentTarget);
 
 // Connect mail or the calendar: Settings at «Google: почта, календарь, файлы». Once the connection is read, focus
 // and scroll go to the one control that moves on: the source's box when Google is connected, else Connect Google
-// (the plain sign-in), else, while sign-in needs a one-time gws setup, the line that says so and its guide link.
-async function homeConnectGoogle(source) {
-  document.getElementById("settings-open").click();
+// (the plain sign-in). Sign-in not set up yet: with no Google profile (or the own client) the documented first step
+// is the own OAuth client under Report storage and delivery (docs/DELIVERY.md), its account choice; with a named
+// gws profile, the line about the gws setup and its guide link.
+async function homeConnectGoogle(source, opener) {
+  openPanel("settings-open", opener);
   const section = document.getElementById("google-context-settings");
   section.open = true;
   section.scrollIntoView({ block: "start" });
@@ -132,6 +134,7 @@ async function homeConnectGoogle(source) {
   const box = document.querySelector(`#google-sources input[value="${source}"]`);
   const account = document.getElementById("google-account");
   const target = !box.disabled ? box : account.dataset.client === "true" ? document.getElementById("google-connect")
+    : !["personal", "work"].includes(account.dataset.profile) ? document.getElementById("delivery-profile")
     : account.querySelector("a") || account;
   target.scrollIntoView({ block: "center" });
   target.focus({ preventScroll: true });
@@ -166,8 +169,9 @@ function homeEmpty(prefix, action, text = [t(`${prefix}_text`)]) {
 const homeNorm = text => String(text).toLowerCase().replace(/\s+/g, " ").replace(/[\s.,;:!?…]+$/u, "").trim();
 // A memo line as the digest would say it: without its list mark, a bold lead («**Цель встречи.**»), Markdown and
 // the memo writer's source marks ([S1], [S1, S2]).
+const HOME_MARKS = /(?:\s*\[S\d+(?:\s*,\s*S\d+)*\])+$/;
 const homeBare = line => homeNorm(homePlain(line.replace(/^(?:[-*+]|\d+[.)])\s+/, "").replace(/^\*\*[^*]+\*\*\s*/, ""))
-  .replace(/(?:\s*\[S\d+(?:\s*,\s*S\d+)*\])+$/, ""));
+  .replace(HOME_MARKS, ""));
 
 // Memo text with its links: a Markdown link shows its label, a bare web address its host; never a raw URL.
 function homeInline(node, text) {
@@ -187,14 +191,13 @@ function homeInline(node, text) {
   return node;
 }
 
-// The memo's Markdown as section headings, paragraphs and lists, showing only what the digest does not. Left out:
-// a top heading that repeats the title, a paragraph that starts with the digest's goal (the goal sentence), the
-// lines the digest shows (`shown.lines`, compared without source marks), and a heading left with nothing under it.
-// A section the digest emptied down to one item shows that item alone, without its heading.
-function homeMemoBody(markdown, titles, shown = { goal: "", lines: [] }) {
+// The memo's Markdown as section headings, paragraphs and lists, showing only what the digest does not (R39). Left
+// out: a top heading that repeats the title, the lines the digest shows whole (`shown.lines`: goal, questions,
+// background, compared without source marks, whose marks go to `shown.marks` for the digest), and a heading left
+// with nothing under it. A section the digest emptied down to one item shows that item alone, without its heading.
+function homeMemoBody(markdown, titles, shown = { lines: [], marks: new Map() }) {
   const nodes = [];
   const trimmed = new Set(); // headings whose section lost lines to the digest
-  const goal = homeNorm(shown.goal || "");
   let list = null, section = null;
   for (const raw of String(markdown || "").split("\n")) {
     const line = raw.trim().replace(/^>\s*/, "");
@@ -210,8 +213,10 @@ function homeMemoBody(markdown, titles, shown = { goal: "", lines: [] }) {
     }
     const item = /^(?:[-*+]|\d+[.)])\s+/.test(line);
     const bare = homeBare(line);
-    // A question or background line is left out only when the digest shows all of it (one cut short stays).
-    if (shown.lines.includes(bare) || (!item && goal && bare.startsWith(goal))) {
+    // Left out only when the digest shows all of it: a longer line, or one whose digest was cut, stays whole.
+    if (shown.lines.includes(bare)) {
+      const marks = line.match(HOME_MARKS)?.[0].trim();
+      if (marks) shown.marks.set(bare, marks);
       if (section) trimmed.add(section);
       continue;
     }
@@ -223,14 +228,19 @@ function homeMemoBody(markdown, titles, shown = { goal: "", lines: [] }) {
       nodes.push(homeInline(document.createElement("p"), line));
     }
   }
-  nodes.forEach((node, index) => {
-    const only = nodes[index + 1];
-    if (!trimmed.has(node) || only?.tagName !== "UL" || only.childElementCount !== 1 || (nodes[index + 2] && nodes[index + 2].tagName !== "H4")) return;
-    nodes[index] = null;
-    nodes[index + 1] = document.createElement("p");
-    nodes[index + 1].append(...only.firstChild.childNodes);
-  });
-  return nodes.filter(Boolean).filter((node, index, kept) => node.tagName !== "H4" || (kept[index + 1] && kept[index + 1].tagName !== "H4"));
+  // Empty sections go first, so a flattened one never leaves its item under the heading before it.
+  const kept = nodes.filter((node, index) => node.tagName !== "H4" || (nodes[index + 1] && nodes[index + 1].tagName !== "H4"));
+  const result = [];
+  for (let index = 0; index < kept.length; index += 1) {
+    const only = kept[index + 1], after = kept[index + 2];
+    if (trimmed.has(kept[index]) && only?.tagName === "UL" && only.childElementCount === 1 && (!after || after.tagName === "H4")) {
+      const line = document.createElement("p");
+      line.append(...only.firstChild.childNodes);
+      result.push(line);
+      index += 1;
+    } else result.push(kept[index]);
+  }
+  return result;
 }
 
 // The full memo, part of the row under its actions, and the Open memo button that shows and hides it.
@@ -240,7 +250,8 @@ function homeMemo(plan, memo, title, key, id, primary, filled = primary) {
   panel.id = id;
   panel.hidden = !homeOpenMemos.has(key);
   const titles = [title, plan.title].filter(Boolean).map(value => homeNorm(value));
-  const shown = { goal: memo.goal, lines: [...(memo.questions || []).slice(0, 3), memo.background].map(value => homeNorm(value || "")).filter(Boolean) };
+  const shown = { lines: [memo.goal, ...(memo.questions || []).slice(0, 3), memo.background].map(value => homeNorm(value || "")).filter(Boolean),
+    marks: new Map() };
   panel.append(...homeMemoBody(plan.memo_markdown, titles, shown));
   if (plan.talk_track_markdown) panel.append(textNode("h4", "", t("plan.talk_track")), ...homeMemoBody(plan.talk_track_markdown, titles));
   // Materials: plain underlined links, like Open the call link.
@@ -268,8 +279,15 @@ function homeMemo(plan, memo, title, key, id, primary, filled = primary) {
     label.textContent = t(open ? "home.hide_memo" : "home.open_memo");
   }
   toggle(!panel.hidden);
-  return { panel, button, show: () => { toggle(true); links.querySelector("a")?.focus(); } };
+  // Where this comes from: the memo's first source link, or its toggle when the sources are plain text.
+  return { panel, button, marks: shown.marks, show: () => { toggle(true); (links.querySelector("a") || button).focus(); } };
 }
+
+// A digest line's source marks from the memo writer ([S1, S2]), shown while its memo is open (screens.css).
+const homeMarks = (memoView, line) => {
+  const marks = memoView?.marks.get(homeNorm(line));
+  return marks ? [" ", textNode("span", "marks", marks)] : [];
+};
 
 function homeRow(meeting, { next, now, supported, id, recording, stale, problem }) {
   const key = homeKey(meeting);
@@ -290,19 +308,27 @@ function homeRow(meeting, { next, now, supported, id, recording, stale, problem 
   if (memo.state === "ready") {
     if (memo.goal) {
       const goal = textNode("p", "goal", "");
-      goal.append(textNode("b", "", t("home.goal")), ` ${memo.goal}`);
+      goal.append(textNode("b", "", t("home.goal")), ` ${memo.goal}`, ...homeMarks(memoView, memo.goal));
       main.append(goal);
     }
     if (memo.questions?.length) {
       const asks = document.createElement("ul");
       asks.className = "asks";
-      asks.append(...memo.questions.slice(0, 3).map(question => textNode("li", "", question)));
+      asks.append(...memo.questions.slice(0, 3).map(question => {
+        const item = textNode("li", "", question);
+        item.append(...homeMarks(memoView, question));
+        return item;
+      }));
       main.append(asks);
     }
     const sources = memo.source_count > 0 && memoView;
     if (memo.background || sources) {
       const background = textNode("p", "bg", "");
-      if (memo.background) background.append(textNode("span", "", memo.background), " ");
+      if (memo.background) {
+        const text = textNode("span", "", memo.background);
+        text.append(...homeMarks(memoView, memo.background));
+        background.append(text, " ");
+      }
       if (sources) {
         const count = memo.source_count;
         const form = new Intl.PluralRules(homeLocale()).select(count);
@@ -325,7 +351,7 @@ function homeRow(meeting, { next, now, supported, id, recording, stale, problem 
     status.className = "state";
     status.append(textNode("span", "lead", t("home.nothing_found")));
     main.append(status);
-    actions.append(homeButton(t("home.connect_mail"), "", `${key}|mail`, () => homeConnectGoogle("gmail")),
+    actions.append(homeButton(t("home.connect_mail"), "", `${key}|mail`, event => homeConnectGoogle("gmail", event.currentTarget)),
       homeButton(t("home.connect_folder"), "ql", `${key}|folder`, homeConnectFolder));
   } else if (memo.state === "failed") {
     const reason = ["ai_no_answer", "ai_needs_choice", "timeout", "error"].includes(memo.reason) ? memo.reason : "error";
@@ -441,7 +467,7 @@ function renderHome(agenda, state, now = Date.now()) {
     column.append(homeEmpty("home.tool", [Object.assign(externalLink(t("home.tool_link"), homeToolHelp()), { className: "ql" }),
       homeButton(t("home.check_again"), "", "empty|recheck", event => homeReload(event.currentTarget))]));
   } else if (calendar === "not_connected") {
-    column.append(homeEmpty("home.calendar_off", homeButton(t("home.calendar_connect"), "primary", "empty|connect", () => homeConnectGoogle("calendar"))));
+    column.append(homeEmpty("home.calendar_off", homeButton(t("home.calendar_connect"), "primary", "empty|connect", event => homeConnectGoogle("calendar", event.currentTarget))));
   } else if (agenda && !meetings.length && !unscheduled.length) {
     // Past calls are in the top bar, or in the menu where the bar has no room for them (up to 700 px).
     column.append(homeEmpty("home.empty", null, [textNode("span", "by-wide", t("home.empty_text_wide")),

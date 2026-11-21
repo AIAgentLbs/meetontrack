@@ -223,19 +223,26 @@ const checks = {
     // «Откуда это: 2 источника» lands on a section of the same name.
     assert.deepEqual(memo.headings, ['Background', lang === 'ru' ? 'Источники' : 'Sources']);
     assert.deepEqual(memo.type, ['16px/600/none']);
-    // Only what the digest does not show: no goal sentence (it starts with the digest's goal), no question shown
-    // above; the one question left reads on its own, without a Questions heading.
-    assert.doesNotMatch(memo.text, /Agree on the pilot|What budget|Who signs off|Which part of the proposal|Pilot review/);
-    assert.match(memo.text, /^A fourth question that the digest leaves out\?\n/);
-    // The memo writer's format: a bold goal lead and [S1] marks on every line. Questions match without their marks;
-    // a question whose digest line was cut stays; the sources list keeps the marks' meaning.
-    assert.deepEqual(await page.evaluate(() => homeMemoBody([
-      '**Meeting goal.** Agree on the pilot scope and the start date [S1]', '', '## Questions to ask',
-      '1. What budget is set for the pilot this year? [S1, S2]', '2. Who signs off the purchase? [S2]', '3. Which offices go first? [S1]',
-      '', '## Sources', '- [S1] Proposal', '- [S2] Notes'].join('\n'), [], {
-      goal: 'Agree on the pilot scope…', lines: ['What budget is set for the pilot this year?', 'Who signs off…'].map(homeNorm) })
-      .map(node => [node.tagName, node.textContent])), [['H4', 'Questions to ask'],
-      ['UL', 'Who signs off the purchase? [S2]Which offices go first? [S1]'], ['H4', 'Sources'], ['UL', '[S1] Proposal[S2] Notes']]);
+    // R39: only what the digest shows whole is left out. The goal line here says more than the digest's goal (a
+    // shortened file digest does the same), so it stays in full; the one question left reads on its own.
+    assert.doesNotMatch(memo.text, /What budget|Who signs off|Which part of the proposal|Pilot review/);
+    assert.match(memo.text, /^Agree on the pilot scope and the start date with Example LLC\.\n+A fourth question that the digest leaves out\?\n/);
+    // The memo writer's format: a bold goal lead and [S1] marks on every line. Lines match without their marks, and
+    // each mark is kept for its digest line; a question whose digest line was cut stays.
+    assert.deepEqual(await page.evaluate(() => {
+      const shown = { lines: ['Agree on the pilot scope and the start date', 'What budget is set for the pilot this year?', 'Who signs off…']
+        .map(homeNorm), marks: new Map() };
+      const nodes = homeMemoBody([
+        '**Meeting goal.** Agree on the pilot scope and the start date [S1]', '', '## Questions to ask',
+        '1. What budget is set for the pilot this year? [S1, S2]', '2. Who signs off the purchase? [S2]', '3. Which offices go first? [S1]',
+        '', '## Sources', '- [S1] Proposal', '- [S2] Notes'].join('\n'), [], shown);
+      return [nodes.map(node => [node.tagName, node.textContent]), [...shown.marks]];
+    }), [[['H4', 'Questions to ask'], ['UL', 'Who signs off the purchase? [S2]Which offices go first? [S1]'], ['H4', 'Sources'],
+      ['UL', '[S1] Proposal[S2] Notes']],
+    [['agree on the pilot scope and the start date', '[S1]'], ['what budget is set for the pilot this year', '[S1, S2]']]]);
+    // A section the digest empties goes before a following one is flattened: no Goal heading over the question.
+    assert.deepEqual(await page.evaluate(() => homeMemoBody('## Goal\nAgree on scope [S1]\n\n## Questions\n1. What budget? [S1]\n2. Who signs? [S2]',
+      [], { lines: ['Agree on scope', 'What budget?'].map(homeNorm), marks: new Map() }).map(node => [node.tagName, node.textContent])), [['P', 'Who signs? [S2]']]);
     // Links: an <https://...> autolink and a destination with balanced parentheses keep their whole address.
     assert.deepEqual(await page.evaluate(() => {
       const node = homeInline(document.createElement('p'), 'See <https://example.org/notes> and [Report](https://example.com/Report_(draft)).');
@@ -246,6 +253,7 @@ const checks = {
     assert.match(memo.text, /See the thread/);
     assert.doesNotMatch(memo.text, /https?:|\(|\*\*/, 'no raw URL or Markdown marks');
     assert.deepEqual(memo.links, [
+      ['Example LLC', 'https://example.com/llc', '_blank', 'noopener noreferrer', false],
       ['example.org', 'https://example.org/history', '_blank', 'noopener noreferrer', false],
       ['Proposal', 'https://example.com/proposal', '_blank', 'noopener noreferrer', true],
       ['Notes', 'https://example.org/notes', '_blank', 'noopener noreferrer', true]]);
@@ -262,7 +270,25 @@ const checks = {
     assert.equal(label.length, 100);
     assert.deepEqual(await page.evaluate(() => [document.documentElement.scrollWidth <= innerWidth,
       [...document.querySelectorAll('#home .memo-links a')].at(-1).getBoundingClientRect().right <= innerWidth]), [true, true]);
+    // R39 at 400 px: the open memo's row shows its digest unclamped, nothing cut.
+    assert.deepEqual(await row.evaluate(node => [...node.querySelectorAll('.goal, .asks li, .bg > span')]
+      .map(item => item.scrollHeight <= item.clientHeight + 1 && getComputedStyle(item).webkitLineClamp === 'none')), [true, true, true, true, true]);
     await page.setViewportSize({ width: 1440, height: 900 });
+    // A memo from the memo writer: each digest line shows its source marks while the memo is open, not before.
+    const plan = page.api.fixture.agenda.meetings[0].plans[0];
+    plan.memo_markdown = ['**Meeting goal.** Agree on the pilot scope and the start date [S1]', '', '## Questions to ask',
+      '1. What budget is set for the pilot this year? [S1, S2]', '2. Who signs off the purchase? [S2]', '', '## Sources', '- [S1] Proposal'].join('\n');
+    await page.evaluate(() => refreshAgenda());
+    await row.locator('.goal .marks').waitFor();
+    assert.deepEqual(await row.locator('.goal .marks, .asks li .marks').allInnerTexts(), ['[S1]', '[S1, S2]', '[S2]']);
+    // Where this comes from with no source links: focus lands on the memo's toggle, never on the page.
+    plan.links = [];
+    await page.evaluate(() => refreshAgenda());
+    await toggle.click();
+    assert.equal(await row.locator('.goal .marks').isVisible(), false, 'marks only with the memo open');
+    await row.locator('.bg button.ql').focus();
+    await page.keyboard.press('Enter');
+    assert.equal(await toggle.evaluate(node => node === document.activeElement), true, 'focus on the memo toggle');
     // Hide memo closes it again.
     await toggle.click();
     assert.equal(await panel.isVisible(), false);
@@ -309,13 +335,20 @@ const checks = {
     // Connect mail: Settings at the Google section, named after mail. The calendar is read, so Google is connected:
     // focus goes to the Mail box, on screen. Escape closes Settings and focus comes back to Connect mail.
     const connect = row.locator('.actions button', { hasText: /^(Подключить почту|Connect mail)$/ });
-    await connect.click();
+    // A click that does not focus the button (WebKit, the macOS app): Escape still returns focus to it.
+    await connect.evaluate(node => node.click());
     await page.locator('#settings-panel').waitFor({ state: 'visible' });
     await page.waitForFunction(() => document.activeElement?.matches('#google-sources input[value="gmail"]'));
     assert.equal(await onScreen('#google-sources input[value="gmail"]'), true, 'the Mail box is on screen');
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('#settings-panel').isVisible(), false);
     assert.equal(await connect.evaluate(node => node === document.activeElement), true, 'focus back on Connect mail');
+    // Settings from Menu after that deep link open at their top, with the focused heading on screen.
+    await page.locator('#menu-button').click();
+    await page.locator('#settings-open').click();
+    await page.waitForFunction(() => document.activeElement?.id === 'settings-heading');
+    assert.equal(await onScreen('#settings-heading'), true, 'the Settings heading is on screen');
+    await page.keyboard.press('Escape');
     // Google signed out since: the plain sign-in step, Connect Google, on screen also in a 400 x 480 window.
     await page.setViewportSize({ width: 400, height: 480 });
     await page.route('**/api/google-context', route => route.fulfill({ json: { ok: true, connected: false, client_configured: true, sources: {} } }));
@@ -324,9 +357,17 @@ const checks = {
     assert.equal(await onScreen('#google-connect'), true, 'Connect Google is on screen');
     await page.keyboard.press('Escape');
     await page.setViewportSize({ width: 1440, height: 900 });
-    // Sign-in needs a one-time gws setup first: the line that says so, focused on its guide link.
+    // First time, no Google profile chosen: the documented first step is the own OAuth client under Report storage
+    // and delivery (docs/DELIVERY.md); focus goes to its account choice, on screen.
     await page.unroute('**/api/google-context');
-    await page.route('**/api/google-context', route => route.fulfill({ json: { ok: true, connected: false, client_configured: false, sources: {} } }));
+    await page.route('**/api/google-context', route => route.fulfill({ json: { ok: true, connected: false, client_configured: false, profile: '', sources: {} } }));
+    await connect.click();
+    await page.waitForFunction(() => document.activeElement?.id === 'delivery-profile');
+    assert.equal(await onScreen('#delivery-profile'), true, 'the Google account choice is on screen');
+    await page.keyboard.press('Escape');
+    // A named gws profile whose sign-in is not set up: the line that says so, focused on the gws guide link.
+    await page.unroute('**/api/google-context');
+    await page.route('**/api/google-context', route => route.fulfill({ json: { ok: true, connected: false, client_configured: false, profile: 'work', sources: {} } }));
     await connect.click();
     await page.waitForFunction(() => document.activeElement?.closest('#google-account'));
     assert.deepEqual(await page.evaluate(() => [document.getElementById('google-account').textContent, document.activeElement.getAttribute('href')]),
@@ -340,7 +381,7 @@ const checks = {
     assert.doesNotMatch(await page.locator('#google-context-settings').innerText(), /LLM|A1:Z80|−90/);
     // Mail gives a snippet, Docs give the excerpts that match: the limits say so, not "the start".
     assert.match(await page.locator('[data-i18n="google.limits"]').innerText(), lang === 'ru'
-      ? /короткий отрывок письма.*подходящие отрывки документа/ : /snippets.*relevant excerpts of a document/);
+      ? /только заголовки и короткий отрывок письма.*подходящие отрывки документа/ : /headers and snippets.*relevant excerpts of a document/);
     await page.locator('#settings-close').click();
     // Connect a folder: the folders dialog, titled as the menu item, focused on Choose folder; usable without a recording.
     await row.locator('.actions a.ql, .actions button.ql').filter({ hasText: /^(Подключить папку|Connect a folder)$/ }).click();
@@ -394,14 +435,16 @@ const checks = {
     await row.locator('.row-error').waitFor();
     assert.match(await row.locator('.row-error').innerText(), /^(Не получилось\. Попробуйте еще раз\.|That did not work\. Try again\.)$/);
     assert.match(await row.locator('.state').first().innerText(), /ИИ не ответил|the AI did not answer/);
-    await rowOf(page, 'Pilot follow-up').locator('button', { hasText: /^(Выбрать ИИ|Choose the AI)$/ }).click();
+    await rowOf(page, 'Pilot follow-up').locator('button', { hasText: /^(Выбрать ИИ|Choose the AI)$/ }).evaluate(node => node.click());
     await page.locator('#getting-started').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#startup-ai-heading').evaluate(node => {
       const box = node.getBoundingClientRect();
       return box.top >= document.querySelector('.topbar').getBoundingClientRect().bottom && box.bottom <= innerHeight;
     }), true, 'the AI step is on screen');
-    // Focus goes into the AI step; Escape closes the guide and focus comes back to Choose the AI.
-    assert.equal(await page.evaluate(() => document.getElementById('startup-ai-heading').closest('.startup-step').contains(document.activeElement)), true);
+    // Focus goes to the AI step's heading, which the step's refresh does not replace; Escape closes the guide and
+    // focus comes back to Choose the AI (clicked without focus, as in WebKit).
+    await page.waitForTimeout(500);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'startup-ai-heading');
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('#getting-started').isVisible(), false);
     assert.match(await page.evaluate(() => document.activeElement.textContent), /^(Выбрать ИИ|Choose the AI)$/);
@@ -703,7 +746,7 @@ const checks = {
       await page.setViewportSize({ width, height: 900 });
       await frames(page);
       assert.deepEqual(await pill.evaluate(node => [node.textContent, node.scrollWidth <= node.clientWidth + 1 && node.scrollHeight <= node.clientHeight + 1]),
-        [lang === 'ru' ? 'Отправить отчет снова' : 'Send the report again', true], `pill at ${width}`);
+        [lang === 'ru' ? 'Проверить отправку отчета' : 'Review failed delivery', true], `pill at ${width}`);
     }
     await page.setViewportSize({ width: 1440, height: 900 });
     const plural = await page.evaluate(() => {
@@ -1076,12 +1119,13 @@ const checks = {
     const only = process.env.HOME_UI_ONLY?.split(',');
     for (const fixture of Object.keys(states).filter(name => !only || only.includes(name))) {
       for (const lang of ['ru', 'en']) {
-        // The ready check reads today's wording: its fixture and page clocks are pinned to today's noon (any run time).
+        // The ready check reads today's wording and the preparing one moves its clock 4 minutes on: their fixture and
+        // page clocks are pinned to today's noon (any run time).
         // HOME_UI_AT=HH:MM pins it elsewhere (to see the check at another hour).
         const pin = new Date();
         const [hours, minutes] = (process.env.HOME_UI_AT || '12:00').split(':').map(Number);
         pin.setHours(hours, minutes, 0, 0);
-        const page = await open(browser, { fixture, lang, at: fixture === 'ready' ? pin.getTime() : null });
+        const page = await open(browser, { fixture, lang, at: ['ready', 'preparing'].includes(fixture) ? pin.getTime() : null });
         await page.waitForFunction(lang => document.documentElement.lang === lang, lang);
         try {
           await page.locator('#home :is(.row, .empty)').first().waitFor({ timeout: 5000 });
