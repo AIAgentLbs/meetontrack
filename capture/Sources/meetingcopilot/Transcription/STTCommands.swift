@@ -21,7 +21,7 @@ struct SpeechChoiceOptions: ParsableArguments {
     }
 }
 
-private func printJSON(_ object: Any) {
+func printJSON(_ object: Any) {
     guard let data = try? JSONSerialization.data(
         withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])
     else { return }
