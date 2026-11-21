@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import threading
 from datetime import datetime, timedelta
@@ -91,14 +90,25 @@ def folder_sources(hits: list[dict], words: dict, limit: int = 4) -> list[dict]:
     from call_plan import _normal  # call_plan imports this module
     strong = [w for name in words["names"] for w in _normal(name).split() if len(w) >= 3]
     strong += [_normal(words["company"])] if words["company"] else []
-    kept = [hit for hit in hits if not strong or any(w in _normal(str(hit.get("text") or "")) for w in strong)]
+    kept = [hit for hit in hits if not strong
+            or any(f" {w} " in f" {_normal(str(hit.get('text') or ''))} " for w in strong)]
     return [{"kind": "folder", "label": f"{hit.get('path')}:{hit.get('line')}"[:200],
              "text": str(hit.get("text") or "")[:1200]} for hit in kept[:limit]]
 
 
+def moment(value: object) -> datetime | None:
+    """An ISO time as an aware datetime; a bare date or a time without offset is local time."""
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.astimezone()
+
+
 def past_reports(archive, words: dict, before: datetime, limit: int = 3) -> list[dict]:
-    """Call reports from before the meeting with the same people (or, without a participant list, the
-    company or two title words), newest first, each as its first three overview points."""
+    """Call reports from before the meeting with the same people (or, without a participant list or
+    without names on the event, the company or two title words), newest first, each as its first three
+    overview points."""
     from call_plan import _normal
     names = {name for name in map(_normal, words["names"]) if name}
     company = _normal(words["company"])
@@ -109,15 +119,11 @@ def past_reports(archive, words: dict, before: datetime, limit: int = 3) -> list
         if not isinstance(snapshot, dict):
             continue
         title, started = str(snapshot.get("meeting") or ""), str(snapshot.get("started_at") or "")
-        try:
-            when = datetime.fromisoformat(started.replace("Z", "+00:00"))
-            when = when if when.tzinfo else when.astimezone()
-        except ValueError:
-            continue
-        if when >= before:
+        when = moment(started)
+        if when is None or when >= before:
             continue
         listed = _json(path.parent / "participants.json", None)
-        if listed is not None:
+        if listed is not None and names:
             people = listed.get("participants") if isinstance(listed, dict) else None
             hit = any(isinstance(p, dict) and _normal(str(p.get("name") or "")) in names for p in people or [])
         else:
@@ -172,7 +178,7 @@ class MemoWriter:
         self.events: dict[str, dict] = {
             key: value for key, value in (events if isinstance(events, dict) else {}).items()
             if isinstance(value, dict) and isinstance(attempts := value.get("attempts", 0), (int, float))
-            and math.isfinite(attempts)}
+            and 0 <= attempts <= 100}  # also drops NaN, infinity and huge numbers without raising
         now = datetime.now().astimezone().isoformat(timespec="seconds")
         for entry in self.events.values():
             if entry.get("state") == "preparing":  # cut short by a restart: one automatic retry at most

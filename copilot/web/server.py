@@ -51,7 +51,7 @@ from ai_providers import AIChoiceError, AIService, SignIns
 from fact_check import FactChecks, extraction_rules, fetch_text, parse_claims, strip_claims, verify as verify_fact, with_speakers
 from stt import STTService
 from local_context import LocalContext
-from memo_writer import folder_sources, past_reports, search_words
+from memo_writer import folder_sources, moment, past_reports, search_words
 from private_dirs import private_dir
 
 
@@ -2584,21 +2584,22 @@ def fact_knowledge(row: dict) -> list[dict]:
 
 def memo_sources(meeting: dict) -> list[dict]:
     """What the connected sources know about an upcoming meeting's people, searched with words from the
-    event only. Private excerpts stay on this machine; of Google, only the calendar is read."""
-    words = search_words(meeting)
-    sources = []
+    event only, at most 3 of each kind. Private excerpts stay on this machine; of Google, only the calendar
+    is read. A kind whose access changed while gathering is left out."""
+    words, start = search_words(meeting), moment(meeting["start"])
     folders = LOCAL_CONTEXT.generation()
-    query = " ".join(words["names"] + [words["company"]] + words["title"]).strip()[:160]
-    found = folder_sources(LOCAL_CONTEXT.search(query)["items"], words) if query else []
-    if folders == LOCAL_CONTEXT.generation():  # a folder disconnected meanwhile: none of its text
-        sources += found
-    for item in TWENTY_CONTEXT.records(words["emails"] + words["names"], str(meeting.get("title") or "")):
-        sources.append({"kind": "crm", "label": f"CRM {item.get('type')}: {item.get('name') or item.get('title') or ''}"[:200],
-                        "text": json.dumps(item, ensure_ascii=False)[:1200]})
+    with TWENTY_CONTEXT._lock:
+        crm = TWENTY_CONTEXT._generation
     with GOOGLE_CONTEXT._lock:
-        generation = GOOGLE_CONTEXT._generation
+        google = GOOGLE_CONTEXT._generation
+    query = " ".join(words["names"] + [words["company"]] + words["title"]).strip()[:160]
+    found = {"folder": folder_sources(LOCAL_CONTEXT.search(query)["items"], words, limit=3) if query else []}
+    found["crm"] = [{"kind": "crm", "label": f"CRM {item.get('type')}: {item.get('name') or item.get('title') or ''}"[:200],
+                     "text": json.dumps(item, ensure_ascii=False)[:1200]}
+                    for item in TWENTY_CONTEXT.records(words["emails"] + words["names"],
+                                                       str(meeting.get("title") or ""))[:3]]
+    history = {}
     if "calendar" in google_sources():
-        history = {}
         for email in words["emails"][:3]:
             try:  # _search_source, not search(): the live analysis keeps its own cached Google results
                 hits = GOOGLE_CONTEXT._search_source("calendar", email).get("items", [])
@@ -2606,15 +2607,18 @@ def memo_sources(meeting: dict) -> list[dict]:
                 continue
             for hit in hits:
                 date = str(hit.get("date") or "")
-                if date and date < meeting["start"]:
+                if (when := moment(date)) and when < start:
                     label = f"{hit.get('title') or ''} {date[:10]}"[:200]
                     history.setdefault(label, {"kind": "calendar", "label": label,
                                                "text": str(hit.get("excerpt") or "")[:1200]})
-        with GOOGLE_CONTEXT._lock:
-            if generation == GOOGLE_CONTEXT._generation:  # access changed mid-search: none of it
-                sources += list(history.values())[:3]
-    sources += past_reports(ARCHIVE, words, datetime.fromisoformat(meeting["start"]))
-    return sources[:12]
+    found["calendar"] = list(history.values())[:3]
+    found["report"] = past_reports(ARCHIVE, words, start)
+    changed = {"folder": folders != LOCAL_CONTEXT.generation()}
+    with TWENTY_CONTEXT._lock:
+        changed["crm"] = crm != TWENTY_CONTEXT._generation
+    with GOOGLE_CONTEXT._lock:
+        changed["calendar"] = google != GOOGLE_CONTEXT._generation
+    return [source for kind, sources in found.items() if not changed.get(kind) for source in sources]
 
 
 def fact_source(raw: str) -> tuple[str, str | None]:

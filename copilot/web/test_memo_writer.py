@@ -220,7 +220,9 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(MemoWriter(self.path, FakeAI(), lambda m: [], lambda: "en").events, {})
         writer = self._stored({"ok": {"state": "preparing", "start": START, "attempts": 0},
                                "text": "not an entry", "bad": {"state": "preparing", "attempts": "many"},
-                               "list": {"state": "failed", "attempts": [1]}})
+                               "list": {"state": "failed", "attempts": [1]},
+                               "huge": {"state": "preparing", "attempts": 10 ** 400},
+                               "nan": {"state": "preparing", "attempts": float("nan")}})
         self.assertEqual(list(writer.events), ["ok"])
         self.assertEqual(writer.events["ok"]["state"], "failed")
 
@@ -274,6 +276,19 @@ class SourceTests(unittest.TestCase):
         loose = {**WORDS, "names": [], "company": ""}
         self.assertEqual(len(folder_sources(hits * 3, loose)), 4)
 
+    def test_folder_names_match_whole_words(self):
+        words = {**WORDS, "names": ["Anna Petrova", "Max Li"]}
+        hits = [{"path": "/f/a.md", "line": 1, "text": "Savannah annual pilot"},
+                {"path": "/f/b.md", "line": 2, "text": "maximum pilot budget"},
+                {"path": "/f/c.md", "line": 3, "text": "Max approved the pilot"}]
+        self.assertEqual([s["label"] for s in folder_sources(hits, words)], ["/f/c.md:3"])
+
+    def test_past_reports_by_title_when_the_event_has_no_names(self):
+        archived(self.root, "m1", "Pilot review Example", "2026-11-20T09:00:00+01:00", ["Someone Else"])
+        archive = FakeArchive(self.root, {"m1": ["Agreed the scope"]})
+        self.assertEqual([s["text"] for s in past_reports(archive, {**WORDS, "names": []}, BEFORE)],
+                         ["Agreed the scope"])
+
     def test_past_reports_by_participants_then_title(self):
         archived(self.root, "m1", "m1-title catch-up", "2026-11-20T09:00:00+01:00", ["Anna  Petrova"])
         archived(self.root, "m2", "m2-title Pilot review Example", "2026-11-10T09:00:00Z")
@@ -311,9 +326,9 @@ class SourceTests(unittest.TestCase):
 
 
 class FakeGoogle:
-    def __init__(self, items, account="me@example.org", change=False):
+    def __init__(self, items, account="me@example.org", change=False, on_search=lambda: None):
         self._lock, self._generation = threading.RLock(), 0
-        self.items, self.account, self.change, self.queries = items, account, change, []
+        self.items, self.account, self.change, self.on_search, self.queries = items, account, change, on_search, []
 
     def enabled_sources(self):
         return ["calendar", "gmail", "drive"]
@@ -326,6 +341,7 @@ class FakeGoogle:
 
     def _search_source(self, source, query):
         self.queries.append((source, query))
+        self.on_search()
         if self.change:
             self._generation += 1
         return {"state": "ok", "items": self.items}
@@ -334,6 +350,7 @@ class FakeGoogle:
 MEETING = {"start": "2026-11-25T10:00:00+01:00", "end": "2026-11-25T10:30:00+01:00",
            "title": "Pilot review with Example LLC", "link": "", "attendees": MEETING_ATTENDEES,
            "event_id": "ev1", "external": True}
+ANNA_CRM = {"type": "person", "name": "Anna Petrova"}
 
 
 class MemoSourcesTests(unittest.TestCase):
@@ -347,36 +364,48 @@ class MemoSourcesTests(unittest.TestCase):
         archived(self.root, "m1", "Pilot review Example", "2026-11-20T09:00:00+01:00")
         self.archive = FakeArchive(self.root, {"m1": ["Agreed the scope"]})
         self.searches = []
+        self.twenty = self.ns(_lock=threading.RLock(), _generation=0)
 
-    def gather(self, google, generations=("same", "same")):
-        folders = iter(generations)
-        local = self.ns(generation=lambda: next(folders),
-                        search=lambda query: self.searches.append(query) or {"items": [
-                            {"path": "/f/a.md", "line": 3, "text": "Notes on Anna Petrova"}]})
-        twenty = self.ns(records=lambda attendees, title="": [{"type": "person", "name": "Anna Petrova"}])
+    def gather(self, google, folder=lambda: "same", crm=(ANNA_CRM,), on_records=lambda: None):
+        local = self.ns(generation=folder, search=lambda query: self.searches.append(query) or {"items": [
+            {"path": "/f/a.md", "line": 3, "text": "Notes on Anna Petrova"}]})
+        self.twenty.records = lambda attendees, title="": on_records() or list(crm)
         with patch.object(self.server, "LOCAL_CONTEXT", local), patch.object(self.server, "GOOGLE_CONTEXT", google), \
-                patch.object(self.server, "TWENTY_CONTEXT", twenty), patch.object(self.server, "ARCHIVE", self.archive):
+                patch.object(self.server, "TWENTY_CONTEXT", self.twenty), \
+                patch.object(self.server, "ARCHIVE", self.archive):
             return self.server.memo_sources(MEETING)
 
     def test_sources_dropped_when_access_changes_mid_gather(self):
-        google = FakeGoogle([{"title": "Intro call", "date": "2026-11-01T10:00:00+01:00", "excerpt": "First talk"}],
-                            change=True)
-        sources = self.gather(google, ("before", "after"))
+        history = [{"title": "Intro call", "date": "2026-11-01T10:00:00+01:00", "excerpt": "First talk"}]
+        google = FakeGoogle(history, change=True)
+        folders = iter(["before", "after"])
+        sources = self.gather(google, folder=lambda: next(folders))
         self.assertEqual([s["kind"] for s in sources], ["crm", "report"])
         self.assertEqual({q[0] for q in google.queries}, {"calendar"})  # never Gmail or Drive
+        # A folder removed during the CRM read, the CRM key changed during the calendar read.
+        state = {"folder": "before"}
+        def crm_changes():
+            self.twenty._generation += 1
+        google = FakeGoogle(history, on_search=crm_changes)
+        sources = self.gather(google, folder=lambda: state["folder"], on_records=lambda: state.update(folder="after"))
+        self.assertEqual([s["kind"] for s in sources], ["calendar", "report"])
 
     def test_calendar_history_keeps_only_events_before_the_meeting(self):
         google = FakeGoogle([{"title": "Intro call", "date": "2026-11-01T10:00:00+01:00", "excerpt": "First talk"},
-                             {"title": "Kickoff", "date": "2026-10-20", "excerpt": ""},
                              {"title": "Pilot review", "date": "2026-11-25T10:00:00+01:00", "excerpt": "This one"},
-                             {"title": "Follow-up", "date": "2026-12-02T10:00:00+01:00", "excerpt": "Later"}])
-        sources = self.gather(google)
+                             {"title": "Other zone", "date": "2026-11-25T09:30:00+00:00", "excerpt": "After, in UTC"},
+                             {"title": "Undated", "date": "soon", "excerpt": "?"},
+                             {"title": "Kickoff", "date": "2026-10-20", "excerpt": ""},
+                             {"title": "Follow-up", "date": "2026-12-02T10:00:00+01:00", "excerpt": "Later"},
+                             {"title": "Prep", "date": "2026-11-25T09:30:00+01:00", "excerpt": "Just before"}])
+        crm = [{"type": "person", "name": f"Person {n}"} for n in range(5)]
+        sources = self.gather(google, crm=crm)
         self.assertEqual(sources, [
             {"kind": "folder", "label": "/f/a.md:3", "text": "Notes on Anna Petrova"},
-            {"kind": "crm", "label": "CRM person: Anna Petrova",
-             "text": json.dumps({"type": "person", "name": "Anna Petrova"})},
+            *({"kind": "crm", "label": f"CRM person: Person {n}", "text": json.dumps(crm[n])} for n in range(3)),
             {"kind": "calendar", "label": "Intro call 2026-11-01", "text": "First talk"},
             {"kind": "calendar", "label": "Kickoff 2026-10-20", "text": ""},
+            {"kind": "calendar", "label": "Prep 2026-11-25", "text": "Just before"},
             {"kind": "report", "label": "Pilot review Example 2026-11-20", "text": "Agreed the scope"}])
         self.assertEqual(google.queries, [("calendar", "anna@example-llc.com")])
         self.assertEqual(self.searches, ["Anna Petrova example-llc pilot example"])
