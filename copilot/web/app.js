@@ -2106,9 +2106,9 @@ function memoNodes(plan) {
 }
 
 // Microphone, call audio and recorder, for the call status (shell.js). A failed fetch keeps the last answer.
-async function refreshPermissions() {
+async function refreshPermissions(fresh = false) {
   try {
-    window.permissionsData = await getJSON("/api/permissions");
+    window.permissionsData = await getJSON(fresh ? "/api/permissions?fresh=1" : "/api/permissions");
   } catch {}
 }
 
@@ -3762,6 +3762,6 @@ window.matchMedia("(max-width: 600px)").addEventListener("change", () => {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     void state();
-    void refreshPermissions().then(() => window.renderShell?.());
+    void refreshPermissions(true).then(() => window.renderShell?.());
   }
 });

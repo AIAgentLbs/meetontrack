@@ -383,6 +383,23 @@ const checks = {
       getComputedStyle(document.querySelector('.settings-panel')).top]);
     assert.deepEqual(await height(page), await height(fresh), 'bar after 400 -> 1440 vs fresh 1440');
     await fresh.close();
+    // The short cap is for the squeezed 701-1100 range only: at 400 (own row) the pill keeps its width, at 1440 its
+    // usual limit (it may still share the row with a two-line Russian status there, as before the cap).
+    const pill = async () => {
+      const widths = {};
+      for (const width of [400, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        await frames(page);
+        widths[width] = await page.locator('#delivery-alert').evaluate((node, width) => width === 400
+          ? Math.round(node.getBoundingClientRect().width) : getComputedStyle(node).maxWidth, width);
+      }
+      return widths;
+    };
+    const withProblem = await pill();
+    page.api.fixture.permissions.microphone = 'granted';
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForFunction(() => !document.querySelector('#call-status-text').classList.contains('fail'));
+    assert.deepEqual(withProblem, await pill(), 'pill width with and without a problem');
   },
   async not_recording(page, lang) {
     await failing(page);
@@ -531,8 +548,12 @@ const checks = {
     assert.equal(await visibleKbd(memo), true);
     // Back from System Settings: the permissions are read again at once, not at the next minute's poll.
     page.api.fixture.permissions.microphone = 'denied';
+    const reads = page.api.permissionReads.length;
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await failing(page, 2000);
+    // That read asks for a fresh answer (the server drops its cache); the polls keep the cache.
+    assert.ok(page.api.permissionReads.slice(reads).includes('?fresh=1'), JSON.stringify(page.api.permissionReads));
+    assert.equal(page.api.permissionReads[0], '');
   },
   async long(page, lang) {
     // Ten attendees: three by name, then one muted line with the rest, the whole list in its tooltip.

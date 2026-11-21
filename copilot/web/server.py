@@ -3017,6 +3017,8 @@ class Handler(BaseHTTPRequestHandler):
                         "live_enabled": bool(config.get("live_transcription", {}).get("enabled", False)),
                         "folders": LOCAL_CONTEXT.snapshot()})
         elif path == "/api/permissions":
+            if parse_qs(urlparse(self.path).query).get("fresh") == ["1"]:
+                PERMISSIONS.invalidate()  # back from System Settings: ask the recorder again
             state = PERMISSIONS.snapshot()
             running = recorder_running()
             self._json({"ok": True, "microphone": state["microphone"], "call_audio": state["call_audio"],
@@ -3173,7 +3175,6 @@ class Handler(BaseHTTPRequestHandler):
                     subprocess.run(["/usr/bin/open", str(binary.parents[2])], check=True, timeout=10)
                 self._json({"ok": True})
             elif path == "/api/permissions/open":
-                PERMISSIONS.invalidate()  # the next read after System Settings asks the recorder again
                 try:
                     open_settings(str(payload.get("which") or ""))
                 except ValueError:

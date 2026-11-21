@@ -40,8 +40,10 @@ body[data-view="home"] .meeting-boundary-bar { display: none; }
 .tools { position: relative; display: flex; align-items: center; gap: 16px; min-width: 0; }
 #menu-button { flex-shrink: 0; }
 .topbar .delivery-alert { display: block; min-width: 0; max-width: 42ch; line-height: 34px; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; }
-/* A recording problem comes first: beside it the pill keeps a short width, its full text in the tooltip. */
-.topbar:has(#call-status-text.fail) .delivery-alert { max-width: 16ch; }
+/* Where the row is squeezed, a recording problem comes first: the pill keeps a short width, its full text in the tooltip. */
+@media (min-width: 701px) and (max-width: 1100px) {
+  .topbar:has(#call-status-text.fail) .delivery-alert { max-width: 16ch; }
+}
 
 .topbar button, .home button {
   font: inherit; font-size: 14px; font-weight: 600; min-height: 36px; padding: 0 14px;

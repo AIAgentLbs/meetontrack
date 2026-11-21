@@ -159,13 +159,18 @@ class RouteTests(unittest.TestCase):
         self.assertEqual((status, json.loads(payload)), (200, {'ok': True}))
         opener.assert_called_once_with('microphone')
 
-    def test_open_drops_the_cached_answer(self):
-        # The person comes back from System Settings: the next read asks the recorder again.
-        probe = mock.Mock()
-        with mock.patch.object(server, 'PERMISSIONS', probe), mock.patch.object(server, 'open_settings'):
-            status, _ = self.request('POST', '/api/permissions/open', {'which': 'microphone'})
-        self.assertEqual(status, 200)
-        probe.invalidate.assert_called_once_with()
+    def test_fresh_read_drops_the_cached_answer(self):
+        # The person comes back from System Settings: that read asks the recorder again, others keep the cache.
+        probe = mock.Mock(**{'snapshot.return_value': FakeProbe().snapshot()})
+        with mock.patch.object(server, 'PERMISSIONS', probe), \
+                mock.patch.object(server, 'recorder_running', return_value=False):
+            self.assertEqual(self.request('GET', '/api/permissions')[0], 200)
+            probe.invalidate.assert_not_called()
+            self.assertEqual(self.request('GET', '/api/permissions?fresh=1')[0], 200)
+            probe.invalidate.assert_called_once_with()
+            with mock.patch.object(server, 'open_settings'):
+                self.request('POST', '/api/permissions/open', {'which': 'microphone'})
+            probe.invalidate.assert_called_once_with()
 
     def test_open_failure_is_generic(self):
         with mock.patch.object(server, 'open_settings', side_effect=OSError('secret detail')):

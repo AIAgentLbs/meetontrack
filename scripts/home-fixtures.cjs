@@ -116,7 +116,7 @@ const states = Object.defineProperties({}, Object.fromEntries(
 // `responses[path]` to {status, json}, 'abort' or a promise of either, and `gate` to a promise that holds back
 // /api/agenda. A fixture without an agenda makes /api/agenda answer 500. `clock` installs a fake page clock that many milliseconds ahead of now.
 async function route(context, fixture, origin) {
-  const api = { fixture, posts: [], responses: {}, gate: null };
+  const api = { fixture, posts: [], responses: {}, gate: null, permissionReads: [] };
   await context.route(`${origin}/**`, async request => {
     const url = new URL(request.request().url());
     if (request.request().method() === 'POST' && url.pathname.startsWith('/api/')) {
@@ -131,7 +131,10 @@ async function route(context, fixture, origin) {
       if (!api.fixture.agenda) return request.fulfill({ status: 500, json: { ok: false, error: 'boom' } });
       return request.fulfill({ json: { ok: true, ...api.fixture.agenda } });
     }
-    if (url.pathname === '/api/permissions') return request.fulfill({ json: api.fixture.permissions });
+    if (url.pathname === '/api/permissions') {
+      api.permissionReads.push(url.search);
+      return request.fulfill({ json: api.fixture.permissions });
+    }
     if (url.pathname.startsWith('/api/')) return request.fulfill({ json: { ok: true } });
     const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
     if (file.includes('/') || !/\.(html|js|css)$/.test(file)) return request.abort();
