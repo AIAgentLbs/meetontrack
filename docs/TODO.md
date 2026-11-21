@@ -30,6 +30,7 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
 - [ ] [MEETONTRACK-171](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-171/): Do not record and call status: edge cases after the redesign reviews.
 - [ ] [MEETONTRACK-172](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-172/): `test_call_plan` fails outside European time zones.
 - [ ] [MEETONTRACK-173](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-173/): Do not record: recorder-owned skip by event under the start lock, then re-enable (off since R35, `server.SKIP_RECORDING_ENABLED`).
+- [ ] [MEETONTRACK-174](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-174/): Home: memo citations, goal links, first-use Google guide focus (last Codex pass on the Home polish, R40).
 - [x] MEETONTRACK-1 (done and verified, closed 2026-11-14): `scripts/check-note-ui.cjs` fails at 0.1.11 and identically at the 0.1.10
   source (`ae27f2b`): `#note-help` shows `--:--` where the test expects the
   fixture's elapsed time `02:44`. Decide whether the hint must render the call
