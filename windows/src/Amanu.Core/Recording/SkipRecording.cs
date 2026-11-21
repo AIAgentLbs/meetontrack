@@ -29,14 +29,15 @@ public static class SkipRecording
     public static readonly TimeSpan Lead = TimeSpan.FromMinutes(5);
 
     /// <summary>True when a stored call covers <paramref name="at"/>.</summary>
-    public static bool Covers(DateTimeOffset at, string? path = null) => Calls(path).Any(call => call.Covers(at));
+    public static bool Covers(DateTimeOffset at, string? path = null) => Calls(path)?.Any(call => call.Covers(at)) == true;
 
     /// <summary>
-    /// The stored calls. A missing, unreadable or malformed file holds none. The file is opened
-    /// only for the read and shared for writing and deletion, because the server replaces it
+    /// The stored calls: none when there is no file, null when the file cannot be read or parsed (a
+    /// skip already holding stays; only a successful read without its call lifts it). The file is
+    /// opened only for the read and shared for writing and deletion, because the server replaces it
     /// with os.replace.
     /// </summary>
-    public static IReadOnlyList<SkipCall> Calls(string? path = null)
+    public static IReadOnlyList<SkipCall>? Calls(string? path = null)
     {
         try
         {
@@ -46,7 +47,7 @@ public static class SkipRecording
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object
                 || !root.TryGetProperty("calls", out var calls)
-                || calls.ValueKind != JsonValueKind.Array) return [];
+                || calls.ValueKind != JsonValueKind.Array) return null;
             var result = new List<SkipCall>();
             foreach (var call in calls.EnumerateArray())
             {
@@ -55,9 +56,13 @@ public static class SkipRecording
             }
             return result;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
             return [];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
         }
     }
 

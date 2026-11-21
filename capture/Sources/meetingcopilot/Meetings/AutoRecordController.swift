@@ -44,7 +44,7 @@ final class AutoRecordController {
     private let loadSettings: () -> Config.AutoRecordSettings
     private let checkMic: (Config.AutoRecordSettings) -> MicActivityMonitor.Result
     private let now: () -> Date
-    private let skips: () -> [SkipRecording.Call]
+    private let skips: () -> [SkipRecording.Call]?
     private let microphone: @MainActor () -> SetupPermissions.State
     private let notifyMicrophoneMissing: @MainActor () -> Void
     private var timer: Timer?
@@ -79,7 +79,7 @@ final class AutoRecordController {
             MicActivityMonitor.check(callApps: $0.callApps, ignoring: $0.ignoreApps)
         },
         now: @escaping () -> Date = Date.init,
-        skips: @escaping () -> [SkipRecording.Call] = { SkipRecording.calls() },
+        skips: @escaping () -> [SkipRecording.Call]? = { SkipRecording.calls() },
         microphone: @escaping @MainActor () -> SetupPermissions.State = SetupPermissions.microphone,
         notifyMicrophoneMissing: @escaping @MainActor () -> Void = Notifications.microphoneMissing
     ) {
@@ -172,13 +172,14 @@ final class AutoRecordController {
 
         // The person chose in MeetOnTrack not to record this call. Manual
         // starts never come through here, so they still work.
+        // nil: the file could not be read, which is not an Undo.
         let calls = skips()
         if let latched = skippedCallStart,
-           !calls.contains(where: { $0.start == latched })
+           calls.map({ !$0.contains(where: { $0.start == latched }) }) == true
             || !mic.active && (micIdleSince.map { now.timeIntervalSince($0) } ?? 0) > settings.stopDelay {
             skippedCallStart = nil
         }
-        if let start = skippedCallStart ?? calls.first(where: { $0.covers(now) })?.start {
+        if let start = skippedCallStart ?? calls?.first(where: { $0.covers(now) })?.start {
             if mic.active { skippedCallStart = start }
             lastDecision = localised("skipped: chosen in MeetOnTrack", "пропуск: выбрано в MeetOnTrack")
             return

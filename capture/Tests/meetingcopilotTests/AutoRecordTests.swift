@@ -349,7 +349,7 @@ struct NoCallAudioStopTests {
     func testUndoLiftsActiveSkip() {
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         var clock = start.addingTimeInterval(-2 * 60)
-        var stored = [SkipRecording.Call(start: start, end: start.addingTimeInterval(30 * 60))]
+        var stored: [SkipRecording.Call]? = [SkipRecording.Call(start: start, end: start.addingTimeInterval(30 * 60))]
         var starts = 0
         var settings = Config.AutoRecordSettings()
         settings.startDelay = 10
@@ -371,6 +371,11 @@ struct NoCallAudioStopTests {
         #expect(starts == 0)
         // The server ends the skip earlier (a call booked after it): the same call, still skipped.
         stored = [SkipRecording.Call(start: start, end: clock)]
+        controller.tick()
+        clock.addTimeInterval(5)
+        #expect(starts == 0)
+        // The file cannot be read for a moment: that is not an Undo, the skip holds.
+        stored = nil
         controller.tick()
         clock.addTimeInterval(5)
         #expect(starts == 0)
@@ -399,9 +404,12 @@ struct NoCallAudioStopTests {
         #expect(SkipRecording.covers(start.addingTimeInterval(30 * 60 - 1), at: url))
         #expect(!SkipRecording.covers(start.addingTimeInterval(30 * 60), at: url))
 
+        #expect(SkipRecording.calls(at: url) == [SkipRecording.Call(start: start, end: start.addingTimeInterval(30 * 60))])
         try Data("not json".utf8).write(to: url)
         #expect(!SkipRecording.covers(start, at: url))
+        #expect(SkipRecording.calls(at: url) == nil)  // unreadable is not "no skips"
         #expect(!SkipRecording.covers(start, at: folder.appendingPathComponent("missing.json")))
+        #expect(SkipRecording.calls(at: folder.appendingPathComponent("missing.json")) == [])
     }
 }
 

@@ -27,8 +27,9 @@ public sealed class SkipRecordingTests
         Assert.Equal(new[] { new SkipCall(Start, Start.AddMinutes(30)) }, SkipRecording.Calls(path));
 
         File.WriteAllText(path, "not json");
-        Assert.Empty(SkipRecording.Calls(path));
+        Assert.Null(SkipRecording.Calls(path)); // unreadable is not "no skips"
         Assert.False(SkipRecording.Covers(Start, path));
         Assert.False(SkipRecording.Covers(Start, Path.Combine(root.Path, "missing.json")));
+        Assert.Empty(SkipRecording.Calls(Path.Combine(root.Path, "missing.json"))!);
     }
 }

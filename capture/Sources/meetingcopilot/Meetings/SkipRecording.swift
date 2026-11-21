@@ -23,12 +23,14 @@ enum SkipRecording {
         }
     }
 
-    /// The stored calls. A missing, unreadable or malformed file holds none.
-    static func calls(at url: URL = path) -> [Call] {
+    /// The stored calls: none when there is no file, nil when the file cannot be read or parsed
+    /// (a skip already holding stays; only a successful read without its call lifts it).
+    static func calls(at url: URL = path) -> [Call]? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
         guard let data = try? Data(contentsOf: url),
               let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let calls = document["calls"] as? [[String: Any]]
-        else { return [] }
+        else { return nil }
         return calls.compactMap { call in
             guard let start = instant(call["start"]), let end = instant(call["end"]) else { return nil }
             return Call(start: start, end: end)
@@ -37,7 +39,7 @@ enum SkipRecording {
 
     /// True when a stored call covers `now`.
     static func covers(_ now: Date, at url: URL = path) -> Bool {
-        calls(at: url).contains { $0.covers(now) }
+        (calls(at: url) ?? []).contains { $0.covers(now) }
     }
 
     private static func instant(_ value: Any?) -> Date? {

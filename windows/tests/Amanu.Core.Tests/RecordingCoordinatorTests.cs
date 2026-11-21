@@ -302,7 +302,7 @@ public sealed class RecordingCoordinatorTests
     public async Task Undo_lifts_an_active_skip_and_a_new_end_keeps_it()
     {
         using var root = new TemporaryDirectory();
-        IReadOnlyList<SkipCall> stored = [new SkipCall(Started, Started.AddMinutes(30))];
+        IReadOnlyList<SkipCall>? stored = [new SkipCall(Started, Started.AddMinutes(30))];
         var coordinator = Coordinator(root.Path, new InspectableCapture(), () => stored);
 
         var at = Started.AddMinutes(-2);
@@ -315,14 +315,19 @@ public sealed class RecordingCoordinatorTests
         await coordinator.ObserveAsync(Observation(at, "Zoom.exe"));
         Assert.False(coordinator.State.IsRecording);
 
+        // The file cannot be read for a moment: that is not an Undo, the skip holds.
+        stored = null;
+        await coordinator.ObserveAsync(Observation(at.AddSeconds(5), "Zoom.exe"));
+        Assert.False(coordinator.State.IsRecording);
+
         // Undo removes the call from the file: the call app still holds the mic, and recording starts.
         stored = [];
-        await coordinator.ObserveAsync(Observation(at.AddSeconds(5), "Zoom.exe"));
+        await coordinator.ObserveAsync(Observation(at.AddSeconds(10), "Zoom.exe"));
         Assert.True(coordinator.State.IsRecording);
     }
 
     private static RecordingCoordinator Coordinator(
-        string root, InspectableCapture capture, Func<IReadOnlyList<SkipCall>>? skips = null)
+        string root, InspectableCapture capture, Func<IReadOnlyList<SkipCall>?>? skips = null)
     {
         var options = new AutoRecordOptions(
             Enabled: true,
