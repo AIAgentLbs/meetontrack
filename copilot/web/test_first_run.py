@@ -86,7 +86,7 @@ class CheckAITests(unittest.TestCase):
             self.assertEqual(readiness.snapshot()["purposes"]["live_analysis"]["state"], "unchecked")
             result = readiness.check()
             options = {call[1][:20]: call[2] for call in adapter.calls}
-            self.assertEqual(len(adapter.calls), 3)  # one text, one image, one file probe shared by seven tasks
+            self.assertEqual(len(adapter.calls), 3)  # one text, one image, one file probe shared by eight tasks
             self.assertEqual({call[0]["model"] for call in adapter.calls}, {"m1"})
             self.assertIn("roots", next(o for p, o in options.items() if p.startswith("Read the file")))
             self.assertTrue(next(o for p, o in options.items() if p.startswith("Which colour")).get("image"))

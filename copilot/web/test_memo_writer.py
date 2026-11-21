@@ -1,11 +1,15 @@
+import io
 import json
 import subprocess
 import tempfile
 import threading
 import unittest
+from contextlib import redirect_stdout
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
+
+import ai_providers
 
 from calendar_meetings import CalendarMeetings
 from call_plan import CallPlans
@@ -76,7 +80,21 @@ class DetectionTests(unittest.TestCase):
 
 
 class FakeAI:
-    pass
+    def __init__(self, answer="", state="ready"):
+        self.answer, self.state, self.error, self.calls, self.gate, self.entered = answer, state, None, [], None, None
+
+    def resolve(self, purpose=""):
+        return ai_providers.Ticket(purpose, self.state, "reason", {"provider": "fake", "model": "m1"}, "k", "")
+
+    def run(self, purpose, prompt, ticket=None, **options):
+        self.calls.append((purpose, prompt, options))
+        if self.entered:
+            self.entered.set()
+        if self.gate:
+            self.gate.wait(5)
+        if self.error:
+            raise self.error
+        return ai_providers.Reply(self.answer, "m1", "")
 
 
 NOW = datetime.now().astimezone()
@@ -428,7 +446,26 @@ GOOD = {"goal": {"text": "Agree the pilot scope\nand more", "sources": ["S2"]},
         "risks": []}
 
 
+ANSWER_ERRORS = {"memo answer is not a JSON object", "memo answer has a malformed line", "memo answer has no cited goal",
+                 "memo answer questions is not a list", "memo answer risks is not a list"}
+
+
 class AnswerTests(unittest.TestCase):
+    def test_ai_written_citations_and_markup_are_stripped(self):
+        answer = parse_answer(json.dumps({
+            **GOOD, "goal": {"text": "## Agree the pilot scope [S9]", "sources": ["S2"]},
+            "questions": [{"text": "- Who signs off? [S1, S2]", "sources": ["S1"]},
+                          {"text": "* Is the budget set?", "sources": ["S1"]}, {"text": "[S1]", "sources": ["S1"]}],
+            "risks": [{"text": "#Budget not confirmed [S1][S2]", "sources": ["S1"]}]}), SOURCES)
+        self.assertEqual(answer["goal"]["text"], "Agree the pilot scope")
+        self.assertEqual([q["text"] for q in answer["questions"]], ["Who signs off?", "Is the budget set?"])
+        self.assertEqual(answer["risks"][0]["text"], "Budget not confirmed")
+        plan, _ = build_plan("ev1", MEETING, answer, SOURCES, "en")
+        self.assertTrue(plan["memo_markdown"].startswith("**Meeting goal.** Agree the pilot scope [S2]\n"))
+        self.assertIn("\n1. Who signs off? [S1]\n", plan["memo_markdown"])
+        self.assertIn("\n- Budget not confirmed [S1]", plan["memo_markdown"])
+        self.assertNotIn("S9", plan["memo_markdown"])
+
     def test_parse_trims_to_contract_limits(self):
         answer = parse_answer("noise " + json.dumps(GOOD), SOURCES)
         self.assertEqual(answer["goal"]["text"], "Agree the pilot scope")
@@ -451,7 +488,7 @@ class AnswerTests(unittest.TestCase):
             with self.subTest(text=text):
                 with self.assertRaises(ValueError) as caught:
                     parse_answer(text, SOURCES)
-                self.assertNotIn("Example", str(caught.exception))
+                self.assertIn(str(caught.exception), ANSWER_ERRORS)  # a fixed message: never answer text
 
     def test_build_plan_is_valid_for_call_plans_and_cites_every_line(self):
         answer = parse_answer(json.dumps({**GOOD, "risks": [{"text": "Budget not confirmed", "sources": ["S1", "S2"]}]}),
@@ -505,6 +542,287 @@ class AnswerTests(unittest.TestCase):
         self.assertIn('"S1"', english.rpartition("Sources: ")[2])
         self.assertIn("anna@example-llc.com", english)
         self.assertNotIn("me@example.org", english)
+
+
+RAW = [{key: s[key] for key in ("kind", "label", "text")} for s in SOURCES]
+EV_START = NOW + timedelta(hours=5)
+
+
+def idle():
+    return False
+
+
+def meeting(event_id, start, external=True, plans=()):
+    return {"start": start.isoformat(timespec="seconds"), "end": (start + timedelta(minutes=30)).isoformat(timespec="seconds"),
+            "title": "Pilot review with Example LLC", "link": "https://meet.example.com/abc",
+            "attendees": MEETING_ATTENDEES, "event_id": event_id, "external": external, "plans": list(plans)}
+
+
+class FakeGather:
+    def __init__(self, result):
+        self.result, self.count, self.seen, self.fail = result, 0, [], set()
+
+    def __call__(self, meeting):
+        self.count += 1
+        self.seen.append(meeting["event_id"])
+        if meeting["event_id"] in self.fail:
+            raise ValueError("start cannot be parsed")
+        return [dict(s) for s in self.result]
+
+
+class LoopTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.lang = "en"
+        self.ai, self.gather, self.writer = self.fresh()
+        self.agenda = {"meetings": [meeting("ev1", EV_START)]}
+        self.out = io.StringIO()
+
+    def fresh(self, name="memos.json"):
+        ai, gather = FakeAI(json.dumps(GOOD)), FakeGather(RAW)
+        return ai, gather, MemoWriter(self.root / name, ai, gather, lambda: self.lang)
+
+    def tick(self, now, busy=idle, writer=None, agenda=None):
+        with redirect_stdout(self.out):
+            (writer or self.writer).tick(agenda or self.agenda, now, busy)
+
+    def test_external_meeting_gets_one_run_per_signature(self):
+        self.tick(NOW)
+        self.tick(NOW + timedelta(minutes=5))
+        self.assertEqual(len(self.ai.calls), 1)
+        self.assertEqual(self.gather.count, 1)
+        e = self.writer.events["ev1"]
+        self.assertEqual((e["state"], e["provider"], e["model"]), ("ready", "fake", "m1"))
+        self.assertEqual(self.ai.calls[0][0], "memo")
+        self.assertEqual(self.ai.calls[0][2]["web"], False)
+        self.assertEqual(self.ai.calls[0][2]["timeout"], MemoWriter.AI_TIMEOUT)
+        self.assertIn('"id": "S2"', self.ai.calls[0][1])
+        self.assertEqual((e["written_at"], e["attempts"], e["retry_at"], e["rechecked"]),
+                         (NOW.isoformat(timespec="seconds"), 0, None, False))
+        self.assertEqual([p["event_id"] for p in self.writer.plans()], ["ev1"])
+        self.assertEqual(self.out.getvalue(), "")
+
+    def test_internal_and_idless_meetings_are_skipped(self):
+        agenda = {"meetings": [meeting("ev1", EV_START, external=False), meeting("", EV_START),
+                               meeting("past", NOW - timedelta(minutes=1)), {**meeting("bad", EV_START), "start": "soon"},
+                               {**meeting("none", EV_START), "start": None}]}
+        self.tick(NOW, agenda=agenda)
+        self.assertEqual((self.gather.count, self.ai.calls, self.writer.events), (0, [], {}))
+
+    def test_file_plan_meeting_is_not_prepared(self):
+        self.tick(NOW, agenda={"meetings": [meeting("ev1", EV_START, plans=[{"written_by": "file", "id": "p1"}])]})
+        self.assertEqual((self.gather.count, self.ai.calls, self.writer.events), (0, [], {}))
+
+    def test_no_run_while_a_call_is_live(self):
+        self.tick(NOW, busy=lambda: True)
+        self.assertEqual((self.ai.calls, self.gather.seen, self.writer.events), ([], [], {}))
+        # A call starts between the gather and the run: the entry goes back to what it was, the tick stops.
+        self.agenda["meetings"].append(meeting("ev2", EV_START + timedelta(hours=1)))
+        answers = iter([False, False, True])
+        self.tick(NOW, busy=lambda: next(answers))
+        self.assertEqual((self.ai.calls, self.gather.seen, self.writer.events), ([], ["ev1"], {}))
+        self.tick(NOW)
+        self.tick(NOW + timedelta(hours=3, minutes=1), busy=iter([False, True]).__next__)  # recheck not gathered
+        self.assertEqual(self.gather.count, 3)
+        self.assertFalse(self.writer.events["ev1"]["rechecked"])
+
+    def test_no_sources_means_no_run(self):
+        self.gather.result = []
+        self.tick(NOW)
+        self.assertEqual((self.writer.events["ev1"]["state"], self.ai.calls), ("nothing_found", []))
+        self.assertEqual(self.writer.memo_for(self.agenda["meetings"][0], [], NOW)["state"], "nothing_found")
+        self.tick(NOW + timedelta(minutes=5))
+        self.assertEqual(self.gather.count, 1)
+
+    def test_recheck_two_hours_before_runs_only_if_sources_changed(self):
+        self.tick(EV_START - timedelta(hours=5))
+        self.tick(EV_START - timedelta(hours=1, minutes=59))
+        self.assertTrue(self.writer.events["ev1"]["rechecked"])
+        self.tick(EV_START - timedelta(hours=1))
+        self.assertEqual(len(self.ai.calls), 1)
+        self.assertEqual(self.gather.count, 2)
+        # The sources differ at the recheck: one more run, then no further recheck.
+        self.writer.events.clear()
+        self.tick(EV_START - timedelta(hours=5))
+        self.gather.result = [RAW[0], {**RAW[1], "text": "Agreed a three-week pilot"}]
+        self.tick(EV_START - timedelta(hours=1, minutes=59))
+        self.tick(EV_START - timedelta(hours=1))
+        self.assertEqual(self.writer.events["ev1"]["state"], "ready")
+        self.assertEqual(len(self.ai.calls), 3)
+        self.assertEqual(self.gather.count, 4)
+
+    def test_language_switch_rebuilds_at_the_recheck(self):
+        self.tick(EV_START - timedelta(hours=5))
+        self.lang = "ru"
+        self.tick(EV_START - timedelta(hours=1, minutes=59))
+        self.assertEqual(len(self.ai.calls), 2)
+        self.assertEqual(self.writer.events["ev1"]["language"], "ru")
+        self.assertIn("**Цель встречи.**", self.writer.plans()[0]["memo_markdown"])
+
+    def test_first_run_inside_two_hours_needs_no_recheck(self):
+        self.tick(EV_START - timedelta(hours=1))
+        self.tick(EV_START - timedelta(minutes=59))
+        self.assertEqual((len(self.ai.calls), self.gather.count), (1, 1))
+
+    def test_malformed_answer_fails_and_shows_no_memo(self):
+        self.ai.answer = "not json"
+        self.tick(NOW)
+        e = self.writer.events["ev1"]
+        self.assertEqual((e["state"], e["reason"], e["plan"]), ("failed", "ai_no_answer", None))
+        self.assertEqual(self.writer.plans(), [])
+
+    def test_failure_reasons(self):
+        cases = [("needs_choice", None, "ai_needs_choice", 0),
+                 ("ready", ai_providers.AIChoiceError("needs_choice", "Choose an AI."), "ai_needs_choice", 1),
+                 ("ready", TimeoutError(), "timeout", 1),
+                 ("ready", RuntimeError("the call timed out after 300 seconds"), "timeout", 1),
+                 ("ready", OSError("disk"), "error", 1), ("ready", RuntimeError("boom"), "error", 1)]
+        for n, (state, error, reason, calls) in enumerate(cases):
+            with self.subTest(reason=reason, error=error):
+                ai, _, writer = self.fresh(f"memos-{n}.json")
+                ai.state, ai.error = state, error
+                self.tick(NOW, writer=writer)
+                e = writer.events["ev1"]
+                self.assertEqual((e["state"], e["reason"], len(ai.calls)), ("failed", reason, calls))
+                self.assertEqual(writer.memo_for(self.agenda["meetings"][0], [], NOW)["reason"], reason)
+
+    def test_needs_choice_runs_as_soon_as_an_ai_is_chosen(self):
+        self.ai.state = "needs_choice"
+        self.tick(NOW)
+        e = self.writer.events["ev1"]
+        self.assertEqual((e["state"], e["reason"], self.ai.calls), ("failed", "ai_needs_choice", []))
+        self.tick(NOW + timedelta(minutes=1))
+        self.assertEqual((self.writer.events["ev1"]["state"], self.ai.calls, self.gather.count), ("failed", [], 1))
+        self.ai.state = "ready"
+        self.tick(NOW + timedelta(minutes=2))
+        self.assertEqual(len(self.ai.calls), 1)
+        self.assertEqual(self.writer.events["ev1"]["state"], "ready")
+
+    def test_single_retry_after_twenty_minutes(self):
+        self.ai.error = RuntimeError("boom")
+        self.tick(NOW)
+        self.assertEqual(self.writer.events["ev1"]["retry_at"], (NOW + timedelta(minutes=20)).isoformat(timespec="seconds"))
+        self.tick(NOW + timedelta(minutes=19))
+        self.assertEqual(len(self.ai.calls), 1)
+        self.tick(NOW + timedelta(minutes=20))
+        self.assertEqual(len(self.ai.calls), 2)
+        self.assertIsNone(self.writer.events["ev1"]["retry_at"])
+        self.tick(NOW + timedelta(hours=1))
+        self.assertEqual(len(self.ai.calls), 2)
+        self.assertEqual(self.out.getvalue(), "memo ev1: failed error\n" * 2)
+
+    def test_failed_gather_is_an_error_with_one_retry_and_the_tick_goes_on(self):
+        self.agenda["meetings"].append(meeting("ev2", EV_START + timedelta(hours=1)))
+        self.gather.fail = {"ev1"}
+        self.tick(NOW)
+        e = self.writer.events["ev1"]
+        self.assertEqual((e["state"], e["reason"], e["retry_at"]),
+                         ("failed", "error", (NOW + timedelta(minutes=20)).isoformat(timespec="seconds")))
+        self.assertEqual(self.writer.events["ev2"]["state"], "ready")
+        self.assertEqual(len(self.ai.calls), 1)
+        self.tick(NOW + timedelta(minutes=20))
+        self.tick(NOW + timedelta(hours=1))
+        self.assertEqual(self.gather.seen, ["ev1", "ev2", "ev1"])
+        self.assertEqual(self.writer.events["ev1"]["retry_at"], None)
+
+    def test_failed_recheck_gather_keeps_the_memo_and_runs_nothing(self):
+        self.tick(EV_START - timedelta(hours=5))
+        self.gather.fail = {"ev1"}
+        self.tick(EV_START - timedelta(hours=1, minutes=59))
+        self.tick(EV_START - timedelta(hours=1, minutes=30))
+        e = self.writer.events["ev1"]
+        self.assertEqual((e["state"], e["rechecked"], len(self.ai.calls), self.gather.count), ("ready", True, 1, 2))
+        self.assertEqual(len(self.writer.plans()), 1)
+        self.assertEqual(self.out.getvalue(), "memo ev1: failed error\n")
+
+    def test_preparing_entry_of_a_meeting_no_longer_prepared_is_removed(self):
+        for changed in ({"external": False}, {"plans": [{"written_by": "file", "id": "p1"}]}):
+            with self.subTest(changed=changed):
+                self.writer.rebuild("ev1", self.agenda)
+                self.assertEqual(self.writer.events["ev1"]["state"], "preparing")
+                self.tick(NOW, agenda={"meetings": [{**self.agenda["meetings"][0], **changed}]})
+                self.assertNotIn("ev1", self.writer.events)
+                self.assertEqual((self.gather.count, self.ai.calls), (0, []))
+                self.assertNotIn("ev1", json.loads((self.root / "memos.json").read_text())["events"])
+
+    def test_rebuild_forces_one_run_with_same_sources(self):
+        self.tick(NOW)
+        self.writer.rebuild("ev1", self.agenda)
+        self.assertEqual(self.writer.memo_for(self.agenda["meetings"][0], [])["state"], "preparing")
+        self.assertTrue(self.writer.wake.is_set())
+        self.assertEqual(self.writer.plans(), [])
+        self.tick(NOW)
+        self.tick(NOW)
+        self.assertEqual(len(self.ai.calls), 2)
+        e = self.writer.events["ev1"]
+        self.assertEqual((e["state"], e["rebuild"]), ("ready", False))
+
+    def test_rebuild_rejects_unknown_internal_or_file_meetings(self):
+        agenda = {"meetings": [meeting("int", EV_START, external=False),
+                               meeting("file", EV_START, plans=[{"written_by": "file", "id": "p1"}]),
+                               meeting("past", NOW - timedelta(hours=1))]}
+        for event_id in ("nope", "", "int", "file", "past"):
+            with self.subTest(event_id=event_id):
+                with self.assertRaises(ValueError):
+                    self.writer.rebuild(event_id, agenda)
+        self.assertEqual(self.writer.events, {})
+        self.assertFalse(self.writer.wake.is_set())
+
+    def test_one_run_at_a_time(self):
+        self.ai.gate, self.ai.entered = threading.Event(), threading.Event()
+        worker = threading.Thread(target=self.writer.tick, args=(self.agenda, NOW, idle))
+        worker.start()
+        try:
+            self.assertTrue(self.ai.entered.wait(5))
+            self.tick(NOW)
+            self.assertEqual((len(self.ai.calls), self.gather.count), (1, 1))
+        finally:
+            self.ai.gate.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(self.writer.events["ev1"]["state"], "ready")
+
+    def test_tick_refreshes_start_of_rescheduled_event(self):
+        self.tick(NOW)
+        moved = EV_START + timedelta(hours=1)
+        agenda = {"meetings": [{**meeting("ev1", moved), "title": "Pilot review moved", "link": "https://meet.example.com/new"}]}
+        self.tick(NOW + timedelta(minutes=1), agenda=agenda)
+        self.assertEqual(len(self.ai.calls), 1)
+        e = self.writer.events["ev1"]
+        self.assertEqual((e["start"], e["plan"]["starts_at"], e["plan"]["title"], e["plan"]["meeting_link"]),
+                         (moved.isoformat(timespec="seconds"),) * 2 + ("Pilot review moved", "https://meet.example.com/new"))
+        self.assertEqual(json.loads((self.root / "memos.json").read_text())["events"]["ev1"]["plan"]["title"],
+                         "Pilot review moved")
+
+    def test_log_lines_name_only_event_and_state(self):
+        self.ai.error = RuntimeError("Pilot review with Example LLC: Anna Petrova <anna@example-llc.com> timed out")
+        self.tick(NOW)
+        self.assertEqual(self.out.getvalue(), "memo ev1: failed timeout\n")
+        for private in ("Pilot", "Anna", "anna@", "Example"):
+            self.assertNotIn(private, self.out.getvalue())
+
+    def test_loop_ticks_on_wake_survives_errors_and_stops(self):
+        stop, calls = threading.Event(), []
+
+        def agenda():
+            calls.append(1)
+            self.writer.wake.set()  # the next turn does not wait
+            if len(calls) == 1:
+                raise RuntimeError("Anna Petrova")
+            if len(calls) == 3:
+                stop.set()
+            return self.agenda
+
+        self.writer.wake.set()
+        with redirect_stdout(self.out):
+            worker = threading.Thread(target=self.writer.loop, args=(stop, idle, agenda))
+            worker.start()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual((len(calls), len(self.ai.calls)), (3, 1))
+        self.assertEqual(self.out.getvalue(), "memo loop: RuntimeError\n")
 
 
 if __name__ == "__main__":

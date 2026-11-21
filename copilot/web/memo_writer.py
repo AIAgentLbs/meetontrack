@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
+from ai_providers import AIChoiceError
 from archive import _atomic_json, _json
 from google_context import json_payload
 from twenty_crm import PUBLIC_DOMAINS
@@ -173,6 +174,7 @@ class MemoWriter:
     def __init__(self, path: Path, ai, gather: Callable[[dict], list[dict]], language: Callable[[], str]) -> None:
         self.path, self.ai, self.gather, self.language = path, ai, gather, language
         self.lock = threading.Lock()
+        self.run_lock = threading.Lock()
         self.wake = threading.Event()
         payload = _json(path, {})
         events = payload.get("events") if isinstance(payload, dict) else None
@@ -203,6 +205,151 @@ class MemoWriter:
                 self.events.clear()
                 self.events.update(before)
                 raise
+
+    def _drop(self, event_id: str) -> None:
+        with self.lock:
+            if (entry := self.events.pop(event_id, None)) is None:
+                return
+            try:
+                _atomic_json(self.path, {"version": 1, "events": self.events})
+            except Exception:
+                self.events[event_id] = entry
+                raise
+
+    def _upcoming(self, agenda: dict, now: datetime) -> dict[str, tuple[datetime, dict]]:
+        """Event id -> (start, meeting) of the agenda meetings the app prepares: external, with an id and
+        a future start, without a file plan."""
+        found = {}
+        for meeting in agenda.get("meetings") or []:
+            if not isinstance(meeting, dict):
+                continue
+            event_id, start = str(meeting.get("event_id") or ""), moment(meeting.get("start"))
+            if (event_id and meeting.get("external") and start is not None and start > now
+                    and not any(isinstance(p, dict) and p.get("written_by") != "app" for p in meeting.get("plans") or [])):
+                found.setdefault(event_id, (start, meeting))
+        return found
+
+    def tick(self, agenda: dict, now: datetime, busy: Callable[[], bool]) -> None:
+        """One pass over the agenda. Spend guard: at most one AI run per event and source signature (a rebuild
+        or the single retry excepted), nothing gathered or run while a call is live, one run at a time."""
+        if busy() or not self.run_lock.acquire(blocking=False):
+            return
+        try:
+            upcoming = self._upcoming(agenda, now)
+            for meeting in agenda.get("meetings") or []:  # stopped being external, or got a file plan
+                event_id = str(meeting.get("event_id") or "") if isinstance(meeting, dict) else ""
+                with self.lock:
+                    stale = event_id not in upcoming and (self.events.get(event_id) or {}).get("state") == "preparing"
+                if stale:
+                    self._drop(event_id)
+            for event_id, (start, meeting) in sorted(upcoming.items(), key=lambda item: item[1][0]):
+                with self.lock:
+                    entry = dict(self.events.get(event_id) or {})
+                if entry:
+                    entry = self._refresh(event_id, entry, meeting)
+                state, retry = entry.get("state"), moment(entry.get("retry_at"))
+                if state == "failed" and entry.get("reason") == "ai_needs_choice":
+                    if self.ai.resolve("memo").state != "ready":
+                        continue
+                    recheck = False
+                elif not entry or entry.get("rebuild") or state == "failed" and retry is not None and retry <= now:
+                    recheck = False
+                elif state in ("ready", "nothing_found") and not entry.get("rechecked") and start - now <= self.RECHECK:
+                    recheck = True
+                else:
+                    continue
+                if not self._prepare(event_id, meeting, entry, start, now, busy, recheck):
+                    return
+        finally:
+            self.run_lock.release()
+
+    def _refresh(self, event_id: str, entry: dict, meeting: dict) -> dict:
+        """A rescheduled or renamed event: its stored start and plan follow the calendar, without a run."""
+        values = {"start": str(meeting.get("start") or "")}
+        if isinstance(plan := entry.get("plan"), dict):
+            values["plan"] = {**plan, "starts_at": values["start"], "title": str(meeting.get("title") or ""),
+                              "meeting_link": str(meeting.get("link") or "")}
+        if all(entry.get(key) == value for key, value in values.items()):
+            return entry
+        self._update(event_id, **values)
+        return {**entry, **values}
+
+    def _prepare(self, event_id: str, meeting: dict, before: dict, start: datetime, now: datetime,
+                 busy: Callable[[], bool], recheck: bool) -> bool:
+        """Gather the sources and run the AI when they call for it; False when a live call stopped the tick."""
+        stamp = now.isoformat(timespec="seconds")
+        if busy():
+            return False
+        if not recheck:
+            self._update(event_id, state="preparing", since=stamp, start=str(meeting.get("start") or ""))
+        try:
+            sources = [{**source, "id": f"S{n}"} for n, source in enumerate(self.gather(meeting), 1)]
+            language = str(self.language())
+        except Exception:
+            if recheck:  # the memo stays as it is: a recheck gathers once and never forces a run
+                print(f"memo {event_id}: failed error", flush=True)
+                self._update(event_id, rechecked=True)
+            else:
+                self._fail(event_id, before, now, "error")
+            return True
+        signature = source_signature(sources, language)
+        if recheck:
+            self._update(event_id, rechecked=True)
+            if signature == before.get("signature"):
+                return True
+        settled = {"since": None, "reason": "", "attempts": 0, "rebuild": False, "retry_at": None,
+                   "signature": signature, "language": language, "rechecked": start - now <= self.RECHECK}
+        if not sources:
+            self._update(event_id, state="nothing_found", plan=None, **settled)
+            return True
+        if busy():
+            if before:
+                self._update(event_id, **before)
+            else:
+                self._drop(event_id)
+            return False
+        reply = None
+        try:
+            ticket = self.ai.resolve("memo")
+            if ticket.state != "ready":
+                raise AIChoiceError(ticket.state, ticket.reason)
+            reply = self.ai.run("memo", memo_prompt(meeting, sources, language), ticket=ticket, web=False,
+                                timeout=self.AI_TIMEOUT)
+            plan, digest = build_plan(event_id, meeting, parse_answer(reply.text, sources), sources, language)
+        except Exception as error:
+            self._fail(event_id, before, now, _reason(error, replied=reply is not None))
+            return True
+        self._update(event_id, state="ready", plan=plan, digest=digest, provider=ticket.choice["provider"],
+                     model=reply.model or ticket.choice["model"], written_at=stamp, **settled)
+        return True
+
+    def _fail(self, event_id: str, before: dict, now: datetime, reason: str) -> None:
+        """One automatic retry after the first failure; a missing AI choice waits for the choice instead."""
+        print(f"memo {event_id}: failed {reason}", flush=True)
+        attempts = 0 if reason == "ai_needs_choice" else int(before.get("attempts") or 0) + 1
+        retry_at = (now + self.RETRY).isoformat(timespec="seconds") if attempts == 1 else None
+        self._update(event_id, state="failed", reason=reason, attempts=attempts, retry_at=retry_at, rebuild=False,
+                     since=None)
+
+    def rebuild(self, event_id: str, agenda: dict) -> None:
+        now = datetime.now().astimezone()
+        found = self._upcoming(agenda, now).get(str(event_id or ""))
+        if found is None:
+            raise ValueError("not an upcoming external meeting without a file plan")
+        self._update(event_id, state="preparing", since=now.isoformat(timespec="seconds"), rebuild=True, attempts=0,
+                     retry_at=None, start=str(found[1].get("start") or ""))
+        self.wake.set()
+
+    def loop(self, stop: threading.Event, busy: Callable[[], bool], agenda: Callable[[], dict]) -> None:
+        while not stop.is_set():
+            self.wake.wait(self.TICK)
+            self.wake.clear()
+            if stop.is_set():
+                break
+            try:
+                self.tick(agenda(), datetime.now().astimezone(), busy)
+            except Exception as error:
+                print(f"memo loop: {type(error).__name__}", flush=True)
 
     def plans(self) -> list[dict]:
         with self.lock:
@@ -242,6 +389,16 @@ class MemoWriter:
                 "source_count": int(digest.get("source_count") or 0),
                 "plan_id": plan_id, "written_by": written_by,
                 "since": since, "reason": reason, "retry_at": retry_at}
+
+
+def _reason(error: Exception, replied: bool) -> str:
+    if isinstance(error, AIChoiceError):
+        return "ai_needs_choice"
+    if replied and isinstance(error, ValueError):
+        return "ai_no_answer"
+    if isinstance(error, TimeoutError) or "timed out" in str(error):
+        return "timeout"
+    return "error"
 
 
 PROMPTS = {"en": """You prepare a short memo the person reads in five seconds before a call.
@@ -295,6 +452,9 @@ def memo_prompt(meeting: dict, sources: list[dict], language: str) -> str:
     return re.sub(r"\{(meeting|sources)\}", lambda m: values[m[1]], PROMPTS.get(language, PROMPTS["en"]))
 
 
+AI_MARKUP = re.compile(r"^(?:#+|[-*](?=\s))\s*|(?:\s*\[S\d+(?:\s*,\s*S\d+)*\])+$")
+
+
 def _line(value: object, known: set[str], limit: int) -> dict | None:
     """A cited line trimmed to one line; None when it is null or cites no known source."""
     if value is None:
@@ -302,7 +462,8 @@ def _line(value: object, known: set[str], limit: int) -> dict | None:
     if not isinstance(value, dict) or not isinstance(value.get("text"), str) or not isinstance(value.get("sources"), list):
         raise ValueError("memo answer has a malformed line")
     cited = list(dict.fromkeys(s for s in value["sources"] if isinstance(s, str) and s in known))
-    text = one_line(value["text"], limit)
+    # The writer cites by itself, and AI text never becomes a heading or a list line.
+    text = one_line(AI_MARKUP.sub("", one_line(value["text"], 10_000)), limit)
     return {"text": text, "sources": cited} if text and cited else None
 
 
