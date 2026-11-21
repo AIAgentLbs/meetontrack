@@ -27,6 +27,8 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
   Design: [call flow redesign](superpowers/specs/2026-11-20-call-flow-redesign-design.md). Accepted at 30/40 or more on the Impeccable critique.
 - [ ] [MEETONTRACK-167](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-167/): `server.py --self-test` fails with real user settings: the self-test stand-in AI does not accept `planning=` when Google context is on.
 - [ ] [MEETONTRACK-168](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-168/): Live-call memo binding, rare edge cases in `copilot/web/call_plan.py` (alias-only file swap, rescheduled start, calls across midnight, a prep file attached to the neighbouring meeting with the same contact).
+- [ ] [MEETONTRACK-171](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-171/): Do not record and call status: edge cases after the redesign reviews.
+- [ ] [MEETONTRACK-172](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-172/): `test_call_plan` fails outside European time zones.
 - [x] MEETONTRACK-1 (done and verified, closed 2026-11-14): `scripts/check-note-ui.cjs` fails at 0.1.11 and identically at the 0.1.10
   source (`ae27f2b`): `#note-help` shows `--:--` where the test expects the
   fixture's elapsed time `02:44`. Decide whether the hint must render the call

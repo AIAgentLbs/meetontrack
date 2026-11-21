@@ -25,7 +25,7 @@ function homeBreakable(tag, className, value) {
 const homePlain = line => line.replace(/^(?:[-*+]|\d+[.)])\s+/, "")
   .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|__|`/g, "").trim();
 
-// The memo the server will send (plan 2), derived meanwhile from a prepared plan's Markdown.
+// Only a fallback when the server sends no memo block: a digest derived from a prepared plan's Markdown.
 function memoFromPlans(meeting) {
   const plan = (meeting.plans || []).find(item => item.has_memo);
   if (!plan) return { state: (meeting.attendees || []).some(person => !person.self) ? "nothing_found" : "none" };
