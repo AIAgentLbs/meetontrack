@@ -137,6 +137,9 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
 .home .ql.inline { display: inline; min-height: 0; padding: 7px 0; white-space: normal; text-align: left; }
 /* Link-style actions on one line read at one size. */
 .home .actions :is(a.ql, button.ql, button.quiet) { font-size: 15px; line-height: 1.4; }
+/* No rows: one block with a title, one line and at most one action. */
+.empty { padding: 28px 0; }
+.empty h2 { font-size: 18px; font-weight: 650; line-height: 1.4; }
 .memo-details { display: grid; gap: 8px; margin-top: 16px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); overflow-wrap: anywhere; }
 .memo-details summary { min-height: 32px; font-weight: 600; cursor: pointer; }
 .memo-details details p { margin: 4px 0; }

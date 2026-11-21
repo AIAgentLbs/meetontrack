@@ -11,6 +11,7 @@ const { states, open } = require('./home-fixtures.cjs');
 const shots = fs.mkdtempSync(path.join(os.tmpdir(), 'home-ui-'));
 const scriptErrors = page => page.errors.filter(error => /(shell|home)\.js/.test(error));
 const texts = (page, selector) => page.locator(selector).allInnerTexts();
+const EMPTY = ['calendar_off', 'tool_missing', 'no_meetings', 'load_failed'];
 const rowOf = (page, title) => page.locator('#home .row', { has: page.locator('.mtitle', { hasText: title }) });
 
 // Rules for every fixture, width, scheme and language.
@@ -40,6 +41,29 @@ async function generic(page, lang, label) {
   assert.deepEqual(result.clipped, [], `${label}: clipped text`);
   if (lang === 'ru') assert.doesNotMatch(result.text, /[ёЁ]/, `${label}: the letter yo`);
   assert.doesNotMatch(result.text, /—/, `${label}: em-dash`);
+}
+
+// At 400 px a row is one column, and the next call's title and time left are on screen without scrolling.
+async function narrow(page, label) {
+  const columns = await page.locator('#home .row').evaluateAll(rows => rows.map(row => getComputedStyle(row).gridTemplateColumns));
+  assert.ok(columns.length && columns.every(value => value.trim().split(/\s+/).length === 1), `${label}: rows in one column: ${columns}`);
+  for (const selector of ['.mtitle', '.soon']) {
+    const box = await page.locator(`#home .row.next ${selector}`).boundingBox();
+    const size = page.viewportSize();
+    assert.ok(box && box.x >= 0 && box.y >= 0 && box.x + box.width <= size.width && box.y + box.height <= size.height,
+      `${label}: next ${selector} inside the window: ${JSON.stringify(box)}`);
+  }
+}
+
+// One empty-state block instead of the rows: its title, its line and the given number of actions.
+async function emptyState(page, lang, [title, text], actions) {
+  const block = page.locator('#home .empty');
+  assert.equal(await block.count(), 1);
+  assert.equal(await page.locator('#home .row').count(), 0);
+  assert.equal(await block.locator('h2').innerText(), title[lang]);
+  assert.equal(await block.locator('.state').innerText(), text[lang]);
+  assert.equal(await page.locator('#home .empty button, #home .empty a').count(), actions);
+  return block;
 }
 
 const checks = {
@@ -154,8 +178,15 @@ const checks = {
     await page.waitForFunction(() => !document.querySelector('#home .row.next .actions button:disabled'));
     delete page.api.responses['/api/memo/rebuild'];
     page.api.posts.length = 0;
-    await Promise.all([page.waitForResponse(response => response.url().endsWith('/api/memo/rebuild')),
+    // The button stays disabled until the agenda is fetched again: a fast second click cannot post twice.
+    let reopen;
+    page.api.gate = new Promise(resolve => { reopen = resolve; });
+    await Promise.all([page.waitForRequest(request => request.url().endsWith('/api/agenda')),
       row.locator('button', { hasText: /Повторить|Retry/ }).click()]);
+    assert.equal(await row.locator('button', { hasText: /Повторить|Retry/ }).isDisabled(), true);
+    page.api.gate = null;
+    reopen();
+    await page.waitForFunction(() => !document.querySelector('#home .row.next .actions button:disabled'));
     assert.deepEqual(page.api.posts.filter(item => item.path === '/api/memo/rebuild').map(item => item.body), [{ event_id: 'evt-failed' }]);
     // A failed retry is not success: the row keeps its state and says so.
     page.api.responses['/api/memo/rebuild'] = { status: 500, json: { ok: false, error: 'boom' } };
@@ -207,6 +238,38 @@ const checks = {
     assert.equal(await page.locator('#home .row.next .goal').count(), 1);
     assert.equal(await page.locator('#home').getByText(/Не записывать|Do not record/).count(), 0);
   },
+  async calendar_off(page, lang) {
+    const block = await emptyState(page, lang, [{ ru: 'Календарь не подключен', en: 'The calendar is not connected' },
+      { ru: 'Звонки и мемо появятся после подключения.', en: 'Calls and memos appear once it is connected.' }], 1);
+    const button = block.locator('button.primary');
+    assert.equal(await button.innerText(), lang === 'ru' ? 'Подключить календарь' : 'Connect the calendar');
+    await button.click();
+    await page.waitForFunction(() => document.querySelector('#project-dialog').open);
+    assert.equal(await page.evaluate(() => document.querySelector('#google-context-settings').open), true);
+  },
+  async tool_missing(page, lang) {
+    const block = await emptyState(page, lang, [
+      { ru: 'Нет программы для чтения календаря', en: 'The calendar reader is not installed' },
+      { ru: 'MeetOnTrack читает Google Календарь через программу gws.', en: 'MeetOnTrack reads Google Calendar through the gws tool.' }], 1);
+    const link = block.locator('a.ql');
+    assert.deepEqual([await link.innerText(), await link.getAttribute('href'), await link.getAttribute('target'), await link.getAttribute('rel')],
+      [lang === 'ru' ? 'Как ее установить' : 'How to install it',
+        'https://github.com/AIAgentLbs/meetontrack/blob/main/docs/CONTEXT_SOURCES.md', '_blank', 'noopener noreferrer']);
+  },
+  async no_meetings(page, lang) {
+    await emptyState(page, lang, [{ ru: 'Сегодня и завтра звонков нет', en: 'No calls today or tomorrow' },
+      { ru: 'Прошедшие звонки открываются сверху.', en: 'Past calls open from the top bar.' }], 0);
+  },
+  async load_failed(page, lang) {
+    const block = await emptyState(page, lang, [{ ru: 'Не удалось загрузить звонки', en: 'Could not load your calls' },
+      { ru: 'Проверьте, что MeetOnTrack запущен, и попробуйте еще раз.', en: 'Check that MeetOnTrack is running and try again.' }], 1);
+    // Retry fetches the agenda again; a good answer replaces the block with the rows.
+    page.api.fixture.agenda = states.ready.agenda;
+    await Promise.all([page.waitForResponse(response => response.url().endsWith('/api/agenda')),
+      block.locator('button', { hasText: /^(Повторить|Retry)$/ }).click()]);
+    await page.locator('#home .row.next').waitFor();
+    assert.equal(await page.locator('#home .empty').count(), 0);
+  },
   async long(page, lang) {
     // Ten attendees: three by name, then one muted line with the rest, the whole list in its tooltip.
     const who = page.locator('#home .row.next .who');
@@ -252,14 +315,15 @@ const checks = {
       for (const lang of ['ru', 'en']) {
         const page = await open(browser, { fixture, lang });
         await page.waitForFunction(lang => document.documentElement.lang === lang, lang);
-        await page.locator('#home .row').first().waitFor();
         try {
+          await page.locator('#home :is(.row, .empty)').first().waitFor({ timeout: 5000 });
           for (const width of [1440, 1024, 400]) {
             for (const scheme of ['light', 'dark']) {
               const label = `${fixture}-${width}-${scheme}-${lang}`;
               await page.setViewportSize({ width, height: 900 });
               await page.emulateMedia({ colorScheme: scheme });
               await generic(page, lang, label);
+              if (width === 400 && !EMPTY.includes(fixture)) await narrow(page, label);
               await page.screenshot({ path: path.join(shots, `${label}.png`), fullPage: true });
             }
           }

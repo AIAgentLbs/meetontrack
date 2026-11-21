@@ -2,6 +2,8 @@
 // Calendar titles, attendee names and memo text are untrusted: every value goes in through textContent.
 const homeErrors = new Map(); // row key -> message key of a skip or retry that failed
 const homeOpenMemos = new Set(); // row keys whose full memo is open
+const homeBusy = new Set(); // button keys whose POST and agenda refresh are in flight
+const HOME_TOOL_HELP = "https://github.com/AIAgentLbs/meetontrack/blob/main/docs/CONTEXT_SOURCES.md";
 let homeSignature = "";
 
 const homeKey = meeting => meeting.event_id || `${meeting.start}|${meeting.title}`;
@@ -60,25 +62,53 @@ function homeButton(label, className, key, onClick) {
   const button = textNode("button", className, label);
   button.type = "button";
   button.dataset.key = key;
+  button.disabled = homeBusy.has(key);
   button.addEventListener("click", onClick);
   return button;
 }
 
 // A skip or retry the server refused leaves the row as it was and adds one line to it.
-// The button is disabled while its POST is in flight, so a double click posts once.
+// The button stays disabled until its POST and the agenda refresh after it are done, so a double click posts
+// once; a row rebuilt meanwhile gets its button disabled too, and focus comes back to it by key.
 async function homeAction(button, key, path, body) {
+  const id = button.dataset.key;
+  homeBusy.add(id);
   button.disabled = true;
   try {
     await post(path, body);
     homeErrors.delete(key);
   } catch (error) {
     homeErrors.set(key, error.status === 409 && path === "/api/agenda/skip-recording" ? "home.cannot_skip" : "home.action_failed");
-  } finally {
-    button.disabled = false;
-    if (document.activeElement === document.body) button.focus();
   }
-  renderHome(window.agendaData, window.appState);
-  await refreshAgenda();
+  try {
+    renderHome(window.agendaData, window.appState);
+    await refreshAgenda();
+  } finally {
+    homeBusy.delete(id);
+    const current = [...document.querySelectorAll("#home [data-key]")].find(node => node.dataset.key === id);
+    if (current) {
+      current.disabled = false;
+      if (document.activeElement === document.body) current.focus();
+    }
+  }
+}
+
+// Mail, folders and the calendar are connected in the project dialog's Google section.
+function homeConnect() {
+  document.getElementById("repo-button").click();
+  document.getElementById("google-context-settings").open = true;
+}
+
+// Home without rows: a title, one line and at most one action.
+function homeEmpty(prefix, action) {
+  const block = textNode("div", "empty", "");
+  block.append(textNode("h2", "", t(`${prefix}_title`)), textNode("p", "state", t(`${prefix}_text`)));
+  if (action) {
+    const actions = textNode("div", "actions", "");
+    actions.append(action);
+    block.append(actions);
+  }
+  return block;
 }
 
 // The full memo under the row, and the Open memo button that shows and hides it.
@@ -161,10 +191,7 @@ function homeRow(meeting, { next, now, supported, id }) {
     status.className = "state";
     status.append(textNode("b", "", t("home.nothing_found")), ` ${t("home.calendar_on")}`);
     main.append(status);
-    actions.append(homeButton(t("home.connect_sources"), "", `${key}|sources`, () => {
-      document.getElementById("repo-button").click();
-      document.getElementById("google-context-settings").open = true;
-    }));
+    actions.append(homeButton(t("home.connect_sources"), "", `${key}|sources`, homeConnect));
   } else if (memo.state === "failed") {
     const reason = ["ai_no_answer", "ai_needs_choice", "timeout", "error"].includes(memo.reason) ? memo.reason : "error";
     const status = document.createElement("p");
@@ -225,8 +252,9 @@ function renderHome(agenda, state, now = Date.now()) {
   const meetings = (agenda?.meetings || []).filter(meeting => Date.parse(meeting.end) > now);
   const unscheduled = agenda?.unscheduled_plans || [];
   const next = nextMeeting(agenda, now);
-  const signature = JSON.stringify([uiLanguage, new Date(now).toDateString(), Boolean(agenda), meetings, unscheduled,
-    agenda?.skip_recording_supported, [...homeErrors]]);
+  const failed = !agenda && Boolean(window.agendaFailed);
+  const signature = JSON.stringify([uiLanguage, new Date(now).toDateString(), Boolean(agenda), failed, agenda?.calendar_state,
+    meetings, unscheduled, agenda?.skip_recording_supported, [...homeErrors]]);
   if (signature === homeSignature) {
     // Same rows: only the time left changes, in place, so focus, scroll and an open memo stay.
     const soon = home.querySelector(".soon");
@@ -239,6 +267,17 @@ function renderHome(agenda, state, now = Date.now()) {
   heading.id = "home-heading";
   const column = document.createElement("div");
   column.className = "col";
+  // Not loaded yet shows nothing; otherwise one empty-state block when there are no rows to show.
+  const calendar = agenda?.calendar_state;
+  if (failed) {
+    column.append(homeEmpty("home.load_failed", homeButton(t("home.retry"), "primary", "empty|reload", () => refreshAgenda())));
+  } else if (calendar === "tool_missing") {
+    column.append(homeEmpty("home.tool", Object.assign(externalLink(t("home.tool_link"), HOME_TOOL_HELP), { className: "ql" })));
+  } else if (calendar === "not_connected") {
+    column.append(homeEmpty("home.calendar_off", homeButton(t("home.calendar_connect"), "primary", "empty|connect", homeConnect)));
+  } else if (agenda && !meetings.length && !unscheduled.length) {
+    column.append(homeEmpty("home.empty"));
+  }
   let day = "", index = 0;
   for (const meeting of meetings) {
     const title = homeDayTitle(meeting.start, now);

@@ -122,6 +122,16 @@ const translations = {
     "home.action_failed": "Не получилось. Попробуйте еще раз.",
     "home.cannot_skip": "Программа записи не умеет пропускать звонок. Обновите приложение.",
     "home.more_people": "и еще {n}",
+    "home.tool_title": "Нет программы для чтения календаря",
+    "home.tool_text": "MeetOnTrack читает Google Календарь через программу gws.",
+    "home.tool_link": "Как ее установить",
+    "home.calendar_off_title": "Календарь не подключен",
+    "home.calendar_off_text": "Звонки и мемо появятся после подключения.",
+    "home.calendar_connect": "Подключить календарь",
+    "home.empty_title": "Сегодня и завтра звонков нет",
+    "home.empty_text": "Прошедшие звонки открываются сверху.",
+    "home.load_failed_title": "Не удалось загрузить звонки",
+    "home.load_failed_text": "Проверьте, что MeetOnTrack запущен, и попробуйте еще раз.",
     "meeting.connecting": "Подключение к записи...",
     "status.checking": "Проверка",
     "shell.home": "Главная",
@@ -386,6 +396,16 @@ const translations = {
     "home.action_failed": "That did not work. Try again.",
     "home.cannot_skip": "The recorder cannot skip a call. Update the app.",
     "home.more_people": "and {n} more",
+    "home.tool_title": "The calendar reader is not installed",
+    "home.tool_text": "MeetOnTrack reads Google Calendar through the gws tool.",
+    "home.tool_link": "How to install it",
+    "home.calendar_off_title": "The calendar is not connected",
+    "home.calendar_off_text": "Calls and memos appear once it is connected.",
+    "home.calendar_connect": "Connect the calendar",
+    "home.empty_title": "No calls today or tomorrow",
+    "home.empty_text": "Past calls open from the top bar.",
+    "home.load_failed_title": "Could not load your calls",
+    "home.load_failed_text": "Check that MeetOnTrack is running and try again.",
     "meeting.connecting": "Connecting to the recording...",
     "status.checking": "Checking",
     "shell.home": "Home",
@@ -2045,12 +2065,14 @@ function memoNodes(plan) {
   return nodes;
 }
 
-// Today's and tomorrow's meetings, polled for Home (home.js renders them).
+// Today's and tomorrow's meetings, polled for Home (home.js renders them). A failed fetch keeps the last
+// agenda; before the first one arrives Home says it could not load them.
 async function refreshAgenda() {
   try {
     window.agendaData = await getJSON("/api/agenda");
+    window.agendaFailed = false;
   } catch {
-    return;
+    window.agendaFailed = true;
   }
   window.renderShell?.();
 }

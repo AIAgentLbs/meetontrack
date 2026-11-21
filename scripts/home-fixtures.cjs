@@ -79,6 +79,10 @@ function build(name) {
         nothing(at10),
       ]);
     },
+    calendar_off: () => agenda([], { calendar: false, calendar_state: 'not_connected' }),
+    tool_missing: () => agenda([], { calendar: false, calendar_state: 'tool_missing', skip_recording_supported: false }),
+    no_meetings: () => agenda([]),
+    load_failed: () => null, // /api/agenda answers 500
   };
   const state = { preferences: {}, journal: [], frames: [], project: {}, updates: {},
     delivery: { channels: {}, undelivered: [], notifications: [] },
@@ -89,12 +93,13 @@ function build(name) {
 
 // name -> {agenda, state, permissions}, rebuilt on every read so the times stay relative to now.
 const states = Object.defineProperties({}, Object.fromEntries(
-  ['ready', 'preparing', 'nothing_found', 'failed', 'skipped', 'adapter', 'no_skip_support', 'long']
+  ['ready', 'preparing', 'nothing_found', 'failed', 'skipped', 'adapter', 'no_skip_support', 'long',
+    'calendar_off', 'tool_missing', 'no_meetings', 'load_failed']
     .map(name => [name, { enumerable: true, get: () => build(name) }])));
 
 // Serves the real UI files and the fixture. The returned object records POST bodies; a test can set
 // `responses[path]` to {status, json}, 'abort' or a promise of either, and `gate` to a promise that holds back
-// /api/agenda. `clock` installs a fake page clock that many milliseconds ahead of now.
+// /api/agenda. A fixture without an agenda makes /api/agenda answer 500. `clock` installs a fake page clock that many milliseconds ahead of now.
 async function route(context, fixture, origin) {
   const api = { fixture, posts: [], responses: {}, gate: null };
   await context.route(`${origin}/**`, async request => {
@@ -108,6 +113,7 @@ async function route(context, fixture, origin) {
     if (url.pathname === '/api/state') return request.fulfill({ json: api.fixture.state });
     if (url.pathname === '/api/agenda') {
       await api.gate;
+      if (!api.fixture.agenda) return request.fulfill({ status: 500, json: { ok: false, error: 'boom' } });
       return request.fulfill({ json: { ok: true, ...api.fixture.agenda } });
     }
     if (url.pathname === '/api/permissions') return request.fulfill({ json: api.fixture.permissions });
