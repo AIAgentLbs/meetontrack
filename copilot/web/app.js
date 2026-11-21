@@ -94,7 +94,7 @@ const translations = {
     "home.in_hours": "через {h} ч {m} мин",
     "home.in_hours_whole": "через {h} ч",
     "home.now": "идет сейчас",
-    "home.goal": "Цель: {goal}",
+    "home.goal": "Цель:",
     "home.sources.one": "Откуда это: {n} источник",
     "home.sources.few": "Откуда это: {n} источника",
     "home.sources.many": "Откуда это: {n} источников",
@@ -110,7 +110,6 @@ const translations = {
     "home.preparing": "Мемо готовится,",
     "home.preparing_late": "дольше обычного. Появится здесь само.",
     "home.nothing_found": "О собеседнике в ваших источниках пока ничего нет.",
-    "home.calendar_on": "Календарь уже подключен.",
     "home.connect_mail": "Подключить почту",
     "home.connect_folder": "Подключить папку",
     "home.failed": "Мемо не получилось: {reason}.",
@@ -128,8 +127,9 @@ const translations = {
     "home.recording_active": "Сейчас идет запись. Остановите ее, чтобы не записывать звонок.",
     "home.more_people": "и еще {n}",
     "home.tool_title": "Нет программы для чтения календаря",
-    "home.tool_text": "Чтобы читать Google Календарь, нужна одна небольшая программа от Google.",
+    "home.tool_text": "Чтобы читать Google Календарь, нужна программа gws от Google.",
     "home.tool_link": "Как ее установить",
+    "home.check_again": "Проверить снова",
     "home.calendar_off_title": "Календарь не подключен",
     "home.calendar_off_text": "Звонки и мемо появятся после подключения.",
     "home.calendar_connect": "Подключить календарь",
@@ -165,7 +165,6 @@ const translations = {
     "status.recording": "Запись",
     "status.mic_missing": "Нет доступа к микрофону: запись в {time} не включится",
     "status.mic_missing_mac": "Нет доступа к микрофону: ваш голос в звонке в {time} не запишется",
-    "status.mic_missing_short": "Нет доступа к микрофону",
     "status.call_audio_missing": "Нет доступа к звуку звонка: запись в {time} будет без собеседника",
     "status.not_recording": "Запись не идет: {reason}",
     "status.reason.mic": "нет доступа к микрофону",
@@ -237,7 +236,7 @@ const translations = {
     "plan.memo": "Мемо перед встречей",
     "plan.talk_track": "Шпаргалка ведущего",
     "plan.memo_open": "Открыть документ мемо",
-    "plan.unscheduled": "Подготовка без даты",
+    "plan.unscheduled": "Подготовка без события в календаре",
     "plan.question": "Вопросы",
     "plan.risk": "Риски",
     "plan.objection": "Возражения",
@@ -406,7 +405,7 @@ const translations = {
     "home.in_hours": "in {h} h {m} min",
     "home.in_hours_whole": "in {h} h",
     "home.now": "on now",
-    "home.goal": "Goal: {goal}",
+    "home.goal": "Goal:",
     "home.sources.one": "Where this comes from: {n} source",
     "home.sources.few": "Where this comes from: {n} sources",
     "home.sources.many": "Where this comes from: {n} sources",
@@ -422,7 +421,6 @@ const translations = {
     "home.preparing": "Memo in progress,",
     "home.preparing_late": "longer than usual. It will appear here by itself.",
     "home.nothing_found": "Nothing about this contact in your sources yet.",
-    "home.calendar_on": "The calendar is already connected.",
     "home.connect_mail": "Connect mail",
     "home.connect_folder": "Connect a folder",
     "home.failed": "Memo not ready: {reason}.",
@@ -440,8 +438,9 @@ const translations = {
     "home.recording_active": "A recording is in progress. Stop it first to skip this call.",
     "home.more_people": "and {n} more",
     "home.tool_title": "The calendar reader is not installed",
-    "home.tool_text": "To read Google Calendar, MeetOnTrack needs one small program from Google.",
+    "home.tool_text": "To read Google Calendar, MeetOnTrack needs gws, a program from Google.",
     "home.tool_link": "How to install it",
+    "home.check_again": "Check again",
     "home.calendar_off_title": "The calendar is not connected",
     "home.calendar_off_text": "Calls and memos appear once it is connected.",
     "home.calendar_connect": "Connect the calendar",
@@ -477,7 +476,6 @@ const translations = {
     "status.recording": "Recording",
     "status.mic_missing": "No microphone access: the {time} call will not be recorded",
     "status.mic_missing_mac": "No microphone access: your voice in the {time} call will not be recorded",
-    "status.mic_missing_short": "No microphone access",
     "status.call_audio_missing": "No access to call audio: the {time} call will be recorded without the other side",
     "status.not_recording": "Not recording: {reason}",
     "status.reason.mic": "no microphone access",
@@ -549,7 +547,7 @@ const translations = {
     "plan.memo": "Pre-call memo",
     "plan.talk_track": "Talk track",
     "plan.memo_open": "Open memo document",
-    "plan.unscheduled": "Preparation without a date",
+    "plan.unscheduled": "Preparation without a calendar event",
     "plan.question": "Questions",
     "plan.risk": "Risks",
     "plan.objection": "Objections",
@@ -805,8 +803,7 @@ function applyLanguage() {
   const languageSelect = document.querySelector("#interface-language");
   if (languageSelect) languageSelect.value = uiLanguage;
   const googleAccount = document.querySelector("#google-account");
-  if (googleAccount?.dataset.auth) googleAccount.textContent = googleAccount.dataset.auth === "connected"
-    ? t("google.account", {account: googleAccount.dataset.account || "gws"}) : t("google.auth");
+  if (googleAccount?.dataset.auth) googleAccountLine(googleAccount, false);
 }
 
 let transcriptSignature = "";
@@ -999,7 +996,7 @@ Object.assign(translations.ru, {
   "delivery.dismiss": "Прочитано", "delivery.dismiss_failed": "Не удалось сохранить. Повторите.",
   "delivery.local_note": "Запись и отчет остаются локально. Ошибки доставки не останавливают звонок.",
   "delivery.auth_pill": "{channel}: войдите снова", "delivery.open_settings": "Открыть настройки",
-  "delivery.pill.undelivered": "Отчет не отправлен", "delivery.pill.unsure": "Отчет мог не дойти",
+  "delivery.pill.undelivered": "Отправить отчет снова", "delivery.pill.unsure": "Отчет мог не дойти",
   "delivery.pill.missing": "Отчет не найден", "delivery.pill.failed": "Отчет не создан",
   "delivery.pill.nopdf": "PDF отчета не создан", "delivery.pill.final": "Отчет ждет расшифровку",
   "delivery.undelivered.title_date": "Отчет по встрече «{title}» от {date} не отправлен",
@@ -1073,7 +1070,7 @@ Object.assign(translations.en, {
   "delivery.dismiss": "Mark as read", "delivery.dismiss_failed": "Could not save. Try again.",
   "delivery.local_note": "Recordings and reports stay locally. Delivery errors do not interrupt the call.",
   "delivery.auth_pill": "{channel}: sign in again", "delivery.open_settings": "Open settings",
-  "delivery.pill.undelivered": "Report not sent", "delivery.pill.unsure": "Report may not have arrived",
+  "delivery.pill.undelivered": "Send the report again", "delivery.pill.unsure": "Report may not have arrived",
   "delivery.pill.missing": "Report not found", "delivery.pill.failed": "Report not created",
   "delivery.pill.nopdf": "Report PDF not created", "delivery.pill.final": "Report waits for the transcript",
   "delivery.undelivered.title_date": "Report for “{title}” on {date} was not sent",
@@ -3552,7 +3549,8 @@ elements.archiveSearch.addEventListener("input", () => {
   archiveSearchTimer = setTimeout(() => { void refreshArchive(); }, 250);
 });
 document.addEventListener("keydown", event => {
-  if (event.key === "Escape" && !elements.archiveDialog.hidden && !document.querySelector("dialog[open]")) {
+  if (event.key === "Escape" && !elements.archiveDialog.hidden
+    && !document.querySelector("dialog[open], #settings-panel:not([hidden]), #getting-started:not([hidden])")) {
     closeArchive(); returnFocus(elements.archiveButton);
   }
 });
@@ -3662,8 +3660,9 @@ Object.assign(translations.ru, {
   "google.save": "Сохранить источники", "google.query": "Участник, компания или тема встречи",
   "google.search": "Найти для текущего звонка", "google.loading": "Подключаю источники…",
   "google.searching": "Ищу контекст…", "google.saved": "Источники сохранены; предыдущие результаты очищены.",
-  "google.limits": "Календарь: 90 дней назад и 30 вперед. Почта: до 3 писем за год, только заголовки и начало. Google Диск: до 5 файлов, у первых двух берется начало документа или таблицы. Найденное хранится 10 минут и стирается при смене источников. Отправка отчетов настраивается отдельно.",
+  "google.limits": "Календарь: 90 дней назад и 30 вперед. Почта: до 3 писем за год, только тема и короткий отрывок письма. Google Диск: до 5 файлов, у первых двух берутся подходящие отрывки документа или начало таблицы. Найденное хранится 10 минут и стирается при смене источников. Отправка отчетов настраивается отдельно.",
   "google.account": "Подключен Google: {account}", "google.auth": "Сначала подключите свой Google-аккаунт в разделе «Хранение и доставка отчетов», разрешив чтение контекста. Затем подключите поиск здесь и выберите источники.",
+  "google.setup": "Чтобы войти в Google, сначала один раз настройте программу gws от Google, это около 5 минут.", "google.setup_link": "Как настроить",
   "google.empty": "Ничего не найдено", "google.partial": "Показана часть результатов",
   "google.failed": "Источник недоступен: {source} ({state}). Проверьте подключение аккаунта и разрешения доступа в настройках.",
   "google.no_meeting": "Для поиска начните или откройте текущую запись.",
@@ -3682,8 +3681,9 @@ Object.assign(translations.en, {
   "google.save": "Save sources", "google.query": "Participant, company or meeting topic",
   "google.search": "Search for this call", "google.loading": "Loading connections…",
   "google.searching": "Searching context…", "google.saved": "Sources saved; previous results cleared.",
-  "google.limits": "Calendar: 90 days back and 30 ahead. Mail: up to 3 messages from the past year, headers and the start only. Google Drive: up to 5 files, the start of the first two documents or sheets. Results are kept for 10 minutes and cleared when the sources change. Report delivery is set up separately.",
+  "google.limits": "Calendar: 90 days back and 30 ahead. Mail: up to 3 messages from the past year, headers and snippets only. Google Drive: up to 5 files; for the first two, relevant excerpts of a document or the start of a spreadsheet. Results are kept for 10 minutes and cleared when the sources change. Report delivery is set up separately.",
   "google.account": "Connected Google: {account}", "google.auth": "First connect your Google account under Report storage and delivery, granting context-read permission. Then connect search here and choose sources.",
+  "google.setup": "Signing in to Google needs a one-time setup of gws, a program from Google, about 5 minutes.", "google.setup_link": "How to set it up",
   "google.empty": "No results", "google.partial": "Some results are omitted",
   "google.failed": "Source unavailable: {source} ({state}). Check the account connection and access permissions in Settings.",
   "google.no_meeting": "Start a current recording before searching.",
@@ -3700,6 +3700,14 @@ function googleControls(busy) {
   document.querySelector("#google-disconnect").disabled = busy || !googleConnected;
   document.querySelector("#google-search-form").setAttribute("aria-busy", String(busy));
 }
+// Connected: the account. Not yet: Connect Google's sign-in, or, while sign-in needs a gws OAuth client first,
+// one plain line and the guide, not the client setup words.
+function googleAccountLine(account, pending) {
+  if (account.dataset.auth === "connected") account.textContent = t("google.account", {account: account.dataset.account || "gws"});
+  else if (pending) account.textContent = t("google.pending");
+  else if (account.dataset.client === "true") account.textContent = t("google.auth");
+  else account.replaceChildren(`${t("google.setup")} `, externalLink(t("google.setup_link"), homeToolHelp()));
+}
 async function loadGoogleContext() {
   if (googleBusy) return;
   googleControls(true);
@@ -3711,7 +3719,8 @@ async function loadGoogleContext() {
     googleConnected = data.connected === true;
     account.dataset.auth = googleConnected ? "connected" : "not_connected";
     account.dataset.account = data.account || "";
-    account.textContent = googleConnected ? t("google.account", {account: data.account || "gws"}) : data.login_pending ? t("google.pending") : t("google.auth");
+    account.dataset.client = String(data.client_configured === true);
+    googleAccountLine(account, data.login_pending);
   } catch (error) { account.textContent = plainError(error); }
   finally { googleControls(false); }
 }
@@ -3728,7 +3737,6 @@ document.querySelector("#settings-open").addEventListener("click", () => {
 document.querySelector("#settings-close").addEventListener("click", () => {
   document.querySelector("#settings-panel").hidden = true;
   document.querySelector("#settings-open").setAttribute("aria-expanded", "false");
-  returnFocus(document.querySelector("#settings-open"));
 });
 document.querySelector("#google-check").addEventListener("click", () => void loadGoogleContext());
 for (const action of ["connect", "disconnect"]) document.querySelector(`#google-${action}`).addEventListener("click", async () => {

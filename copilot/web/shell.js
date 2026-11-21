@@ -74,7 +74,7 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
   // macOS still records the call audio without the microphone (only the owner's voice is lost); Windows does not start.
   if (next && mic) {
     return { kind: "mic_missing", text: t(permissions.platform === "macos" ? "status.mic_missing_mac" : "status.mic_missing", { time }),
-      short: t("status.mic_missing_short"), action: action("open_mic") };
+      action: action("open_mic") };
   }
   if (next && permissions?.call_audio === "denied") {
     return { kind: "mic_missing", text: t("status.call_audio_missing", { time }), action: action("open_call_audio") };
@@ -127,7 +127,8 @@ async function statusAction(button, id) {
   }
 }
 
-// Up to 480 px the waiting status drops "recording starts by itself", so the bar keeps to two rows.
+// Up to 480 px the waiting status drops "recording starts by itself", so the bar keeps to two rows. A problem keeps
+// its whole text, consequence included, and wraps.
 const SHORT_BAR = matchMedia("(max-width: 480px)");
 SHORT_BAR.addEventListener("change", () => renderShell());
 
@@ -295,7 +296,35 @@ $("menu-nav-home").addEventListener("click", goHome);
 $("menu-past-calls").addEventListener("click", () => $("archive-button").click());
 $("menu-updates").addEventListener("click", () => $("updates-notice").click());
 $("getting-started-open").addEventListener("click", () => $("settings-panel").hidden || $("settings-close").click());
-$("call-status-help").addEventListener("click", () => $("getting-started-open").click());
+// The guide opened at one step: the step at its top, focus on its button (or the step's first control).
+function openGuideStep(heading, control) {
+  $("getting-started-open").click();
+  const step = $(heading);
+  step.scrollIntoView({ block: "start" });
+  (control ? $(control) : step.closest(".startup-step").querySelector("button:not([hidden]):not(:disabled), select"))?.focus({ preventScroll: true });
+}
+// Every reason How to fix shows for (recorder, microphone, call audio) is the guide's recording step.
+$("call-status-help").addEventListener("click", () => openGuideStep("startup-audio-heading", "startup-recorder"));
+// Settings and the guide: focus goes to the panel's heading when it opens, Escape closes it, and focus goes back to
+// the control that opened it (a menu item, hidden by then, hands it to Menu). Registered after getting-started.js
+// sets its own handlers, so the panel is already shown when the heading takes focus.
+const PANELS = [["settings-panel", "settings-open", "settings-close", "settings-heading"],
+  ["getting-started", "getting-started-open", "getting-started-close", "getting-started-heading"]];
+addEventListener("DOMContentLoaded", () => {
+  for (const [panel, open, close, heading] of PANELS) {
+    let opener = null;
+    $(open).addEventListener("click", () => {
+      opener = document.activeElement === document.body ? null : document.activeElement;
+      if (!$(panel).hidden) $(heading).focus({ preventScroll: true });
+    });
+    $(close).addEventListener("click", () => returnFocus(opener));
+  }
+});
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape" || document.querySelector("dialog[open]")) return;
+  const open = PANELS.find(([panel]) => !$(panel).hidden);
+  if (open) $(open[2]).click();
+});
 $("call-status-action").addEventListener("click", event => {
   if (event.currentTarget.dataset.action !== "back") return statusAction(event.currentTarget, event.currentTarget.dataset.action);
   try {

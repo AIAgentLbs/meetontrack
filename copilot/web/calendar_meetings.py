@@ -26,6 +26,7 @@ class CalendarMeetings:
 
     def __init__(self, executable: str | None = None, enabled=None) -> None:
         self.executable = executable if executable is not None else shutil.which("gws")
+        self._look_up = executable is None  # found on PATH: looked up again until it is there
         self.enabled = enabled
         self._cache: dict[str, tuple[float, list[dict] | None]] = {}  # None: the read failed
         self._lock = threading.Lock()
@@ -34,6 +35,8 @@ class CalendarMeetings:
         return bool(self.executable) and (self.enabled is None or bool(self.enabled()))
 
     def state(self) -> str:
+        if not self.executable and self._look_up:
+            self.executable = shutil.which("gws")  # installed after start (Home's Check again)
         if not self.executable:
             return "tool_missing"
         return "not_connected" if self.enabled is not None and not self.enabled() else "connected"

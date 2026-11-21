@@ -122,6 +122,14 @@ const checks = {
     const [title, who] = await Promise.all([row.locator('.mtitle').boundingBox(), row.locator('.who').boundingBox()]);
     assert.ok(who.x >= title.x + title.width && Math.abs(who.y - title.y) < 8, `who beside the title: ${JSON.stringify({ title, who })}`);
     assert.match(await row.locator('.goal').innerText(), /^(Цель|Goal): Agree on the pilot scope/);
+    // The title carries the row: the goal reads at regular weight, only its label is bold.
+    assert.deepEqual(await row.locator('.goal').evaluate(node => [getComputedStyle(node).fontWeight,
+      getComputedStyle(node.firstElementChild).fontWeight, node.firstElementChild.textContent]), ['400', '600', lang === 'ru' ? 'Цель:' : 'Goal:']);
+    // Tabs, not links: no underline; the bar under the current one only.
+    assert.deepEqual(await page.evaluate(() => ['nav-home', 'archive-button'].map(id => {
+      const style = getComputedStyle(document.getElementById(id));
+      return [style.textDecorationLine, style.boxShadow !== 'none'];
+    })), [['none', true], ['none', false]]);
     assert.equal(await row.locator('.asks li').count(), 3);
     assert.match(await row.locator('.soon').innerText(), /через 40 мин|in 40 min/);
     // The bar: the whole status in a wide window; up to 480 px the short one, so the bar keeps to two rows.
@@ -137,7 +145,7 @@ const checks = {
     await page.waitForFunction(() => /,/.test(document.querySelector('#call-status-text').textContent));
     assert.match(await row.locator('.bg').innerText(), /(Откуда это: 2 источника|Where this comes from: 2 sources)$/);
     // Day headings: the next meeting is today unless it crosses midnight; tomorrow's 10:00 meeting is tomorrow.
-    const crosses = new Date(Date.now() + 40 * 60000).getDate() !== new Date().getDate();
+    const crosses = await page.evaluate(() => new Date(Date.now() + 40 * 60000).getDate() !== new Date().getDate());
     const headings = await texts(page, '#home h2');
     assert.match(headings[0], crosses ? /^(Завтра|Tomorrow), / : /^(Сегодня|Today), /);
     assert.match(headings.at(-1), /^(Завтра|Tomorrow), \S+ \d+ \S+$/);
@@ -182,6 +190,10 @@ const checks = {
     await row.locator('.bg button.ql').click();
     assert.equal(await panel.isVisible(), true);
     assert.equal(await page.evaluate(() => document.activeElement.href), 'https://example.com/proposal');
+    // One sources control at a time: with the memo open its sources list is there, and the digest's link goes.
+    assert.equal(await row.locator('.bg button.ql').isVisible(), false);
+    await openMemo.click();
+    assert.equal(await row.locator('.bg button.ql').isVisible(), true);
   },
   // The opened memo is part of the row: one toggle, real section headings, no repeat of the digest above it,
   // links by their labels only, the materials as plain underlined links.
@@ -209,25 +221,31 @@ const checks = {
     assert.equal(memo.toggles, 0, 'no inner disclosure: Open memo is the only toggle');
     assert.equal(memo.box, false, 'no box of its own inside the row');
     // «Откуда это: 2 источника» lands on a section of the same name.
-    assert.deepEqual(memo.headings, ['Questions', 'Background', lang === 'ru' ? 'Источники' : 'Sources']);
+    assert.deepEqual(memo.headings, ['Background', lang === 'ru' ? 'Источники' : 'Sources']);
     assert.deepEqual(memo.type, ['16px/600/none']);
-    // A line the digest shows in full is not repeated (the three questions); a longer one stays whole (the goal
-    // with its company link), and so does a line whose digest was cut short.
-    assert.doesNotMatch(memo.text, /What budget|Who signs off|Which part of the proposal|Pilot review/);
-    assert.match(memo.text, /Agree on the pilot scope and the start date with Example LLC\./);
-    assert.equal(await page.evaluate(() => homeMemoBody('Agree on the pilot scope and the start date.', [],
-      [homeNorm('Agree on the pilot…')]).length), 1, 'a truncated digest hides nothing');
+    // Only what the digest does not show: no goal sentence (it starts with the digest's goal), no question shown
+    // above; the one question left reads on its own, without a Questions heading.
+    assert.doesNotMatch(memo.text, /Agree on the pilot|What budget|Who signs off|Which part of the proposal|Pilot review/);
+    assert.match(memo.text, /^A fourth question that the digest leaves out\?\n/);
+    // The memo writer's format: a bold goal lead and [S1] marks on every line. Questions match without their marks;
+    // a question whose digest line was cut stays; the sources list keeps the marks' meaning.
+    assert.deepEqual(await page.evaluate(() => homeMemoBody([
+      '**Meeting goal.** Agree on the pilot scope and the start date [S1]', '', '## Questions to ask',
+      '1. What budget is set for the pilot this year? [S1, S2]', '2. Who signs off the purchase? [S2]', '3. Which offices go first? [S1]',
+      '', '## Sources', '- [S1] Proposal', '- [S2] Notes'].join('\n'), [], {
+      goal: 'Agree on the pilot scope…', lines: ['What budget is set for the pilot this year?', 'Who signs off…'].map(homeNorm) })
+      .map(node => [node.tagName, node.textContent])), [['H4', 'Questions to ask'],
+      ['UL', 'Who signs off the purchase? [S2]Which offices go first? [S1]'], ['H4', 'Sources'], ['UL', '[S1] Proposal[S2] Notes']]);
     // Links: an <https://...> autolink and a destination with balanced parentheses keep their whole address.
     assert.deepEqual(await page.evaluate(() => {
       const node = homeInline(document.createElement('p'), 'See <https://example.org/notes> and [Report](https://example.com/Report_(draft)).');
       return [node.textContent, [...node.querySelectorAll('a')].map(link => link.getAttribute('href'))];
     }), ['See example.org and Report.', ['https://example.org/notes', 'https://example.com/Report_(draft)']]);
-    assert.deepEqual(memo.items, ['A fourth question that the digest leaves out?']);
+    assert.deepEqual(memo.items, []);
     assert.doesNotMatch(memo.text, /The last proposal went out a week ago/, 'the background line is in the digest already');
     assert.match(memo.text, /See the thread/);
     assert.doesNotMatch(memo.text, /https?:|\(|\*\*/, 'no raw URL or Markdown marks');
     assert.deepEqual(memo.links, [
-      ['Example LLC', 'https://example.com/llc', '_blank', 'noopener noreferrer', false],
       ['example.org', 'https://example.org/history', '_blank', 'noopener noreferrer', false],
       ['Proposal', 'https://example.com/proposal', '_blank', 'noopener noreferrer', true],
       ['Notes', 'https://example.org/notes', '_blank', 'noopener noreferrer', true]]);
@@ -255,7 +273,7 @@ const checks = {
     // One format on every row: the same bold lead (its start time when known) and the same note.
     // Past 5 minutes the note says it takes longer than usual.
     const lines = await page.locator('#home .row .state').evaluateAll(nodes => nodes.filter(node => node.closest('.row')
-      .querySelector('.mtitle').textContent !== 'First talk about the pilot').map(node => [node.querySelector('b')?.textContent, node.textContent]));
+      .querySelector('.mtitle').textContent !== 'First talk about the pilot').map(node => [node.querySelector('.lead')?.textContent, node.textContent]));
     const [late, fresh] = await page.evaluate(() => window.agendaData.meetings.slice(0, 2).map(item => homeClock(item.memo.since)));
     assert.deepEqual(lines, lang === 'ru' ? [
       [`Мемо готовится с ${late},`, `Мемо готовится с ${late}, дольше обычного. Появится здесь само.`],
@@ -264,10 +282,16 @@ const checks = {
       [`Memo in progress since ${late},`, `Memo in progress since ${late}, longer than usual. It will appear here by itself.`],
       [`Memo in progress since ${fresh},`, `Memo in progress since ${fresh}, usually 2-3 minutes. It will appear here by itself.`],
       ['Memo in progress,', 'Memo in progress, usually 2-3 minutes. It will appear here by itself.']]);
-    // The note ages on the 30 s tick without a poll: a fresh row turns late once it passes 5 minutes.
-    await page.evaluate(() => { window.agendaData.meetings[1].memo.since = new Date(Date.now() - 6 * 60000).toISOString(); });
-    await page.evaluate(() => renderHome(window.agendaData, window.appState));
+    // The lead is plain text in the text colour: the title carries the row.
+    assert.deepEqual(await page.locator('#home .row .state .lead').first().evaluate(node => [getComputedStyle(node).fontWeight,
+      getComputedStyle(node).color === getComputedStyle(node.closest('.row').querySelector('.mtitle')).color]), ['400', true]);
+    // The note ages on the 30 s tick, in place: a fresh row turns late past 5 minutes and focus stays where it was.
+    const link = page.locator('#home .row.next .actions a.ql');
+    await link.focus();
+    await link.evaluate(node => { node.dataset.marked = '1'; });
+    await page.evaluate(() => renderHome(window.agendaData, window.appState, Date.now() + 4 * 60000));
     assert.match(await page.locator('#home .row .state').nth(1).innerText(), /дольше обычного|longer than usual/);
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.marked), '1', 'focus stays on the call link');
   },
   // R37: each label names its destination, and the destination carries the same name.
   async nothing_found(page, lang) {
@@ -279,22 +303,44 @@ const checks = {
       const box = node.getBoundingClientRect();
       return node.checkVisibility() && box.top >= document.querySelector('.topbar').getBoundingClientRect().bottom && box.bottom <= innerHeight;
     });
-    // Connect mail: Settings at the Google section, named after mail, with the Mail box on screen.
-    // Google not connected yet: focus goes to Connect Google, the step that makes the Mail box usable.
-    await row.locator('.actions button', { hasText: /^(Подключить почту|Connect mail)$/ }).click();
+    // The calendar row says only what is missing (the calendar itself works: the meeting is on Home).
+    assert.equal(await row.locator('.state').innerText(), lang === 'ru' ? 'О собеседнике в ваших источниках пока ничего нет.'
+      : 'Nothing about this contact in your sources yet.');
+    // Connect mail: Settings at the Google section, named after mail. The calendar is read, so Google is connected:
+    // focus goes to the Mail box, on screen. Escape closes Settings and focus comes back to Connect mail.
+    const connect = row.locator('.actions button', { hasText: /^(Подключить почту|Connect mail)$/ });
+    await connect.click();
     await page.locator('#settings-panel').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.activeElement?.matches('#google-sources input[value="gmail"]'));
+    assert.equal(await onScreen('#google-sources input[value="gmail"]'), true, 'the Mail box is on screen');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#settings-panel').isVisible(), false);
+    assert.equal(await connect.evaluate(node => node === document.activeElement), true, 'focus back on Connect mail');
+    // Google signed out since: the plain sign-in step, Connect Google, on screen also in a 400 x 480 window.
+    await page.setViewportSize({ width: 400, height: 480 });
+    await page.route('**/api/google-context', route => route.fulfill({ json: { ok: true, connected: false, client_configured: true, sources: {} } }));
+    await connect.click();
     await page.waitForFunction(() => document.activeElement?.id === 'google-connect');
+    assert.equal(await onScreen('#google-connect'), true, 'Connect Google is on screen');
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Sign-in needs a one-time gws setup first: the line that says so, focused on its guide link.
+    await page.unroute('**/api/google-context');
+    await page.route('**/api/google-context', route => route.fulfill({ json: { ok: true, connected: false, client_configured: false, sources: {} } }));
+    await connect.click();
+    await page.waitForFunction(() => document.activeElement?.closest('#google-account'));
+    assert.deepEqual(await page.evaluate(() => [document.getElementById('google-account').textContent, document.activeElement.getAttribute('href')]),
+      [lang === 'ru' ? 'Чтобы войти в Google, сначала один раз настройте программу gws от Google, это около 5 минут. Как настроить'
+        : 'Signing in to Google needs a one-time setup of gws, a program from Google, about 5 minutes. How to set it up',
+      `https://github.com/AIAgentLbs/meetontrack/blob/main/docs/CONTEXT_SOURCES.md#${lang === 'ru' ? 'ru-calendar' : 'install-the-calendar-reader-gws'}`]);
     assert.equal(await page.locator('#google-context-settings > summary').innerText(),
       lang === 'ru' ? 'Google: почта, календарь, файлы' : 'Google: mail, calendar, files');
     assert.equal(await page.locator('#google-sources label', { has: page.locator('input[value="gmail"]') }).innerText(),
       lang === 'ru' ? 'Почта (Gmail)' : 'Mail (Gmail)');
-    assert.equal(await onScreen('#google-sources input[value="gmail"]'), true, 'the Mail box is on screen');
     assert.doesNotMatch(await page.locator('#google-context-settings').innerText(), /LLM|A1:Z80|−90/);
-    await page.locator('#settings-close').click();
-    // Google connected: focus goes to the Mail box itself.
-    await page.route('**/api/google-context', route => route.fulfill({ json: { ok: true, connected: true, account: 'me@example.com', sources: {} } }));
-    await row.locator('.actions button', { hasText: /^(Подключить почту|Connect mail)$/ }).click();
-    await page.waitForFunction(() => document.activeElement?.matches('#google-sources input[value="gmail"]'));
+    // Mail gives a snippet, Docs give the excerpts that match: the limits say so, not "the start".
+    assert.match(await page.locator('[data-i18n="google.limits"]').innerText(), lang === 'ru'
+      ? /короткий отрывок письма.*подходящие отрывки документа/ : /snippets.*relevant excerpts of a document/);
     await page.locator('#settings-close').click();
     // Connect a folder: the folders dialog, titled as the menu item, focused on Choose folder; usable without a recording.
     await row.locator('.actions a.ql, .actions button.ql').filter({ hasText: /^(Подключить папку|Connect a folder)$/ }).click();
@@ -354,6 +400,11 @@ const checks = {
       const box = node.getBoundingClientRect();
       return box.top >= document.querySelector('.topbar').getBoundingClientRect().bottom && box.bottom <= innerHeight;
     }), true, 'the AI step is on screen');
+    // Focus goes into the AI step; Escape closes the guide and focus comes back to Choose the AI.
+    assert.equal(await page.evaluate(() => document.getElementById('startup-ai-heading').closest('.startup-step').contains(document.activeElement)), true);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#getting-started').isVisible(), false);
+    assert.match(await page.evaluate(() => document.activeElement.textContent), /^(Выбрать ИИ|Choose the AI)$/);
   },
   async skipped(page, lang) {
     const row = page.locator('#home .row.next');
@@ -393,7 +444,7 @@ const checks = {
     assert.equal(await rowOf(page, 'Example LLC sync').count(), 1);
     const unscheduled = rowOf(page, 'Contract draft review');
     assert.equal(await unscheduled.count(), 1);
-    assert.match(await page.locator('#home h2').last().innerText(), /^(Подготовка без даты|Preparation without a date)$/);
+    assert.match(await page.locator('#home h2').last().innerText(), /^(Подготовка без события в календаре|Preparation without a calendar event)$/);
     const lefts = await Promise.all([unscheduled, row].map(item => item.locator('.mtitle').evaluate(node => node.getBoundingClientRect().left)));
     assert.equal(lefts[0], lefts[1], 'an unscheduled title sits in the title column');
     await unscheduled.locator('button', { hasText: /Открыть мемо|Open memo/ }).click();
@@ -500,14 +551,14 @@ const checks = {
   async calendar_off_with_plans(page, lang) {
     // One calendar block, then the plans without an event under their own heading.
     assert.deepEqual(await page.locator('#home .col > *').evaluateAll(nodes => nodes.map(node => node.className)), ['empty', 'day', 'row']);
-    assert.match(await page.locator('#home h2.day').innerText(), /^(Подготовка без даты|Preparation without a date)$/);
+    assert.match(await page.locator('#home h2.day').innerText(), /^(Подготовка без события в календаре|Preparation without a calendar event)$/);
     assert.equal(await rowOf(page, 'Contract draft review').count(), 1);
     assert.equal(await page.locator('#home .empty button, #home .empty a').count(), 1);
   },
   async tool_missing(page, lang) {
     const block = await emptyState(page, lang, [
       { ru: 'Нет программы для чтения календаря', en: 'The calendar reader is not installed' },
-      { ru: 'Чтобы читать Google Календарь, нужна одна небольшая программа от Google.', en: 'To read Google Calendar, MeetOnTrack needs one small program from Google.' }], 1);
+      { ru: 'Чтобы читать Google Календарь, нужна программа gws от Google.', en: 'To read Google Calendar, MeetOnTrack needs gws, a program from Google.' }], 2);
     const link = block.locator('a.ql');
     assert.deepEqual([await link.innerText(), await link.getAttribute('href'), await link.getAttribute('target'), await link.getAttribute('rel')],
       [lang === 'ru' ? 'Как ее установить' : 'How to install it',
@@ -516,6 +567,10 @@ const checks = {
     // The Russian step exists in the repo doc under that anchor.
     const doc = fs.readFileSync(path.join(__dirname, '../docs/CONTEXT_SOURCES.md'), 'utf8');
     assert.match(doc, /<a id="ru-calendar"><\/a>\n## [^\n]*[А-я]/);
+    // Installed it: Check again reads the calendar again, no restart.
+    const again = block.locator('button');
+    assert.deepEqual([await again.innerText(), await again.getAttribute('class')], [lang === 'ru' ? 'Проверить снова' : 'Check again', '']);
+    await Promise.all([page.waitForRequest(request => request.url().endsWith('/api/agenda')), again.click()]);
   },
   async no_meetings(page, lang) {
     await emptyState(page, lang, [{ ru: 'Больше звонков сегодня и завтра нет', en: 'No more calls today or tomorrow' },
@@ -589,12 +644,15 @@ const checks = {
     const text = lang === 'ru' ? `Нет доступа к микрофону: ваш голос в звонке в ${time} не запишется`
       : `No microphone access: your voice in the ${time} call will not be recorded`;
     await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text, text);
-    // Up to 480 px the bar says it short and whole: the button names the fix.
+    // At 400 px a problem keeps its consequence: the whole text, wrapped, none of it cut.
     await page.setViewportSize({ width: 400, height: 900 });
-    await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text,
-      lang === 'ru' ? 'Нет доступа к микрофону' : 'No microphone access');
+    await frames(page);
+    assert.deepEqual(await page.locator('#call-status-text').evaluate(node => [node.textContent,
+      node.scrollHeight <= node.clientHeight + 1 && node.scrollWidth <= node.clientWidth + 1]), [text, true]);
+    // 1024 px: the outlined memo button keeps its ↵ (Enter still opens it).
+    await page.setViewportSize({ width: 1024, height: 900 });
+    assert.equal(await visibleKbd(page.locator('#home .row.next .actions button[aria-controls]')), true);
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.waitForFunction(text => document.querySelector('#call-status-text').textContent === text, text);
     // The bar's fix is the one filled button: the row's Open memo is outlined, and ↵ still opens it.
     const memo = page.locator('#home .row.next .actions button[aria-controls]');
     assert.equal(await memo.getAttribute('class'), '');
@@ -645,7 +703,7 @@ const checks = {
       await page.setViewportSize({ width, height: 900 });
       await frames(page);
       assert.deepEqual(await pill.evaluate(node => [node.textContent, node.scrollWidth <= node.clientWidth + 1 && node.scrollHeight <= node.clientHeight + 1]),
-        [lang === 'ru' ? 'Отчет не отправлен' : 'Report not sent', true], `pill at ${width}`);
+        [lang === 'ru' ? 'Отправить отчет снова' : 'Send the report again', true], `pill at ${width}`);
     }
     await page.setViewportSize({ width: 1440, height: 900 });
     const plural = await page.evaluate(() => {
@@ -704,6 +762,9 @@ const checks = {
     // The pill does not take the status's room: the status keeps most of the first row.
     assert.deepEqual(fit, { scroll: true, text: true, action: true, menu: true, alert: true, wide: true, lines: fit.lines });
     assert.ok(fit.lines >= 1 && fit.lines <= 2, `status on one or two lines: ${fit.lines}`);
+    // The pill sits on Menu's row, not on a row of its own.
+    const [pillBox, menuBox] = await Promise.all(['#delivery-alert', '#menu-button'].map(selector => page.locator(selector).boundingBox()));
+    assert.ok(Math.abs(pillBox.y + pillBox.height / 2 - (menuBox.y + menuBox.height / 2)) < 4, `pill beside Menu: ${JSON.stringify({ pillBox, menuBox })}`);
     // Settings open under the taller bar: their header is not covered.
     await page.locator('#menu-button').click();
     await page.locator('#settings-open').click();
@@ -790,6 +851,12 @@ const checks = {
     await page.setViewportSize({ width: 1440, height: 900 });
     await help.click();
     await page.locator('#getting-started').waitFor({ state: 'visible' });
+    // How to fix lands on the recording step, focused on its button.
+    await page.waitForFunction(() => document.activeElement?.id === 'startup-recorder');
+    assert.equal(await page.locator('#startup-audio-heading').evaluate(node => node.getBoundingClientRect().top
+      >= document.querySelector('.topbar').getBoundingClientRect().bottom), true, 'the recording step is on screen');
+    await page.keyboard.press('Escape');
+    assert.equal(await help.evaluate(node => node === document.activeElement), true, 'focus back on How to fix');
   },
   async menu_open(page, lang) {
     assert.equal(await page.locator('#app-menu').isVisible(), true);
@@ -810,6 +877,13 @@ const checks = {
       ? [['Открыть мемо следующего звонка', '↵'], ['Начать запись', key], ['Перейти в звонок', 'J']]
       : [["Open the next call's memo", '↵'], ['Start recording', key], ['Join the call', 'J']]);
     assert.equal(await page.locator('#menu-shortcuts').getAttribute('aria-label'), lang === 'ru' ? 'Клавиши' : 'Keys');
+    // Settings from the menu take focus (their heading); Escape closes them and Menu gets focus back.
+    await page.locator('#settings-open').click();
+    await page.waitForFunction(() => document.activeElement?.id === 'settings-heading');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#settings-panel').isVisible(), false);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'menu-button');
+    await page.locator('#menu-button').click();
     // A change while the menu is open does not rebuild the list under the focused item.
     const link = page.locator('#menu-shortcuts [role="menuitem"]', { hasText: /Перейти|Join/ });
     await link.focus();

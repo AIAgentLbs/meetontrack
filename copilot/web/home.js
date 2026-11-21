@@ -63,6 +63,8 @@ function homeDayTitle(start, now) {
   return t(tomorrow ? "home.tomorrow" : "home.today", { date });
 }
 
+// One rule for row actions: an outlined button for the action that unblocks the row (Connect mail, Choose the AI),
+// underlined text for an optional or alternative one (Connect a folder, Retry now) and for links out of the app.
 function homeButton(label, className, key, onClick) {
   const button = textNode("button", className, label);
   button.type = "button";
@@ -116,21 +118,23 @@ function homeRelease(id) {
 }
 
 // Without a chosen AI: the getting-started guide, on its AI step.
-function homeChooseAI() {
-  document.getElementById("getting-started-open").click();
-  document.getElementById("startup-ai-heading").scrollIntoView({ block: "start" });
-}
+const homeChooseAI = () => openGuideStep("startup-ai-heading");
 
-// The calendar is connected in Settings, Google section: open it there with the Calendar checkbox in view.
-// Connect mail or the calendar: Settings at «Google: почта, календарь, файлы» with that box on screen. Focus goes to
-// the box, or to Connect Google while Google is not connected yet (the box is unusable until then).
+// Connect mail or the calendar: Settings at «Google: почта, календарь, файлы». Once the connection is read, focus
+// and scroll go to the one control that moves on: the source's box when Google is connected, else Connect Google
+// (the plain sign-in), else, while sign-in needs a one-time gws setup, the line that says so and its guide link.
 async function homeConnectGoogle(source) {
   document.getElementById("settings-open").click();
-  document.getElementById("google-context-settings").open = true;
-  const box = document.querySelector(`#google-sources input[value="${source}"]`);
-  box.scrollIntoView({ block: "center" });
+  const section = document.getElementById("google-context-settings");
+  section.open = true;
+  section.scrollIntoView({ block: "start" });
   await window.googleLoad;
-  (box.disabled ? document.getElementById("google-connect") : box).focus({ preventScroll: true });
+  const box = document.querySelector(`#google-sources input[value="${source}"]`);
+  const account = document.getElementById("google-account");
+  const target = !box.disabled ? box : account.dataset.client === "true" ? document.getElementById("google-connect")
+    : account.querySelector("a") || account;
+  target.scrollIntoView({ block: "center" });
+  target.focus({ preventScroll: true });
 }
 
 // Connect a folder: the folders dialog (the menu's «Папки с файлами»), focused on Choose folder.
@@ -142,9 +146,10 @@ function homeConnectFolder() {
 // The bar shows a problem (not recording, no microphone...): its fix is the one filled button on screen.
 const homeProblem = (state, agenda, now) => !["recording", "waiting"].includes(callStatus(state, agenda, window.permissionsData, now).kind);
 // A memo still in progress 5 minutes after it started takes longer than usual.
-const homeLate = (memo, now) => memo?.state === "preparing" && Boolean(memo.since) && now - Date.parse(memo.since) >= 5 * 60000;
+const homeLate = (since, now) => Boolean(since) && now - Date.parse(since) >= 5 * 60000;
+const homeNote = (since, now) => ` ${t(homeLate(since, now) ? "home.preparing_late" : "home.preparing_note")}`;
 
-// Home without rows: a title, one line and at most one action.
+// Home without rows: a title, one line and its actions (none, one, or a link and a button).
 function homeEmpty(prefix, action, text = [t(`${prefix}_text`)]) {
   const block = textNode("div", "empty", "");
   const line = textNode("p", "state", "");
@@ -152,13 +157,17 @@ function homeEmpty(prefix, action, text = [t(`${prefix}_text`)]) {
   block.append(textNode("h2", "", t(`${prefix}_title`)), line);
   if (action) {
     const actions = textNode("div", "actions", "");
-    actions.append(action);
+    actions.append(...[action].flat());
     block.append(actions);
   }
   return block;
 }
 
 const homeNorm = text => String(text).toLowerCase().replace(/\s+/g, " ").replace(/[\s.,;:!?…]+$/u, "").trim();
+// A memo line as the digest would say it: without its list mark, a bold lead («**Цель встречи.**»), Markdown and
+// the memo writer's source marks ([S1], [S1, S2]).
+const homeBare = line => homeNorm(homePlain(line.replace(/^(?:[-*+]|\d+[.)])\s+/, "").replace(/^\*\*[^*]+\*\*\s*/, ""))
+  .replace(/(?:\s*\[S\d+(?:\s*,\s*S\d+)*\])+$/, ""));
 
 // Memo text with its links: a Markdown link shows its label, a bare web address its host; never a raw URL.
 function homeInline(node, text) {
@@ -178,11 +187,15 @@ function homeInline(node, text) {
   return node;
 }
 
-// The memo's Markdown as section headings, paragraphs and lists. Left out: a top heading that repeats the title
-// and the lines the digest already shows (the goal and its questions); a heading left with nothing under it goes too.
-function homeMemoBody(markdown, titles, shown) {
+// The memo's Markdown as section headings, paragraphs and lists, showing only what the digest does not. Left out:
+// a top heading that repeats the title, a paragraph that starts with the digest's goal (the goal sentence), the
+// lines the digest shows (`shown.lines`, compared without source marks), and a heading left with nothing under it.
+// A section the digest emptied down to one item shows that item alone, without its heading.
+function homeMemoBody(markdown, titles, shown = { goal: "", lines: [] }) {
   const nodes = [];
-  let list = null;
+  const trimmed = new Set(); // headings whose section lost lines to the digest
+  const goal = homeNorm(shown.goal || "");
+  let list = null, section = null;
   for (const raw of String(markdown || "").split("\n")) {
     const line = raw.trim().replace(/^>\s*/, "");
     if (!line || /^-{3,}$/.test(line)) {
@@ -192,12 +205,17 @@ function homeMemoBody(markdown, titles, shown) {
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
       list = null;
-      if (heading[1] !== "#" || !titles.includes(homeNorm(homePlain(heading[2])))) nodes.push(homeInline(textNode("h4", "", ""), heading[2]));
+      if (heading[1] !== "#" || !titles.includes(homeNorm(homePlain(heading[2])))) nodes.push(section = homeInline(textNode("h4", "", ""), heading[2]));
       continue;
     }
-    // Only a line the digest shows in full is left out: a longer one, or one whose digest was cut, stays whole.
-    if (shown.includes(homeNorm(homePlain(line)))) continue;
-    if (/^(?:[-*+]|\d+[.)])\s+/.test(line)) {
+    const item = /^(?:[-*+]|\d+[.)])\s+/.test(line);
+    const bare = homeBare(line);
+    // A question or background line is left out only when the digest shows all of it (one cut short stays).
+    if (shown.lines.includes(bare) || (!item && goal && bare.startsWith(goal))) {
+      if (section) trimmed.add(section);
+      continue;
+    }
+    if (item) {
       if (!list) nodes.push(list = document.createElement("ul"));
       list.append(homeInline(document.createElement("li"), line.replace(/^(?:[-*+]|\d+[.)])\s+/, "")));
     } else {
@@ -205,7 +223,14 @@ function homeMemoBody(markdown, titles, shown) {
       nodes.push(homeInline(document.createElement("p"), line));
     }
   }
-  return nodes.filter((node, index) => node.tagName !== "H4" || (nodes[index + 1] && nodes[index + 1].tagName !== "H4"));
+  nodes.forEach((node, index) => {
+    const only = nodes[index + 1];
+    if (!trimmed.has(node) || only?.tagName !== "UL" || only.childElementCount !== 1 || (nodes[index + 2] && nodes[index + 2].tagName !== "H4")) return;
+    nodes[index] = null;
+    nodes[index + 1] = document.createElement("p");
+    nodes[index + 1].append(...only.firstChild.childNodes);
+  });
+  return nodes.filter(Boolean).filter((node, index, kept) => node.tagName !== "H4" || (kept[index + 1] && kept[index + 1].tagName !== "H4"));
 }
 
 // The full memo, part of the row under its actions, and the Open memo button that shows and hides it.
@@ -215,9 +240,9 @@ function homeMemo(plan, memo, title, key, id, primary, filled = primary) {
   panel.id = id;
   panel.hidden = !homeOpenMemos.has(key);
   const titles = [title, plan.title].filter(Boolean).map(value => homeNorm(value));
-  const shown = [memo.goal, ...(memo.questions || []).slice(0, 3), memo.background].map(value => homeNorm(value || "")).filter(Boolean);
+  const shown = { goal: memo.goal, lines: [...(memo.questions || []).slice(0, 3), memo.background].map(value => homeNorm(value || "")).filter(Boolean) };
   panel.append(...homeMemoBody(plan.memo_markdown, titles, shown));
-  if (plan.talk_track_markdown) panel.append(textNode("h4", "", t("plan.talk_track")), ...homeMemoBody(plan.talk_track_markdown, titles, []));
+  if (plan.talk_track_markdown) panel.append(textNode("h4", "", t("plan.talk_track")), ...homeMemoBody(plan.talk_track_markdown, titles));
   // Materials: plain underlined links, like Open the call link.
   const links = document.createElement("div");
   links.className = "memo-links";
@@ -263,7 +288,11 @@ function homeRow(meeting, { next, now, supported, id, recording, stale, problem 
   const memoView = memo.state === "ready" && plan ? homeMemo(plan, memo, meeting.title, key, id, next, next && !problem) : null;
 
   if (memo.state === "ready") {
-    if (memo.goal) main.append(textNode("p", "goal", t("home.goal", { goal: memo.goal })));
+    if (memo.goal) {
+      const goal = textNode("p", "goal", "");
+      goal.append(textNode("b", "", t("home.goal")), ` ${memo.goal}`);
+      main.append(goal);
+    }
     if (memo.questions?.length) {
       const asks = document.createElement("ul");
       asks.className = "asks";
@@ -286,14 +315,15 @@ function homeRow(meeting, { next, now, supported, id, recording, stale, problem 
     const status = document.createElement("p");
     status.className = "state";
     status.setAttribute("role", "status");
-    // One format: a bold lead (with the start time when known) and the note, which ages after 5 minutes.
-    status.append(textNode("b", "", memo.since ? t("home.preparing_since", { time: homeClock(memo.since) }) : t("home.preparing")),
-      ` ${t(homeLate(memo, now) ? "home.preparing_late" : "home.preparing_note")}`);
+    // One format: a lead (with the start time when known) and the note, which ages after 5 minutes, in place.
+    status.dataset.since = memo.since || "";
+    status.append(textNode("span", "lead", memo.since ? t("home.preparing_since", { time: homeClock(memo.since) }) : t("home.preparing")),
+      textNode("span", "note", homeNote(memo.since, now)));
     main.append(status);
   } else if (memo.state === "nothing_found") {
     const status = document.createElement("p");
     status.className = "state";
-    status.append(textNode("b", "", t("home.nothing_found")), ` ${t("home.calendar_on")}`);
+    status.append(textNode("span", "lead", t("home.nothing_found")));
     main.append(status);
     actions.append(homeButton(t("home.connect_mail"), "", `${key}|mail`, () => homeConnectGoogle("gmail")),
       homeButton(t("home.connect_folder"), "ql", `${key}|folder`, homeConnectFolder));
@@ -370,12 +400,16 @@ function renderHome(agenda, state, now = Date.now()) {
   const stale = Boolean(agenda && window.agendaFailed);
   const problem = homeProblem(state, agenda, now);
   const signature = JSON.stringify([uiLanguage, new Date(now).toDateString(), Boolean(agenda), failed, agenda?.calendar_state,
-    stale && window.agendaLoadedAt, problem, meetings.map(meeting => homeLate(meeting.memo, now)),
-    meetings, unscheduled, agenda?.skip_recording_supported, [...homeErrors], recording, agenda?.failed_days]);
+    stale && window.agendaLoadedAt, problem, meetings, unscheduled, agenda?.skip_recording_supported, [...homeErrors], recording, agenda?.failed_days]);
   if (signature === homeSignature) {
     // Same rows: only the time left changes, in place, so focus, scroll and an open memo stay.
     const soon = home.querySelector(".soon");
     if (soon && next) soon.textContent = homeTimeLeft(next, now);
+    for (const status of home.querySelectorAll("[data-since]")) {
+      const note = status.querySelector(".note");
+      const text = homeNote(status.dataset.since, now);
+      if (note.textContent !== text) note.textContent = text;
+    }
     return;
   }
   homeSignature = signature;
@@ -404,7 +438,8 @@ function renderHome(agenda, state, now = Date.now()) {
   if (failed && !failedDays.length) {
     column.append(loadFailed());
   } else if (calendar === "tool_missing") {
-    column.append(homeEmpty("home.tool", Object.assign(externalLink(t("home.tool_link"), homeToolHelp()), { className: "ql" })));
+    column.append(homeEmpty("home.tool", [Object.assign(externalLink(t("home.tool_link"), homeToolHelp()), { className: "ql" }),
+      homeButton(t("home.check_again"), "", "empty|recheck", event => homeReload(event.currentTarget))]));
   } else if (calendar === "not_connected") {
     column.append(homeEmpty("home.calendar_off", homeButton(t("home.calendar_connect"), "primary", "empty|connect", () => homeConnectGoogle("calendar"))));
   } else if (agenda && !meetings.length && !unscheduled.length) {

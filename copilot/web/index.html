@@ -65,7 +65,7 @@
 
     <section id="settings-panel" class="settings-panel" hidden aria-labelledby="settings-heading">
       <div class="repo-dialog-header">
-        <h2 id="settings-heading" data-i18n="settings.open">Настройки</h2>
+        <h2 id="settings-heading" tabindex="-1" data-i18n="settings.open">Настройки</h2>
         <button class="quiet-button" id="settings-close" type="button" data-i18n="common.close">Закрыть</button>
       </div>
       <div id="settings-content">
@@ -199,7 +199,7 @@
       </div>
     </section>
     <section id="getting-started" class="getting-started" hidden aria-labelledby="getting-started-heading">
-      <div class="repo-dialog-header"><h2 id="getting-started-heading">Начать работу с MeetOnTrack</h2><button class="quiet-button" id="getting-started-close" type="button">Закрыть</button></div>
+      <div class="repo-dialog-header"><h2 id="getting-started-heading" tabindex="-1">Начать работу с MeetOnTrack</h2><button class="quiet-button" id="getting-started-close" type="button">Закрыть</button></div>
       <p id="getting-started-intro"></p>
       <div class="startup-step"><h3 id="startup-audio-heading"></h3><p id="startup-audio-status" role="status"></p><button class="quiet-button" id="startup-recorder" type="button"></button> <button class="primary-button" id="startup-record" type="button"></button></div>
       <div class="startup-step"><h3 id="startup-ai-heading"></h3><p id="startup-ai-help"></p><p id="startup-ai-status" role="status"></p><div id="ai-card" class="ai-purposes"></div><p id="ai-choice-message" role="status"></p><button class="quiet-button" id="startup-ai-check" type="button"></button> <button class="quiet-button" id="ai-refresh" type="button"></button><p id="startup-ai-login"></p></div>
@@ -358,7 +358,7 @@
             <button class="quiet-button" id="google-search" type="submit" data-i18n="google.search">Найти для текущего звонка</button>
           </form>
           </details>
-          <p data-i18n="google.limits">Календарь: 90 дней назад и 30 вперед. Почта: до 3 писем за год, только заголовки и начало. Google Диск: до 5 файлов, у первых двух берется начало документа или таблицы. Найденное хранится 10 минут и стирается при смене источников. Отправка отчетов настраивается отдельно.</p>
+          <p data-i18n="google.limits">Календарь: 90 дней назад и 30 вперед. Почта: до 3 писем за год, только тема и короткий отрывок письма. Google Диск: до 5 файлов, у первых двух берутся подходящие отрывки документа или начало таблицы. Найденное хранится 10 минут и стирается при смене источников. Отправка отчетов настраивается отдельно.</p>
           <p id="google-message" role="status" aria-live="polite"></p>
           <div id="google-results"></div>
         </details>

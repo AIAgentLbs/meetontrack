@@ -2910,8 +2910,8 @@ def skip_recording_supported() -> bool:
 def agenda_payload(now=None) -> dict:
     """The agenda with the calendar's state, whether the recorder honours "do not record", and each choice.
     A calendar day that could not be read is "failed" with the rows of the day that loaded, never an empty day."""
+    state = PLANS.calendar.state() if PLANS.calendar else "tool_missing"  # first: it finds a gws installed since start
     agenda = PLANS.agenda(now, memo=MEMOS.memo_for)
-    state = PLANS.calendar.state() if PLANS.calendar else "tool_missing"
     agenda["calendar_state"] = "failed" if agenda.get("failed_days") else state
     # A call booked after a skip ends that skip before it, on the days that loaded; a cancelled one gives it back
     # only when a connected calendar read both days.

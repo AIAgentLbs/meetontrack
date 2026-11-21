@@ -175,6 +175,12 @@ async function route(context, fixture, origin) {
       api.permissionReads.push(url.search);
       return request.fulfill({ json: api.fixture.permissions });
     }
+    // Google is connected exactly when the calendar is read (calendar_meetings reads only a connected Google).
+    if (url.pathname === '/api/google-context') {
+      const connected = api.fixture.agenda?.calendar_state === 'connected';
+      return request.fulfill({ json: { ok: true, connected, client_configured: true, account: connected ? 'me@example.com' : '',
+        sources: { calendar: connected, gmail: false, drive: false } } });
+    }
     if (url.pathname.startsWith('/api/')) return request.fulfill({ json: { ok: true } });
     const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
     if (file.includes('/') || !/\.(html|js|css)$/.test(file)) return request.abort();

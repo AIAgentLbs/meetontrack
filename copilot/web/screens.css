@@ -26,10 +26,10 @@ body:has(#archive-dialog[data-mode="library"]:not([hidden])) #home { display: no
 .navs { display: flex; gap: 16px; }
 .topbar .nav {
   display: inline-flex; align-items: center; min-height: 36px; padding: 0 4px; border: 0; border-radius: 0;
-  background: none; color: var(--text); font-weight: 500; white-space: nowrap;
-  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong);
+  background: none; color: var(--text); font-weight: 600; white-space: nowrap;
 }
-.topbar .nav[aria-current="page"] { font-weight: 600; text-decoration: none; box-shadow: inset 0 -2px 0 var(--text); }
+/* Tabs, not links: no underline, one weight; the bar marks the current one. */
+.topbar .nav[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--text); }
 .topbar .status {
   display: flex; align-items: center; gap: 8px 14px; min-width: 0; min-height: 36px;
   padding-left: 20px; border-left: 1px solid var(--line); color: var(--text); font-size: inherit;
@@ -151,7 +151,9 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
 .who b { display: block; color: var(--text); font-weight: 600; }
 .who b:not(:first-child), .who .more { margin-top: 6px; }
 .who .more { display: block; }
-.goal { margin-top: 10px; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+/* The title carries the row: the goal at regular weight, only its label bold. */
+.goal { margin-top: 10px; font-size: 16px; overflow-wrap: anywhere; }
+.goal b { font-weight: 600; }
 .asks { margin-top: 8px; padding: 0; list-style: none; display: grid; gap: 4px; }
 .asks li { position: relative; padding-left: 16px; overflow-wrap: anywhere; }
 /* The digest keeps two lines of the goal and of each question; the full text is in the opened memo. */
@@ -160,9 +162,11 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
 .bg { margin-top: 10px; color: var(--muted); font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
 /* Two lines of background at most; Where this comes from sits outside the clamp and stays visible. */
 .bg > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* One sources control at a time: with the memo open its sources list is there, so Where this comes from goes. */
+.row:has(.memo-details:not([hidden])) .bg > button.ql, .row:has(.memo-details:not([hidden])) .bg:not(:has(> span)) { display: none; }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; }
 .state { margin-top: 6px; color: var(--muted); }
-.state b { color: var(--text); font-weight: 600; }
+.state .lead { color: var(--text); }
 .row-error { margin-top: 10px; }
 .stale { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
 .home .status-text { white-space: normal; overflow: visible; }
@@ -191,9 +195,9 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
 .memo-links { display: flex; flex-wrap: wrap; gap: 4px 20px; }
 .home .memo-links a.ql { font-size: 15px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
 
-/* Window narrower than 1100 px: key labels only inside primary buttons and the menu. */
+/* Window narrower than 1100 px: no key labels in the bar; the memo button keeps ↵, filled or outlined. */
 @media (max-width: 1100px) {
-  .topbar .status kbd, .home button:not(.primary) kbd { display: none; }
+  .topbar .status kbd { display: none; }
 }
 /* Window narrower than 700 px: navigation goes into the menu. */
 @media (max-width: 700px) {
@@ -206,10 +210,15 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
   .topbar :is(.status, .spacer, .tools) { display: contents; }
   #call-status-text { grid-area: text; }
   #call-status-text:not(.rec) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; }
+  /* A problem keeps its consequence: up to three lines. */
+  #call-status-text.fail { -webkit-line-clamp: 3; line-clamp: 3; }
+  /* The delivery pill sits on Menu's row; the status takes the whole row under them. */
+  .topbar:has(#delivery-alert:not([hidden])) { grid-template-areas: "alert menu" "text text" "action action"; }
+  .topbar:has(#delivery-alert:not([hidden])) #call-status-text { margin-top: 6px; }
   #menu-button { grid-area: menu; }
   .status-actions { grid-area: action; flex-wrap: wrap; max-width: 100%; margin-top: 6px; }
   #call-status-action { max-width: 100%; white-space: normal; text-align: left; }
-  .topbar .delivery-alert { grid-area: alert; margin-top: 6px; max-width: 100%; white-space: normal; }
+  .topbar .delivery-alert { grid-area: alert; max-width: 100%; white-space: normal; }
   .home .by-wide { display: none; }
   .home .by-narrow { display: inline; }
   .topbar .menu { right: 16px; }

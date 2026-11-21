@@ -75,6 +75,18 @@ class CalendarStateTests(unittest.TestCase):
         self.assertEqual(CalendarMeetings(executable='/bin/gws', enabled=lambda: True).state(), 'connected')
         self.assertEqual(CalendarMeetings(executable='/bin/gws').state(), 'connected')
 
+    def test_gws_installed_after_start_is_found_on_the_next_read(self):
+        # Home's Check again after installing the calendar reader: no restart needed.
+        with mock.patch('calendar_meetings.shutil.which', return_value=None):
+            calendar = CalendarMeetings()
+            self.assertEqual(calendar.state(), 'tool_missing')
+        with mock.patch('calendar_meetings.shutil.which', return_value='/opt/bin/gws'):
+            self.assertEqual(calendar.state(), 'connected')
+            self.assertEqual(calendar.executable, '/opt/bin/gws')
+        # A reader given by the caller (tests, Windows path) is never looked up again.
+        with mock.patch('calendar_meetings.shutil.which', return_value='/opt/bin/gws'):
+            self.assertEqual(CalendarMeetings(executable='').state(), 'tool_missing')
+
 
 class SkipRecordingTests(unittest.TestCase):
     def setUp(self):
