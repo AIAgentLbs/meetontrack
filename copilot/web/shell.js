@@ -116,7 +116,10 @@ function renderStatus(view) {
   }
   $("menu-notes").hidden = view === "home";
   const transcript = window.appState?.transcript || {};
-  $("menu-notes-title").textContent = t("shell.notes", { title: transcript.display_meeting || transcript.meeting || "" });
+  const title = transcript.display_meeting || transcript.meeting;
+  $("menu-notes-title").textContent = title ? t("shell.notes", { title }) : t("journal.notes");
+  // The guide's own Start recording follows the microphone too, also while the guide is open.
+  $("startup-record").hidden = window.permissionsData?.microphone === "denied";
   fitBar();
 }
 
@@ -146,10 +149,12 @@ const OVERLAYS = "dialog[open], #settings-panel:not([hidden]), #getting-started:
 
 document.addEventListener("keydown", event => {
   const shortcut = shortcuts.find(item => item.match(event));
-  if (!shortcut || event.repeat || document.querySelector(OVERLAYS)) return;
-  const plain = !shortcut.record && (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey);
-  if (plain || event.target.closest?.(`input, textarea, select, [contenteditable]${shortcut.kbd === "↵" ? ", button, a" : ""}`)) return;
+  if (!shortcut) return;
+  // The record combo is ours everywhere, so it never reloads the page, even where it does nothing.
   if (shortcut.record) event.preventDefault();
+  if (event.repeat || document.querySelector(OVERLAYS)) return;
+  const plain = !shortcut.record && (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey);
+  if (plain || event.target.closest?.(`input, textarea, select, [contenteditable]${shortcut.kbd === "↵" ? ', button, a, summary, [role="button"]' : ""}`)) return;
   const control = shortcut.control();
   if (control && !control.disabled) control.click();
 });
@@ -158,6 +163,7 @@ document.addEventListener("keydown", event => {
 // list changes, so a poll never takes focus away from an item.
 let shortcutSignature = "";
 function renderShortcuts() {
+  if (!menu.hidden) return; // never rebuilt under the focused item: toggleMenu refreshes it before opening
   const ready = shortcuts.filter(item => item.control());
   const signature = JSON.stringify([uiLanguage, ready.map(item => item.label)]);
   if (signature === shortcutSignature) return;
@@ -199,9 +205,9 @@ const menuItems = () => [...menu.querySelectorAll('[role="menuitem"]')].filter(i
 
 function toggleMenu(open) {
   if (!open && menu.contains(document.activeElement)) $("menu-button").focus();
+  if (open) renderShortcuts();
   menu.hidden = !open;
   $("menu-button").setAttribute("aria-expanded", String(open));
-  if (open) renderShortcuts();
   if (open) menuItems()[0]?.focus();
 }
 

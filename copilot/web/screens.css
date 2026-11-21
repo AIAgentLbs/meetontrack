@@ -16,7 +16,7 @@ body[data-view="home"] .meeting-boundary-bar { display: none; }
 /* Top bar: Home, Past calls, one call status and Menu. Everything else lives in the menu. */
 .topbar {
   position: sticky; top: 0; z-index: 30; flex-shrink: 0;
-  display: flex; align-items: center; gap: 12px 20px; min-height: var(--bar-h); padding: 0 24px;
+  display: flex; align-items: center; gap: 12px 20px; min-height: 60px; padding: 0 24px;
   background: var(--surface); border-bottom: 1px solid var(--line); font-size: 15px; line-height: 1.5;
 }
 .topbar .spacer { flex: 1; }
@@ -40,6 +40,8 @@ body[data-view="home"] .meeting-boundary-bar { display: none; }
 .tools { position: relative; display: flex; align-items: center; gap: 16px; min-width: 0; }
 #menu-button { flex-shrink: 0; }
 .topbar .delivery-alert { display: block; min-width: 0; max-width: 42ch; line-height: 34px; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; }
+/* A recording problem comes first: beside it the pill keeps a short width, its full text in the tooltip. */
+.topbar:has(#call-status-text.fail) .delivery-alert { max-width: 16ch; }
 
 .topbar button, .home button {
   font: inherit; font-size: 14px; font-weight: 600; min-height: 36px; padding: 0 14px;

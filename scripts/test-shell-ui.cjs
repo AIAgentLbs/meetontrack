@@ -12,9 +12,9 @@ const errors = [];
   let live = true;
   const healthy = { channels: { gmail: { configured: true, state: 'sent', issues: [] } }, undelivered: [], notifications: [] };
   const problem = { ...healthy, undelivered: [{ meeting_id: 'm9', channels: ['email'], title: 'Pilot review', started_at: '2026-11-20T10:00:00+00:00' }] };
-  let delivery = healthy, language = 'ru', updates = {};
+  let delivery = healthy, language = 'ru', updates = {}, title = 'Pilot review';
   const state = () => ({ preferences: { interface_language: language }, journal: [], frames: [], project: {}, delivery, updates,
-    transcript: { meeting_id: 'm1', meeting: 'Pilot review', status: live ? 'recording' : 'idle', live, segments: [], speakers: [] },
+    transcript: { meeting_id: 'm1', meeting: title, status: live ? 'recording' : 'idle', live, segments: [], speakers: [] },
     recording_health: { capture: { audio_recording: live } },
     copilot: { busy: false, analysis: { state: 'idle' }, messages: [] },
   });
@@ -230,6 +230,11 @@ const errors = [];
     const notes = page.locator('#menu-notes');
     assert.equal(await notes.isVisible(), true);
     assert.equal(await notes.innerText(), 'Заметки к звонку «Pilot review»\nваш текст, который учтут подсказки');
+    // A call without a title: no empty quotes, the notes tab's own name.
+    title = '';
+    await page.waitForFunction(() => document.querySelector('#menu-notes-title').textContent === 'Мои заметки');
+    title = 'Pilot review';
+    await page.waitForFunction(() => document.querySelector('#menu-notes-title').textContent === 'Заметки к звонку «Pilot review»');
     await notes.click();
     assert.equal(await page.locator('[data-content-view="notes"]').getAttribute('aria-selected'), 'true');
     assert.equal(await page.locator('#app-menu').isVisible(), false);

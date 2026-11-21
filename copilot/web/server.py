@@ -3173,6 +3173,7 @@ class Handler(BaseHTTPRequestHandler):
                     subprocess.run(["/usr/bin/open", str(binary.parents[2])], check=True, timeout=10)
                 self._json({"ok": True})
             elif path == "/api/permissions/open":
+                PERMISSIONS.invalidate()  # the next read after System Settings asks the recorder again
                 try:
                     open_settings(str(payload.get("which") or ""))
                 except ValueError:

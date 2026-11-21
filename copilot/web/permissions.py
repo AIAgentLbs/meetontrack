@@ -40,6 +40,11 @@ class RecorderProbe:
                 self.cached = (time.monotonic(), self._windows() if self.os_name == "nt" else self._macos())
             return dict(self.cached[1])
 
+    def invalidate(self) -> None:
+        """Forget the cached answer: the person may have just changed a permission."""
+        with self.lock:
+            self.cached = None
+
     def _json(self, *args: str) -> dict:
         """The recorder's JSON answer, or {} for anything else; its output goes nowhere but here."""
         try:

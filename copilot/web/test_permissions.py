@@ -85,6 +85,14 @@ class RecorderProbeTests(unittest.TestCase):
         probe.snapshot()
         self.assertEqual(len(calls), 1)
 
+    def test_invalidate_reads_again(self):
+        calls = []
+        probe = RecorderProbe(self.binary, run=fake_run('{}', calls=calls), os_name='posix', ttl=30)
+        probe.snapshot()
+        probe.invalidate()
+        probe.snapshot()
+        self.assertEqual(len(calls), 2)
+
 
 class OpenSettingsTests(unittest.TestCase):
     def test_opens_fixed_pages(self):
@@ -150,6 +158,14 @@ class RouteTests(unittest.TestCase):
             status, payload = self.request('POST', '/api/permissions/open', {'which': 'microphone'})
         self.assertEqual((status, json.loads(payload)), (200, {'ok': True}))
         opener.assert_called_once_with('microphone')
+
+    def test_open_drops_the_cached_answer(self):
+        # The person comes back from System Settings: the next read asks the recorder again.
+        probe = mock.Mock()
+        with mock.patch.object(server, 'PERMISSIONS', probe), mock.patch.object(server, 'open_settings'):
+            status, _ = self.request('POST', '/api/permissions/open', {'which': 'microphone'})
+        self.assertEqual(status, 200)
+        probe.invalidate.assert_called_once_with()
 
     def test_open_failure_is_generic(self):
         with mock.patch.object(server, 'open_settings', side_effect=OSError('secret detail')):
