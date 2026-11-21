@@ -40,7 +40,8 @@ public sealed class RecordingCoordinator(
     SessionStore sessions,
     AutoRecordPolicy autoRecord,
     IAudioCapture capture,
-    Func<bool>? wholeSystemAudio = null) : IAsyncDisposable
+    Func<bool>? wholeSystemAudio = null,
+    Func<IReadOnlyList<SkipCall>?>? skips = null) : IAsyncDisposable
 {
     private readonly SemaphoreSlim gate = new(1, 1);
     private SessionHandle? current;
@@ -90,8 +91,19 @@ public sealed class RecordingCoordinator(
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Undo in MeetOnTrack removes the call from the file, and its skip with it. A file that cannot be
+            // read (null) is not an Undo: the skip holds.
+            var stored = skips?.Invoke();
+            if (autoRecord.SkippedCall is { } latched && (skips is null || stored is not null && !stored.Any(call => call.Start == latched)))
+                autoRecord.SkipLifted();
             var decision = autoRecord.Observe(observation);
-            if (decision.Action == AutoRecordAction.Start && current is null)
+            if (decision.Action == AutoRecordAction.Start && current is null
+                && stored?.FirstOrDefault(call => call.Covers(observation.At)) is { } skipped)
+            {
+                // The person chose in MeetOnTrack not to record this call; manual starts still work.
+                autoRecord.Skipped(skipped.Start);
+            }
+            else if (decision.Action == AutoRecordAction.Start && current is null)
             {
                 try
                 {

@@ -30,6 +30,8 @@ from urllib.parse import urldefrag, urlparse, urlsplit, urlunsplit, parse_qs
 import hidden_consoles
 hidden_consoles.install()  # before any helper starts: no console windows on Windows
 from archive import MeetingArchive
+from permissions import RecorderProbe, open_settings
+from skip_recording import SkipRecording
 from analysis_rebuild import WINDOW as ANALYSIS_WINDOW, AnalysisRebuilds, chunk_key, transcript_chunks, transcript_signature
 from canonical_transcript import canonical_segments
 from meeting_boundaries import MeetingBoundaries, BoundaryConflict, BoundaryUnavailable
@@ -84,6 +86,7 @@ UPDATES = ReleaseUpdates(HOME / ".config/meeting-copilot/updates.json", installe
 TRANSCRIPT_FILE = HOME / ".local/share/meeting-copilot/meeting-copilot-live.json"
 MEMOS_FILE = HOME / ".local/share/meeting-copilot/memos.json"
 BOUND_MEMOS_DIR = HOME / ".local/share/meeting-copilot/bound-memos"
+SKIP_RECORDING_FILE = TRANSCRIPT_FILE.with_name("skip-recording.json")
 SESSION_FILE = HOME / ".config/meeting-copilot/SESSION.md"
 MANIFEST_FILE = HOME / ".config/meeting-copilot/repos.json"
 ACTIVE_REPOS_FILE = HOME / ".config/meeting-copilot/active-repos.json"
@@ -2471,6 +2474,8 @@ ASK формулируй как одну короткую реплику, кот
 
 
 TRANSCRIPT = TranscriptState()
+PERMISSIONS = RecorderProbe(RECOGNITION_GUARD.binary)
+SKIPS = SkipRecording(SKIP_RECORDING_FILE)
 PLANS = CallPlans(PREPARATIONS_FILE, CALL_PLAN_STATE_FILE, ACTIVE_REPOS_FILE,
                  CalendarMeetings(enabled=lambda: "calendar" in GOOGLE_CONTEXT.enabled_sources()),
                  app_plans=lambda: MEMOS.plans(),  # late-bound: MEMOS is defined further down
@@ -2868,18 +2873,61 @@ class AnnotationCache:
 ANNOTATED_CACHE = AnnotationCache()
 
 
+_RECORDER_RUNNING: tuple[float, bool | None] | None = None  # (monotonic time, answer), kept 5 s
+
+
 def recorder_running() -> bool | None:
     """Whether the recorder app is running, from the process list; None when that can't be told.
     The app is the binary with no subcommand (or `run`); `stt-options`, `process` and the other
-    one-shot commands share its path but record nothing."""
+    one-shot commands share its path but record nothing. Cached 5 s: the UI polls it."""
+    global _RECORDER_RUNNING
     if os.name == "nt":
         return None  # ponytail: Windows liveness unknown, add a tasklist check when its banner needs it
+    cached = _RECORDER_RUNNING
+    if cached and time.monotonic() - cached[0] < 5:
+        return cached[1]
     try:
         listing = subprocess.run(["/bin/ps", "-axo", "args="], capture_output=True, text=True, timeout=5).stdout
     except (OSError, subprocess.SubprocessError):
-        return None
+        listing = None
     app = str(RECOGNITION_GUARD.binary)
-    return any(line.strip() == app or line.startswith((app + " run", app + " -psn")) for line in listing.splitlines())
+    answer = None if listing is None else any(
+        line.strip() == app or line.startswith((app + " run", app + " -psn")) for line in listing.splitlines())
+    _RECORDER_RUNNING = (time.monotonic(), answer)
+    return answer
+
+
+def agenda_payload(now=None) -> dict:
+    """The agenda with the calendar's state, whether the recorder honours "do not record", and each choice.
+    A calendar day that could not be read is "failed" with the rows of the day that loaded, never an empty day."""
+    agenda = PLANS.agenda(now, memo=MEMOS.memo_for)
+    state = PLANS.calendar.state() if PLANS.calendar else "tool_missing"
+    agenda["calendar_state"] = "failed" if agenda.get("failed_days") else state
+    # A call booked after a skip ends that skip before it, on the days that loaded; a cancelled one gives it back
+    # only when a connected calendar read both days.
+    SKIPS.clip(agenda["meetings"], restore=complete_agenda(agenda, state))
+    agenda["skip_recording_supported"] = PERMISSIONS.snapshot()["skip_recording"]
+    agenda["meetings"] = [{**meeting, "skip_recording": SKIPS.skipped(meeting)} for meeting in agenda["meetings"]]
+    return agenda
+
+
+def complete_agenda(agenda: dict, state: str) -> bool:
+    """A connected calendar read both days: only then may a shortened skip have its window back."""
+    return state == "connected" and not agenda.get("failed_days")
+
+
+def auto_record_enabled() -> bool:
+    """Whether this platform's recorder starts by itself, read from the shared settings file with the recorders' own
+    keys and defaults (Config.swift autoRecord, AppSettings.cs AutoRecordSettings): on, and something to start from.
+    The Windows recorder starts only from microphone activity; the Mac one also from the calendar."""
+    try:
+        settings = json.loads(CAPTURE_CONFIG_FILE.read_text()).get("auto_record")
+    except (OSError, ValueError, AttributeError):
+        settings = None
+    settings = settings if isinstance(settings, dict) else {}
+    flag = lambda key, default: settings[key] if isinstance(settings.get(key), bool) else default
+    calendar = flag("calendar", False) and sys.platform != "win32"
+    return flag("enabled", True) and (flag("mic_activity", True) or calendar)
 
 
 def annotated_snapshot():
@@ -3060,6 +3108,10 @@ class Handler(BaseHTTPRequestHandler):
             self._static("getting-started.js", "text/javascript; charset=utf-8")
         elif path == "/speech.js":
             self._static("speech.js", "text/javascript; charset=utf-8")
+        elif path in ("/shell.js", "/home.js"):
+            self._static(path[1:], "text/javascript; charset=utf-8")
+        elif path == "/screens.css":
+            self._static("screens.css", "text/css; charset=utf-8")
         elif path == "/api/stt":
             self._json({"ok": True, "choice": STT.status(), "downloads": STT.downloads(), "retranscribe": STT.jobs(),
                         "check": STT.last_check()})
@@ -3077,6 +3129,14 @@ class Handler(BaseHTTPRequestHandler):
                         "capture_running": recorder_running(),
                         "live_enabled": bool(config.get("live_transcription", {}).get("enabled", False)),
                         "folders": LOCAL_CONTEXT.snapshot()})
+        elif path == "/api/permissions":
+            if parse_qs(urlparse(self.path).query).get("fresh") == ["1"]:
+                PERMISSIONS.invalidate()  # back from System Settings: ask the recorder again
+            state = PERMISSIONS.snapshot()
+            running = recorder_running()
+            self._json({"ok": True, "microphone": state["microphone"], "call_audio": state["call_audio"],
+                        "recorder": "unknown" if running is None else "running" if running else "stopped",
+                        "auto_record": auto_record_enabled()})
         elif path == "/api/ai":
             # The one choice, each task's state with it (a task the choice cannot do is
             # unavailable with its reason) and the last Check AI result per task.
@@ -3123,7 +3183,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif path == "/api/agenda":
             # Today's and tomorrow's meetings with their memos; not part of the 2.5 s state poll.
-            self._json({"ok": True, **PLANS.agenda(memo=MEMOS.memo_for)})
+            self._json({"ok": True, **agenda_payload()})
         elif path == "/api/repositories":
             self._json({"ok": True, **REPOSITORIES.catalog()})
         elif path == "/api/projects":
@@ -3228,6 +3288,35 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     subprocess.run(["/usr/bin/open", str(binary.parents[2])], check=True, timeout=10)
                 self._json({"ok": True})
+            elif path == "/api/permissions/open":
+                try:
+                    open_settings(str(payload.get("which") or ""))
+                except ValueError:
+                    raise
+                except Exception:  # no system error text reaches the page
+                    self._json({"ok": False, "error": "open_failed"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+                else:
+                    self._json({"ok": True})
+            elif path == "/api/agenda/skip-recording":
+                limits = {"event_id": 1024, "start": 64, "end": 64, "title": 300}
+                if not isinstance(payload.get("skip"), bool) or any(
+                        not isinstance(payload.get(field), str) or len(payload[field]) > limit
+                        for field, limit in limits.items()):
+                    raise ValueError("A call needs event_id, start, end, title and skip.")
+                meeting = {field: payload[field] for field in limits}
+                if not PERMISSIONS.snapshot()["skip_recording"]:
+                    self._json({"ok": False, "error": "recorder_cannot_skip"}, HTTPStatus.CONFLICT)
+                else:
+                    agenda = PLANS.agenda(datetime.now().astimezone())
+                    state = PLANS.calendar.state() if PLANS.calendar else "tool_missing"
+                    # R32: no skip while any recording runs (the recorders read the file only before they start, so
+                    # a skip cannot stop it). Checked last, after every calendar read, right before the write. Undo stays.
+                    if payload["skip"] and capture_recording():
+                        self._json({"ok": False, "error": "recording_active"}, HTTPStatus.CONFLICT)
+                    else:
+                        SKIPS.set(meeting, payload["skip"], datetime.now().astimezone(), agenda["meetings"],
+                                  restore=complete_agenda(agenda, state))
+                        self._json({"ok": True})
             elif path == "/api/getting-started/start-recording":
                 run = subprocess.run([str(RECOGNITION_GUARD.binary), "record", "start"],
                                      capture_output=True, text=True, timeout=10, check=False)
@@ -3552,9 +3641,6 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(event_id, str) or not 0 < len(event_id) <= 1024:
                     raise ValueError("Send event_id: the calendar event of the memo to write again")
                 MEMOS.rebuild(event_id, PLANS.agenda())  # ValueError (400) unless upcoming, external, no file plan
-                self._json({"ok": True})
-            elif path == "/api/refresh":
-                TRANSCRIPT.trigger.set()
                 self._json({"ok": True})
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)

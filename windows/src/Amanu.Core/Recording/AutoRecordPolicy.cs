@@ -79,6 +79,12 @@ public sealed class AutoRecordPolicy(AutoRecordOptions initial)
 
     public AutoRecordPhase Phase { get; private set; } = AutoRecordPhase.Watching;
 
+    /// <summary>
+    /// The start of the stored call skipped while the mic was held. That call stays skipped, even
+    /// past its scheduled end, until the call app lets go of the mic or Undo removes it from the file.
+    /// </summary>
+    public DateTimeOffset? SkippedCall { get; private set; }
+
     /// <summary>What the policy is thinking, for the window: "why didn't it record?"</summary>
     public string LastDecision { get; private set; } = T("waiting for a call", "жду звонка");
 
@@ -140,6 +146,20 @@ public sealed class AutoRecordPolicy(AutoRecordOptions initial)
         return wait;
     }
 
+    /// <summary>
+    /// A start was due, but the person chose in MeetOnTrack not to record the stored call that
+    /// starts at <paramref name="call"/>. It stays skipped, even past its scheduled end, until the
+    /// call app lets go of the mic.
+    /// </summary>
+    public void Skipped(DateTimeOffset call)
+    {
+        SkippedCall = call;
+        LastDecision = T("skipped: chosen in MeetOnTrack", "пропуск: выбрано в MeetOnTrack");
+    }
+
+    /// <summary>Undo in MeetOnTrack removed the skipped call from the file: it records like any other.</summary>
+    public void SkipLifted() => SkippedCall = null;
+
     /// <summary>The duration ceiling, which holds for every recording whatever else is on.</summary>
     public bool CeilingReached(DateTimeOffset now) =>
         recordingStartedAt is { } started && now - started >= options.MaximumDuration;
@@ -154,7 +174,11 @@ public sealed class AutoRecordPolicy(AutoRecordOptions initial)
         var callOver = !owned && observation.At - microphoneReleasedSince >= options.StopDelay;
         // A new call is a new episode: whatever failed during the last one says
         // nothing about this one.
-        if (callOver) startFailures = 0;
+        if (callOver)
+        {
+            startFailures = 0;
+            SkippedCall = null;
+        }
 
         switch (Phase)
         {
@@ -189,7 +213,12 @@ public sealed class AutoRecordPolicy(AutoRecordOptions initial)
 
         microphoneHeldSince ??= observation.At;
         var held = observation.At - microphoneHeldSince.Value;
-        if (held >= options.StartDelay) return AutoRecordDecision.Start;
+        if (held >= options.StartDelay)
+        {
+            if (SkippedCall is not { } skipped) return AutoRecordDecision.Start;
+            Skipped(skipped);
+            return AutoRecordDecision.None;
+        }
         var remaining = (int)Math.Ceiling((options.StartDelay - held).TotalSeconds);
         LastDecision = T($"{observation.MicrophoneOwner} took the mic — starting in {remaining}s",
                          $"{observation.MicrophoneOwner} взял микрофон — начну через {remaining} с");

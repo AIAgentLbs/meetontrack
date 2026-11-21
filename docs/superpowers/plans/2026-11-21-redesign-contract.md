@@ -94,7 +94,9 @@ puts the meeting into `preparing` (plan 2).
 
 `POST /api/agenda/skip-recording` with
 `{"event_id": "...", "start": ISO, "end": ISO, "title": "...", "skip": true}`
-returns `{"ok": true}`, or 409 when the recorder cannot honour it (plan 1).
+returns `{"ok": true}`, or 409 when the recorder cannot honour it (plan 1):
+`recorder_cannot_skip`, or `recording_active` while any recording runs (ruling R32; an
+undo, `"skip": false`, is still accepted).
 The choice is stored in `skip-recording.json` in the app data directory and
 matched by the recorders by time window.
 

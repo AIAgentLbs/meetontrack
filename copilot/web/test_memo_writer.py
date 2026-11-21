@@ -13,6 +13,7 @@ import ai_providers
 
 from calendar_meetings import CalendarMeetings
 from call_plan import CallPlans
+from skip_recording import SkipRecording
 from memo_writer import (MemoWriter, build_plan, company_from, file_digest, folder_sources, is_external,
                          memo_prompt, one_line, outside_attendees, parse_answer, past_reports, search_words,
                          source_signature)
@@ -1158,6 +1159,9 @@ def calendar_of(events):
         def available(self):
             return True
 
+        def state(self):
+            return "connected"
+
         def for_day(self, day):
             return [dict(event) for event in events if datetime.fromisoformat(event["start"]).date() == day]
 
@@ -1183,7 +1187,10 @@ class MemoRoutesTests(unittest.TestCase):
         self.writer._update("ev1", state="failed", reason="timeout", start=when["start"], attempts=2)
         plans = CallPlans(root / "preparations.json", root / "call-plans-state.json", None, calendar_of(events),
                           app_plans=lambda: server.MEMOS.plans())
-        for target, value in (("PLANS", plans), ("MEMOS", self.writer)):
+        # /api/agenda also reads the skip choices and the recorder's permissions: keep both out of the user's files.
+        permissions = type("Permissions", (), {"snapshot": lambda self: {"skip_recording": False}})()
+        for target, value in (("PLANS", plans), ("MEMOS", self.writer), ("PERMISSIONS", permissions),
+                              ("SKIPS", SkipRecording(root / "skip-recording.json"))):
             patcher = patch.object(server, target, value)
             patcher.start()
             self.addCleanup(patcher.stop)

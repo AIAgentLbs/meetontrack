@@ -28,7 +28,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         copilot: {messages: [], busy: false, analysis: {state: 'idle'}}, journal: [], frames: [], meeting_chat: [], project: {}}});
       if (url.pathname.startsWith('/api/')) return route.fulfill({json: {ok: true}});
       const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-      if (!['index.html', 'app.js', 'styles.css'].includes(file)) return route.abort();
+      if (!['index.html', 'app.js', 'styles.css', 'screens.css', 'home.js', 'shell.js'].includes(file)) return route.abort();
       const type = file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html';
       return route.fulfill({contentType: type, body: await fs.readFile(path.join(root, file))});
     });
@@ -44,6 +44,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       'main screen carries no new-meeting help, AI-context subtitle or analysis status line');
 
     // Language: one labelled control in Settings, saved to the shared preferences.
+    await page.locator('#menu-button').click();
     await page.locator('#settings-open').click();
     const language = page.getByRole('combobox', {name: 'Язык интерфейса', exact: true});
     assert.equal(await language.count(), 1, 'Settings has one labelled interface language control');
@@ -53,14 +54,18 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.deepEqual(saved, [{interface_language: 'en'}]);
     await page.locator('#settings-close').click();
 
-    // Transcript: one click hides it, the other panel takes the width, a slim control brings it back.
+    // Transcript: one click hides it, the other panel takes the width, the menu brings it back.
     assert.equal(await hide.textContent(), 'Hide');
+    await page.locator('#menu-button').click();
     assert.equal(await show.isVisible(), false);
+    await page.keyboard.press('Escape');
     const fullWidth = (await page.locator('.workspace').boundingBox()).width;
     await hide.click();
     await transcript.waitFor({state: 'hidden'});
     assert.equal(await show.textContent(), 'Show transcript');
+    await page.locator('#menu-button').click();
     assert.equal(await show.isVisible(), true);
+    await page.keyboard.press('Escape');
     assert(Math.abs((await copilot.boundingBox()).width - fullWidth) < 2, 'freed width goes to the other panel');
     assert.deepEqual(saved.at(-1), {transcript_hidden: true});
 
@@ -81,8 +86,9 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await fresh.waitForFunction(() => document.documentElement.lang === 'ru');
     assert.equal(await fresh.locator('#transcript-show').textContent(), 'Показать расшифровку');
 
-    // Narrow screen: the show control stays reachable and nothing scrolls sideways.
+    // Narrow screen: the show control stays reachable in the menu and nothing scrolls sideways.
     await fresh.setViewportSize({width: 390, height: 844});
+    await fresh.locator('#menu-button').click();
     assert.equal(await fresh.locator('#transcript-show').isVisible(), true);
     assert.equal(await fresh.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await fresh.locator('#transcript-show').click();
@@ -98,6 +104,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     const before = saved.length;
     slowNextSave = true;
     await fresh.locator('#transcript-hide').click();
+    await fresh.locator('#menu-button').click();
     await fresh.locator('#transcript-show').click();
     for (let wait = 0; saved.length < before + 2 && wait < 100; wait++) await new Promise(resolve => setTimeout(resolve, 100));
     assert.deepEqual(saved.slice(before), [{transcript_hidden: true}, {transcript_hidden: false}], 'saves keep click order');

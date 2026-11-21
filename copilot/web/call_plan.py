@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-from calendar_meetings import CalendarMeetings
+from calendar_meetings import CalendarMeetings, CalendarUnavailable
 from archive import _atomic_json, _json
 from memo_writer import is_external
 from repo_preparations import RepositoryPreparations
@@ -238,7 +238,11 @@ class CallPlans:
         except (KeyError, TypeError, ValueError):
             return []
         matches = []
-        for event in self.calendar.for_day(started.astimezone().date()):
+        try:
+            events = self.calendar.for_day(started.astimezone().date())
+        except CalendarUnavailable:
+            return []  # the live call keeps its plan by other means; Home reports the failure
+        for event in events:
             try:
                 event_start = datetime.fromisoformat(event["start"])
                 event_end = datetime.fromisoformat(event["end"])
@@ -264,7 +268,11 @@ class CallPlans:
             day = datetime.fromisoformat(str(transcript["started_at"]).replace("Z", "+00:00")).astimezone().date()
         except (KeyError, TypeError, ValueError):
             return plan
-        for event in self.calendar.for_day(day):
+        try:
+            events = self.calendar.for_day(day)
+        except CalendarUnavailable:
+            return None  # failing calendar: the event cannot be confirmed
+        for event in events:
             if event.get("id") != plan["event_id"]:
                 continue
             try:
@@ -316,12 +324,17 @@ class CallPlans:
         Works with no live call; calendar reads and repository scans are cached by their owners.
         """
         now = now or datetime.now().astimezone()
-        meetings, unscheduled, seen = [], [], set()
+        meetings, unscheduled, seen, failed = [], [], set(), []
         for day in (now.date(), now.date() + timedelta(days=1)):
             noon = datetime.combine(day, time(12)).astimezone().isoformat()
             plans = [plan for plan in self._plans({"started_at": noon}) if self._valid(plan)]
             matched: set[str] = set()
-            for event in (self.calendar.for_day(day) if self.calendar else []):
+            try:
+                events = self.calendar.for_day(day) if self.calendar else []
+            except CalendarUnavailable:
+                events = []
+                failed.append(day.isoformat())  # the day that loaded keeps its rows; Home offers Retry for this one
+            for event in events:
                 try:
                     started, ended = datetime.fromisoformat(event["start"]), datetime.fromisoformat(event["end"])
                 except (KeyError, TypeError, ValueError):
@@ -348,13 +361,15 @@ class CallPlans:
                 if memo:
                     item["memo"] = memo(dict(item), hits)
                 meetings.append({**item, "_sort": started, "plans": [self._summary(plan) for plan in hits]})
+            if day.isoformat() in failed:
+                continue  # its dated memos may belong to an event: unknown until the day loads
             unscheduled += [self._summary(plan) for plan in plans  # an app plan is never unscheduled
                             if plan["id"] not in matched and not plan.get("event_id")
                             and self._scheduled_day(plan) == day]
         return {"calendar": bool(self.calendar and self.calendar.available()),
                 "meetings": [{k: v for k, v in item.items() if k != "_sort"}
                              for item in sorted(meetings, key=lambda item: item["_sort"])],
-                "unscheduled_plans": unscheduled}
+                "unscheduled_plans": unscheduled, "failed_days": failed}
 
     @staticmethod
     def _near_scheduled_time(plan: dict, event_start: datetime) -> bool:

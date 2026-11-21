@@ -46,7 +46,8 @@ public static class CopilotControl
                     }
                     result = new { ok=true, recording=runtime.State.IsRecording, paused=runtime.State.IsPaused,
                         live_model_ready=runtime.IsLocalModelReady("nemotron-live"), final_model_ready=runtime.IsLocalModelReady("parakeet"),
-                        local_runtime_ready=runtime.LocalRuntimePresent, live_status=runtime.LiveStatus };
+                        local_runtime_ready=runtime.LocalRuntimePresent, live_status=runtime.LiveStatus,
+                        skip_recording=true };
                 }
                 catch (Exception) { result = new { ok=false, error="Capture command failed; inspect the Capture window" }; }
                 await writer.WriteLineAsync(JsonSerializer.Serialize(result));

@@ -20,6 +20,8 @@ enum Notifications {
     private static let sessionKey = "com.aiagentlabs.meeting-copilot.session"
     /// A release banner: clicking it installs, like the menu item (MEETONTRACK-156).
     private static let releaseKey = "com.aiagentlabs.meeting-copilot.release"
+    /// A banner whose click opens this URL, such as a System Settings pane.
+    private static let urlKey = "com.aiagentlabs.meeting-copilot.url"
 
     @MainActor
     private static var authorization: Task<Bool, Never>?
@@ -38,7 +40,7 @@ enum Notifications {
     }
 
     @MainActor
-    static func post(title: String, body: String, opening session: URL?, release: String? = nil) {
+    static func post(title: String, body: String, opening session: URL?, release: String? = nil, url: URL? = nil) {
         guard usesNotificationCenter else { return }
 
         let content = UNMutableNotificationContent()
@@ -46,6 +48,7 @@ enum Notifications {
         content.body = body
         if let session { content.userInfo = [sessionKey: session.path] }
         if let release { content.userInfo = [releaseKey: release] }
+        if let url { content.userInfo = [urlKey: url.absoluteString] }
 
         // Asked for once, lazily: a permission dialog on first launch, before
         // anything has happened, is a question about nothing.
@@ -61,6 +64,17 @@ enum Notifications {
                 UNNotificationRequest(
                     identifier: UUID().uuidString, content: content, trigger: nil))
         }
+    }
+
+    /// An automatic recording started without microphone access: the call is
+    /// recorded, the person's own voice is not. A click opens the pane that
+    /// grants it.
+    @MainActor
+    static func microphoneMissing() {
+        post(title: localised("Not recording your voice: no microphone access",
+                              "Ваш голос не записывается: нет доступа к микрофону"),
+             body: "", opening: nil,
+             url: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"))
     }
 
     /// The folder a banner was about, or nil when it named none.
@@ -95,8 +109,10 @@ enum Notifications {
             let userInfo = response.notification.request.content.userInfo
             let folder = Notifications.session(in: userInfo)
             let release = userInfo[Notifications.releaseKey] as? String
+            let url = (userInfo[Notifications.urlKey] as? String).flatMap(URL.init(string:))
             await MainActor.run {
                 if let release { return onRelease(release) }
+                if let url { NSWorkspace.shared.open(url); return }
                 NSApp.activate(ignoringOtherApps: true)
                 onOpen(folder)
             }

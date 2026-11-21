@@ -5,7 +5,7 @@
   --surface-strong: #ffffff;
   --surface-muted: #eceae5;
   --line: #d6d3cc;
-  --line-strong: #b9b5ac;
+  --line-strong: #7f7b73;
   --text: #20211f;
   --muted: #656762;
   --faint: #656760;
@@ -66,7 +66,7 @@
     --surface-strong: #242824;
     --surface-muted: #2b2f2b;
     --line: #3a3f3a;
-    --line-strong: #555b55;
+    --line-strong: #737a73;
     --text: #edf0eb;
     --muted: #aeb4ad;
     --faint: #9fa59f;
@@ -373,49 +373,6 @@ input:focus-visible + span {
   outline-offset: 2px;
 }
 
-.topbar {
-  min-height: 68px;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px 24px;
-  padding: 12px 22px;
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
-}
-
-.brand-block {
-  min-width: min(100%, 300px);
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-}
-
-.brand-lockup {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  flex: 0 0 auto;
-}
-
-.brand-company {
-  color: var(--accent-strong);
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.brand {
-  flex: 0 0 auto;
-  font-weight: 720;
-  letter-spacing: -0.02em;
-}
-
 .meeting-title {
   overflow: hidden;
   max-width: 52vw;
@@ -548,7 +505,6 @@ input:focus-visible + span {
 }
 
 .quiet-button,
-.repo-button,
 .suggestions button,
 .view-tabs button,
 .journal-filters button {
@@ -564,21 +520,6 @@ input:focus-visible + span {
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
-}
-
-.repo-button {
-  padding: 3px 0;
-  border: 0;
-  border-bottom: 1px dashed var(--line-strong);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.repo-button:hover {
-  color: var(--text);
-  border-bottom-color: var(--accent);
 }
 
 .quiet-button:hover,
@@ -1791,18 +1732,6 @@ textarea::placeholder {
     overflow: auto;
   }
 
-  .topbar {
-    height: auto;
-    min-height: 68px;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    padding: 13px 14px;
-  }
-
-  .brand-block {
-    display: block;
-  }
-
   .meeting-title {
     max-width: 55vw;
     margin-top: 4px;
@@ -1814,8 +1743,6 @@ textarea::placeholder {
     flex: 0 1 auto;
     max-width: 100%;
   }
-
-  .status-strip .repo-button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 
   .workspace {
     height: auto;

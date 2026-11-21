@@ -11,6 +11,7 @@ struct MeetingCopilot: ParsableCommand {
         subcommands: [
             Run.self, Setup.self, Doctor.self, Install.self, Sessions.self, ProcessSession.self,
             Record.self, TranscribeAudio.self, STTOptions.self, STTDownload.self, STTCheck.self,
+            PermissionsCommand.self,
         ],
         defaultSubcommand: Run.self
     )

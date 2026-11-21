@@ -41,6 +41,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     // Other panels get a bare {ok: true} stub here; only errors raised by app.js are this test's business.
     page.on('pageerror', error => /app\.js/.test(error.stack || '') && errors.push(String(error.stack)));
     await page.route('**/api/**', route => route.fulfill({ json: new URL(route.request().url()).pathname === '/api/state' ? payload : { ok: true } }));
+    // The first-run guide has been seen: it opens over the call and would cover it.
+    await page.addInitScript(() => localStorage.setItem('meetontrack-started', '1'));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     const strip = page.locator('#call-board .board-column.facts');
     await strip.locator('.fact-row').first().waitFor();
@@ -87,6 +89,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.doesNotMatch(text, /[—ё]/, 'RU copy: no em dashes, no ё');
 
     payload.preferences.interface_language = 'en';  // what the real server saves; state() re-applies it
+    await page.locator('#menu-button').click();
     await page.locator('#settings-open').click();  // the interface language lives in Settings
     await page.locator('#interface-language').selectOption('en');
     await page.locator('#settings-close').click();

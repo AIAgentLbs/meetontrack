@@ -41,6 +41,21 @@ labelled metadata-only. Returned excerpts are bounded and do not prove exhaustiv
 coverage. Results remain in memory for at most ten minutes; changing sources
 clears them. Disconnect does not log out shared `gws` used for report delivery.
 
+## Install the calendar reader (gws)
+
+Home reads today's and tomorrow's Google Calendar events through `gws`, the
+[Google Workspace CLI](https://github.com/googleworkspace/cli). MeetOnTrack only
+reads the calendar. It never changes an event.
+
+1. Install `gws` as its [installation guide](https://github.com/googleworkspace/cli#installation)
+   describes. With Homebrew the package is `googleworkspace-cli`. The Homebrew
+   package named `gws` is a different tool.
+2. Sign `gws` in to the Google account whose calendar MeetOnTrack should read, as
+   its [authentication guide](https://github.com/googleworkspace/cli#authentication)
+   describes.
+3. Reopen MeetOnTrack. If Home then says the calendar is not connected, click
+   **Connect the calendar** and tick **Google Calendar** in the Google section.
+
 ## Regression checks
 
 ```sh

@@ -5,7 +5,6 @@
   const word = (english, russian) => en() ? english : russian;
   let current = {}, recording = false, starting = false;
   const labels = {
-    "getting-started-open": ["Getting started", "Начать работу"],
     "getting-started-heading": ["Start using MeetOnTrack", "Начать работу с MeetOnTrack"],
     "getting-started-close": ["Close", "Закрыть"],
     "getting-started-intro": ["Start a call, see both sides in the transcript, then ask a question. Recording and local speech recognition need no paid API key. AI answers use the AI tool you choose below and its account limits.", "Начните звонок, увидьте обе стороны в стенограмме и задайте вопрос. Для записи и локальной расшифровки платный ключ не нужен. Ответы ИИ используют выбранный ниже инструмент ИИ и лимиты его аккаунта."],
@@ -46,6 +45,7 @@
     for (const [id, texts] of Object.entries(labels)) $(id).textContent = texts[en() ? 0 : 1];
     $("startup-record").textContent = recording ? word("Recording is active", "Запись идет") : starting ? word("Waiting for recording…", "Жду начала записи…") : word("Start recording now", "Начать запись сейчас");
     $("startup-record").disabled = recording || starting || current.capture_installed === false;
+    // Without the microphone a recording cannot start: the guide does not offer it (shell.js callStatus).
     $("startup-audio-status").textContent = !current.capture_installed
       ? word("Recorder not found. Install MeetOnTrack from meetontrack.com.", "Приложение для записи не найдено. Запустите установщик с meetontrack.com.")
       : current.live_enabled

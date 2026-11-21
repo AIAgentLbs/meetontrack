@@ -1,6 +1,6 @@
 // Real browser against actual UI files, synthetic API only: the header delivery pill
 // names the concrete problem and offers one action; closed failures show nothing.
-const { chromium } = require('playwright');
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');  // as the other release UI scripts
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
