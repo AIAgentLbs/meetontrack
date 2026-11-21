@@ -55,13 +55,12 @@ const memoText = L => [
 ].join('\n');
 const links = L => [{ label: L.links[0], url: 'https://example.com/proposal' }, { label: L.links[1], url: 'https://example.org/notes' }];
 
-function build(name, lang = 'en') {
+function build(name, lang = 'en', now = Date.now()) {
   const L = TEXT[lang];
   const MEMO_TEXT = memoText(L);
   const LINKS = links(L);
   const anna = { name: L.anna, email: 'anna@example.com', company: L.company, self: false };
   const oleg = { name: L.oleg, email: 'oleg@example.org', self: false };
-  const now = Date.now();
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
   tomorrow.setHours(10, 0, 0, 0);
@@ -186,10 +185,11 @@ async function route(context, fixture, origin) {
 }
 
 // A page on Home with the fixture: page.api is the route's recorder, page.errors the script errors.
-async function open(browser, { fixture, width = 1440, scheme = 'light', lang = 'ru', data: dataLang = 'en', gate = null, clock = null }) {
+// `at` pins both clocks: the fixture is built for that moment and the page's clock starts there (and runs on).
+async function open(browser, { fixture, width = 1440, scheme = 'light', lang = 'ru', data: dataLang = 'en', gate = null, clock = null, at = null }) {
   const origin = 'http://home-ui.test';
   const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme, locale: lang });
-  const data = build(fixture, dataLang);
+  const data = build(fixture, dataLang, at ?? Date.now());
   data.state.preferences.interface_language = lang;
   const api = await route(context, data, origin);
   api.gate = gate;
@@ -202,6 +202,7 @@ async function open(browser, { fixture, width = 1440, scheme = 'light', lang = '
   page.errors = [];
   page.on('pageerror', error => page.errors.push(String(error.stack || error)));
   if (clock !== null) await page.clock.install({ time: Date.now() + clock });
+  if (at !== null) await page.clock.install({ time: at });
   await page.goto(`${origin}/`);
   return page;
 }

@@ -177,6 +177,11 @@ const errors = [];
       const tomorrow = callStatus({}, agenda(call(24 * 60 + 40)), perms(), now);
       result.tomorrow = [tomorrow.text, tomorrow.short, homeClock(at(24 * 60 + 40)) === result.time];
       result.waitingShort = callStatus(...cases.waiting, now).short;
+      // Just after local midnight a call that began a minute ago is still waiting: it is not tomorrow's.
+      const midnight = new Date(now);
+      midnight.setHours(24, 0, 0, 0);
+      const underway = { ...call(0), start: new Date(midnight.getTime() - 30000).toISOString(), end: new Date(midnight.getTime() + 1800000).toISOString() };
+      result.underway = [callStatus({}, agenda(underway), perms(), midnight.getTime() + 30000).text, homeClock(underway.start)];
       // Never Start recording with the microphone denied, whatever else holds.
       // The page lost the server: a capture seen a moment ago is no longer a recording claim.
       stateConnectionFailed = true;
@@ -216,6 +221,7 @@ const errors = [];
       recorderStoppedBefore: ['waiting', `Ждет звонка в ${time}`, 'start'],
       tomorrow: [`Ждет звонка завтра в ${time}, запись включится сама`, `Ждет звонка завтра в ${time}`, true],
       waitingShort: `Ждет звонка в ${time}`,
+      underway: [`Ждет звонка в ${statuses.underway[1]}, запись включится сама`, statuses.underway[1]],
       homeNext: 'e40',
       captureRecording: ['recording', 'Запись', null],
       captureVerifying: ['recording', 'Запись', null],

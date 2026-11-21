@@ -189,7 +189,7 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
 .memo-details li::before { content: ""; position: absolute; left: 0; top: 10px; width: 5px; height: 5px; background: var(--muted); border-radius: 1px; }
 .memo-details a:not(.ql) { color: var(--text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
 .memo-links { display: flex; flex-wrap: wrap; gap: 4px 20px; }
-.home .memo-links a.ql { font-size: 15px; line-height: 1.4; }
+.home .memo-links a.ql { font-size: 15px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
 
 /* Window narrower than 1100 px: key labels only inside primary buttons and the menu. */
 @media (max-width: 1100px) {

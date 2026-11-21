@@ -81,8 +81,10 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
   }
   // Recording starts by itself only with auto-record on and the recorder not known to be stopped.
   const manual = permissions?.auto_record === false || permissions?.recorder === "stopped" ? "_manual" : "";
-  // A next call on another date is tomorrow's (the agenda holds today and tomorrow). `short` is for a narrow bar.
-  const day = next && new Date(next.start).toDateString() !== new Date(now).toDateString() ? "tomorrow_" : "";
+  // A next call starting on the next local day is tomorrow's; one that began before midnight is not. `short` is for a narrow bar.
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const day = next && new Date(next.start).toDateString() === tomorrow.toDateString() ? "tomorrow_" : "";
   return { kind: "waiting", text: next ? t(`status.waiting_${day}at${manual}`, { time }) : t(`status.waiting${manual}`),
     short: next ? t(`status.waiting_${day}at_manual`, { time }) : null, action: mic ? null : action("start", false) };
 }

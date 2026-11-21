@@ -211,13 +211,23 @@ const checks = {
     // «Откуда это: 2 источника» lands on a section of the same name.
     assert.deepEqual(memo.headings, ['Questions', 'Background', lang === 'ru' ? 'Источники' : 'Sources']);
     assert.deepEqual(memo.type, ['16px/600/none']);
-    // The goal and the three questions are already in the digest above: the memo goes on from the fourth.
-    assert.doesNotMatch(memo.text, /Agree on the|What budget|Who signs off|Which part of the proposal|Pilot review/);
+    // A line the digest shows in full is not repeated (the three questions); a longer one stays whole (the goal
+    // with its company link), and so does a line whose digest was cut short.
+    assert.doesNotMatch(memo.text, /What budget|Who signs off|Which part of the proposal|Pilot review/);
+    assert.match(memo.text, /Agree on the pilot scope and the start date with Example LLC\./);
+    assert.equal(await page.evaluate(() => homeMemoBody('Agree on the pilot scope and the start date.', [],
+      [homeNorm('Agree on the pilot…')]).length), 1, 'a truncated digest hides nothing');
+    // Links: an <https://...> autolink and a destination with balanced parentheses keep their whole address.
+    assert.deepEqual(await page.evaluate(() => {
+      const node = homeInline(document.createElement('p'), 'See <https://example.org/notes> and [Report](https://example.com/Report_(draft)).');
+      return [node.textContent, [...node.querySelectorAll('a')].map(link => link.getAttribute('href'))];
+    }), ['See example.org and Report.', ['https://example.org/notes', 'https://example.com/Report_(draft)']]);
     assert.deepEqual(memo.items, ['A fourth question that the digest leaves out?']);
     assert.doesNotMatch(memo.text, /The last proposal went out a week ago/, 'the background line is in the digest already');
     assert.match(memo.text, /See the thread/);
     assert.doesNotMatch(memo.text, /https?:|\(|\*\*/, 'no raw URL or Markdown marks');
     assert.deepEqual(memo.links, [
+      ['Example LLC', 'https://example.com/llc', '_blank', 'noopener noreferrer', false],
       ['example.org', 'https://example.org/history', '_blank', 'noopener noreferrer', false],
       ['Proposal', 'https://example.com/proposal', '_blank', 'noopener noreferrer', true],
       ['Notes', 'https://example.org/notes', '_blank', 'noopener noreferrer', true]]);
@@ -225,6 +235,16 @@ const checks = {
     const look = selector => page.locator(selector).first().evaluate(node => ['textDecorationLine', 'fontWeight', 'fontSize', 'color']
       .map(key => getComputedStyle(node)[key]).join(' '));
     assert.equal(await look('#home .row.next .memo-details a.ql'), await look('#home .row.next .actions a.ql'));
+    // A 100-character source label wraps inside the memo at 400 px: no sideways scroll, the whole label readable.
+    const label = 'A very long source label that keeps going so that it never fits on one narrow line of the memo panel';
+    page.api.fixture.agenda.meetings[0].plans[0].links.push({ label, url: 'https://example.com/long' });
+    await page.evaluate(() => refreshAgenda());
+    await panel.locator('a.ql', { hasText: 'A very long' }).waitFor();
+    await page.setViewportSize({ width: 400, height: 900 });
+    assert.equal(label.length, 100);
+    assert.deepEqual(await page.evaluate(() => [document.documentElement.scrollWidth <= innerWidth,
+      [...document.querySelectorAll('#home .memo-links a')].at(-1).getBoundingClientRect().right <= innerWidth]), [true, true]);
+    await page.setViewportSize({ width: 1440, height: 900 });
     // Hide memo closes it again.
     await toggle.click();
     assert.equal(await panel.isVisible(), false);
@@ -982,7 +1002,12 @@ const checks = {
     const only = process.env.HOME_UI_ONLY?.split(',');
     for (const fixture of Object.keys(states).filter(name => !only || only.includes(name))) {
       for (const lang of ['ru', 'en']) {
-        const page = await open(browser, { fixture, lang });
+        // The ready check reads today's wording: its fixture and page clocks are pinned to today's noon (any run time).
+        // HOME_UI_AT=HH:MM pins it elsewhere (to see the check at another hour).
+        const pin = new Date();
+        const [hours, minutes] = (process.env.HOME_UI_AT || '12:00').split(':').map(Number);
+        pin.setHours(hours, minutes, 0, 0);
+        const page = await open(browser, { fixture, lang, at: fixture === 'ready' ? pin.getTime() : null });
         await page.waitForFunction(lang => document.documentElement.lang === lang, lang);
         try {
           await page.locator('#home :is(.row, .empty)').first().waitFor({ timeout: 5000 });

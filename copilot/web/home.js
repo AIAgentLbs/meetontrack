@@ -164,11 +164,12 @@ const homeNorm = text => String(text).toLowerCase().replace(/\s+/g, " ").replace
 function homeInline(node, text) {
   const strip = value => value.replace(/\*\*|__|`/g, "");
   let at = 0;
-  for (const match of text.matchAll(/\[([^\]]+)\]\(([^)\s]+)\)|https?:\/\/[^\s)]+/g)) {
+  // [label](address, may hold balanced parentheses), <https://autolink>, or a bare address.
+  for (const match of text.matchAll(/\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)|<(https?:\/\/[^\s>]+)>|https?:\/\/[^\s)<>]+/g)) {
     node.append(strip(text.slice(at, match.index)));
     at = match.index + match[0].length;
-    let url = match[2] || match[0];
-    const tail = match[2] ? "" : url.match(/[.,;:!?]+$/)?.[0] || "";
+    let url = match[2] || match[3] || match[0];
+    const tail = match[2] || match[3] ? "" : url.match(/[.,;:!?]+$/)?.[0] || "";
     url = url.slice(0, url.length - tail.length);
     const label = match[1] ? strip(match[1]) : homeSafeLink(url) ? new URL(url).host : "";
     node.append(homeSafeLink(url) ? externalLink(label, url) : label, tail);
@@ -194,8 +195,8 @@ function homeMemoBody(markdown, titles, shown) {
       if (heading[1] !== "#" || !titles.includes(homeNorm(homePlain(heading[2])))) nodes.push(homeInline(textNode("h4", "", ""), heading[2]));
       continue;
     }
-    const plain = homeNorm(homePlain(line));
-    if (shown.some(item => plain.startsWith(item))) continue;
+    // Only a line the digest shows in full is left out: a longer one, or one whose digest was cut, stays whole.
+    if (shown.includes(homeNorm(homePlain(line)))) continue;
     if (/^(?:[-*+]|\d+[.)])\s+/.test(line)) {
       if (!list) nodes.push(list = document.createElement("ul"));
       list.append(homeInline(document.createElement("li"), line.replace(/^(?:[-*+]|\d+[.)])\s+/, "")));
