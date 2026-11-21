@@ -225,7 +225,7 @@ struct NoCallAudioStopTests {
                     active: true, names: ["Google Chrome"], families: ["com.google.Chrome"],
                     allHolders: ["Google Chrome"])
             },
-            now: { clock })
+            now: { clock }, skipped: { _ in false })
         controller.currentSession = { session }
         controller.stopRecording = { stops.append($0); session = nil }
         controller.startRecording = { _, _ in starts += 1 }
@@ -239,6 +239,60 @@ struct NoCallAudioStopTests {
             controller.tick()
         }
         #expect(starts == 0)
+    }
+
+    @Test("A call the person chose not to record does not start on its own")
+    @MainActor
+    func testSkippedCallDoesNotAutoStart() {
+        for skip in [true, false] {
+            var clock = Date(timeIntervalSince1970: 1_800_000_000)
+            var starts = 0
+            var settings = Config.AutoRecordSettings()
+            settings.startDelay = 10
+            let controller = AutoRecordController(
+                settings: settings, calendar: nil, loadSettings: { settings },
+                checkMic: { _ in
+                    MicActivityMonitor.Result(
+                        active: true, names: ["zoom.us"], families: ["us.zoom.xos"], allHolders: ["zoom.us"])
+                },
+                now: { clock },
+                skipped: { _ in skip })
+            controller.startRecording = { _, _ in starts += 1 }
+
+            controller.tick()
+            clock.addTimeInterval(settings.startDelay + 5)
+            controller.tick()
+
+            #expect(starts == (skip ? 0 : 1))
+            if skip {
+                #expect(controller.lastDecision
+                    == localised("skipped: chosen in MeetOnTrack", "пропуск: выбрано в MeetOnTrack"))
+            }
+        }
+    }
+
+    @Test("The skip file covers a call from five minutes before it starts until it ends")
+    func testSkipFileWindow() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("skip-recording.json")
+        // 09:00+01:00 is 08:00 UTC, the same instant as `start`.
+        try Data(#"""
+            {"version": 1, "calls": [{"key": "2027-01-15T09:00:00+01:00|Pilot review", "event_id": "",
+              "start": "2027-01-15T09:00:00+01:00", "end": "2027-01-15T09:30:00+01:00"}]}
+            """#.utf8).write(to: url)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+
+        #expect(!SkipRecording.covers(start.addingTimeInterval(-6 * 60), at: url))
+        #expect(SkipRecording.covers(start.addingTimeInterval(-4 * 60), at: url))
+        #expect(SkipRecording.covers(start.addingTimeInterval(30 * 60 - 1), at: url))
+        #expect(!SkipRecording.covers(start.addingTimeInterval(30 * 60), at: url))
+
+        try Data("not json".utf8).write(to: url)
+        #expect(!SkipRecording.covers(start, at: url))
+        #expect(!SkipRecording.covers(start, at: folder.appendingPathComponent("missing.json")))
     }
 }
 
@@ -268,7 +322,8 @@ struct ManualStopAutoRecordTests {
                     allHolders: micActive() ? ["zoom.us"] : []
                 )
             },
-            now: { clock.date }
+            now: { clock.date },
+            skipped: { _ in false }
         )
         controller.startRecording = { _, _ in onStart() }
         return controller

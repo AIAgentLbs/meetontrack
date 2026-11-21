@@ -40,7 +40,8 @@ public sealed class RecordingCoordinator(
     SessionStore sessions,
     AutoRecordPolicy autoRecord,
     IAudioCapture capture,
-    Func<bool>? wholeSystemAudio = null) : IAsyncDisposable
+    Func<bool>? wholeSystemAudio = null,
+    Func<DateTimeOffset, bool>? skipped = null) : IAsyncDisposable
 {
     private readonly SemaphoreSlim gate = new(1, 1);
     private SessionHandle? current;
@@ -91,7 +92,13 @@ public sealed class RecordingCoordinator(
         try
         {
             var decision = autoRecord.Observe(observation);
-            if (decision.Action == AutoRecordAction.Start && current is null)
+            if (decision.Action == AutoRecordAction.Start && current is null
+                && skipped?.Invoke(observation.At) == true)
+            {
+                // The person chose in MeetOnTrack not to record this call; manual starts still work.
+                autoRecord.Skipped();
+            }
+            else if (decision.Action == AutoRecordAction.Start && current is null)
             {
                 try
                 {

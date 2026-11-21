@@ -44,6 +44,7 @@ final class AutoRecordController {
     private let loadSettings: () -> Config.AutoRecordSettings
     private let checkMic: (Config.AutoRecordSettings) -> MicActivityMonitor.Result
     private let now: () -> Date
+    private let skipped: (Date) -> Bool
     private var timer: Timer?
     private var micActiveSince: Date?
     private var micIdleSince: Date?
@@ -71,13 +72,15 @@ final class AutoRecordController {
         checkMic: @escaping (Config.AutoRecordSettings) -> MicActivityMonitor.Result = {
             MicActivityMonitor.check(callApps: $0.callApps, ignoring: $0.ignoreApps)
         },
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        skipped: @escaping (Date) -> Bool = { SkipRecording.covers($0) }
     ) {
         self.enabled = settings.enabled
         self.calendar = calendar
         self.loadSettings = loadSettings
         self.checkMic = checkMic
         self.now = now
+        self.skipped = skipped
     }
 
     func start() {
@@ -155,6 +158,13 @@ final class AutoRecordController {
                 return
             }
             standingDownUntilCallEnds = false
+        }
+
+        // The person chose in MeetOnTrack not to record this call. Manual
+        // starts never come through here, so they still work.
+        if skipped(now) {
+            lastDecision = localised("skipped: chosen in MeetOnTrack", "пропуск: выбрано в MeetOnTrack")
+            return
         }
 
         if settings.calendar, let calendar,

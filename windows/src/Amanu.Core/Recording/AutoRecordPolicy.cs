@@ -140,6 +140,9 @@ public sealed class AutoRecordPolicy(AutoRecordOptions initial)
         return wait;
     }
 
+    /// <summary>A start was due, but the person chose in MeetOnTrack not to record this call.</summary>
+    public void Skipped() => LastDecision = T("skipped: chosen in MeetOnTrack", "пропуск: выбрано в MeetOnTrack");
+
     /// <summary>The duration ceiling, which holds for every recording whatever else is on.</summary>
     public bool CeilingReached(DateTimeOffset now) =>
         recordingStartedAt is { } started && now - started >= options.MaximumDuration;

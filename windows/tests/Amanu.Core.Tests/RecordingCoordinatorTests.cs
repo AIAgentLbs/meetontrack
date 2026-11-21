@@ -234,7 +234,34 @@ public sealed class RecordingCoordinatorTests
         Assert.False(coordinator.State.IsRecording);
     }
 
-    private static RecordingCoordinator Coordinator(string root, InspectableCapture capture)
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SkippedCallDoesNotAutoStart(bool skip)
+    {
+        using var root = new TemporaryDirectory();
+        var coordinator = Coordinator(root.Path, new InspectableCapture(), _ => skip);
+
+        await coordinator.ObserveAsync(Observation(Started, "Zoom.exe"));
+        await coordinator.ObserveAsync(Observation(Started.AddSeconds(12), "Zoom.exe"));
+
+        Assert.Equal(!skip, coordinator.State.IsRecording);
+        if (skip) Assert.Contains("MeetOnTrack", coordinator.Policy.LastDecision);
+    }
+
+    [Fact]
+    public async Task A_skipped_call_still_records_by_hand()
+    {
+        using var root = new TemporaryDirectory();
+        var coordinator = Coordinator(root.Path, new InspectableCapture(), _ => true);
+
+        await coordinator.StartManualAsync(Started);
+
+        Assert.True(coordinator.State.IsRecording);
+    }
+
+    private static RecordingCoordinator Coordinator(
+        string root, InspectableCapture capture, Func<DateTimeOffset, bool>? skipped = null)
     {
         var options = new AutoRecordOptions(
             Enabled: true,
@@ -244,7 +271,7 @@ public sealed class RecordingCoordinatorTests
             SilenceStop: TimeSpan.FromMinutes(10),
             MaximumDuration: TimeSpan.FromHours(5));
         return new RecordingCoordinator(
-            new SessionStore(root, processId: 99), new AutoRecordPolicy(options), capture);
+            new SessionStore(root, processId: 99), new AutoRecordPolicy(options), capture, skipped: skipped);
     }
 
     private static AudioObservation Observation(DateTimeOffset at, string process) => new(

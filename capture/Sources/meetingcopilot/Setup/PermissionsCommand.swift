@@ -12,12 +12,14 @@ struct PermissionsCommand: ParsableCommand {
     )
 
     func run() throws {
-        let answer: [String: Any] = MainActor.assumeIsolated {
+        var answer: [String: Any] = MainActor.assumeIsolated {
             Self.report(
                 microphone: SetupPermissions.microphone(),
                 heardAt: SetupState.systemAudioHeardAt(),
                 now: Date())
         }
+        // Auto-record reads skip-recording.json, so Home may offer "Do not record".
+        answer["skip_recording"] = true
         printJSON(answer)
     }
 
