@@ -206,8 +206,19 @@ Tomorrow
   question, so an old hint is not read as current.
 - While the answer to a heard question is prepared, the line gives the usual
   wait ("usually a few seconds").
-- A lost call-audio state puts "Choose the call's sound" first and "How to
-  fix" as a quiet link. "How to fix" has one look on every screen.
+- A lost call-audio state puts "Choose where to listen to the call from"
+  first and "How to fix" as a quiet link. "How to fix" has one look on every
+  screen. (The earlier wording "Choose the call's sound" read as picking a
+  ringtone; seventh critique.)
+- The stopped state says what happens next: "Recording stopped at HH:MM. The
+  report opens in 10 s." with "Resume recording" beside it. No detached
+  countdown.
+- One muted line under the level marks shows the last phrase heard, as proof
+  that speech is being turned into text and not only that sound arrives. One
+  line, cut with an ellipsis.
+- "Being prepared" for a memo says since when ("since HH:MM, usually 2-3
+  minutes"). The menu item for the person's own notes names the call it
+  belongs to.
 
 ### After (MEETONTRACK-163)
 
@@ -259,6 +270,12 @@ Tomorrow
 - A channel that failed is retried once by the app after a minute and says
   so; Retry and the link to that channel's settings stay. The plain "sent"
   state lists each channel with its time.
+- The send block has a quiet link "How recipients will see it" that opens the
+  report as it will arrive (the rendered message, read-only). Send now is a
+  secondary button in every state before sending; this screen has no primary
+  button, because sending needs no action.
+- "Send again" in the sent state says what it does before it is pressed: the
+  e-mail and Telegram message arrive a second time, the CRM note is updated.
 - Column names are generic, so they read right for any call: "Ask the other
   side", "Asked of you", "Risks and objections", "Fact check". A differing
   statement names the speaker and the meeting on both sides.
