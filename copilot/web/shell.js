@@ -68,18 +68,21 @@ function toggleMenu(open) {
 
 $("menu-button").addEventListener("click", () => toggleMenu(menu.hidden));
 menu.addEventListener("click", event => event.target.closest('[role="menuitem"]') && toggleMenu(false));
-menu.addEventListener("keydown", event => {
+// While the menu is open its keys work wherever focus is, and Escape closes nothing else.
+document.addEventListener("keydown", event => {
+  if (menu.hidden) return;
   if (event.key === "Escape") {
     event.stopPropagation();
     toggleMenu(false);
+    $("menu-button").focus();
   } else if (event.key === "Tab") {
     toggleMenu(false);
   } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();
-    const items = menuItems();
-    items.at((items.indexOf(document.activeElement) + (event.key === "ArrowDown" ? 1 : -1)) % items.length)?.focus();
+    const items = menuItems(), index = items.indexOf(document.activeElement), down = event.key === "ArrowDown";
+    items.at(index < 0 ? (down ? 0 : -1) : (index + (down ? 1 : -1)) % items.length)?.focus();
   }
-});
+}, true);
 document.addEventListener("click", event => {
   if (!menu.hidden && !menu.contains(event.target) && !$("menu-button").contains(event.target)) toggleMenu(false);
 });

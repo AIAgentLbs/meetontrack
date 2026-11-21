@@ -12,8 +12,8 @@ const errors = [];
   let live = true;
   const healthy = { channels: { gmail: { configured: true, state: 'sent', issues: [] } }, undelivered: [], notifications: [] };
   const problem = { ...healthy, undelivered: [{ meeting_id: 'm9', channels: ['email'], title: 'Pilot review', started_at: '2026-11-20T10:00:00+00:00' }] };
-  let delivery = healthy;
-  const state = () => ({ preferences: { interface_language: 'ru' }, journal: [], frames: [], project: {}, delivery,
+  let delivery = healthy, language = 'ru', updates = {};
+  const state = () => ({ preferences: { interface_language: language }, journal: [], frames: [], project: {}, delivery, updates,
     transcript: { meeting_id: 'm1', meeting: 'Pilot review', status: live ? 'recording' : 'idle', live, segments: [], speakers: [] },
     recording_health: { capture: { audio_recording: live } },
     copilot: { busy: false, analysis: { state: 'idle' }, messages: [] },
@@ -29,6 +29,8 @@ const errors = [];
       const type = file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html';
       return route.fulfill({ contentType: type, body: await fs.readFile(path.join(root, file)) });
     });
+    // The first-run guide has been seen: it opens over the call and would cover it.
+    await context.addInitScript(() => localStorage.setItem('meetontrack-started', '1'));
     const page = await context.newPage();
     page.on('pageerror', error => /(shell|home)\.js/.test(error.stack || '') && errors.push(String(error.stack)));
     await page.goto('http://shell-ui.test/');
@@ -111,6 +113,16 @@ const errors = [];
     assert.equal(await page.locator('#app-menu').isVisible(), false);
     assert.equal(await page.locator('#menu-button').getAttribute('aria-expanded'), 'false');
     assert.equal(await focused(), 'menu-button');
+    // With focus outside the items: ArrowUp goes to the last, ArrowDown to the first, Escape still closes.
+    const blur = () => page.evaluate(() => document.activeElement.blur());
+    await page.locator('#menu-button').click();
+    await blur(); await page.keyboard.press('ArrowUp');
+    assert.equal(await focused(), items.at(-1));
+    await blur(); await page.keyboard.press('ArrowDown');
+    assert.equal(await focused(), items[0]);
+    await blur(); await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#app-menu').isVisible(), false);
+    assert.equal(await focused(), 'menu-button');
     await page.locator('#menu-button').click();
     await page.mouse.click(700, 600);
     assert.equal(await page.locator('#app-menu').isVisible(), false, 'a click outside closes the menu');
@@ -129,6 +141,31 @@ const errors = [];
     await page.locator('#settings-close').click();
     assert.equal(await focused(), 'menu-button');
 
+    // A dialog opened from the menu gives focus back to Menu when it closes.
+    await page.locator('#menu-button').click();
+    await page.locator('#repo-button').click();
+    await page.waitForFunction(() => document.querySelector('#project-dialog').open);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('#project-dialog').open);
+    await page.waitForFunction(() => document.activeElement.id === 'menu-button', null, { timeout: 2000 });
+
+    // One update entry: the notice when there is an update, plain Updates otherwise.
+    const updateItems = () => page.evaluate(() => ['updates-notice', 'menu-updates'].map(id => document.getElementById(id).checkVisibility()));
+    updates = { version: '0.1.9', platform: 'macos', enabled: true, notify: true,
+      latest: { version: '0.1.10', url: 'https://github.com/AIAgentLbs/meetontrack/releases/tag/v0.1.10', notes: '' } };
+    await page.waitForFunction(() => !document.querySelector('#updates-notice').hidden);
+    await page.locator('#menu-button').click();
+    assert.deepEqual(await updateItems(), [true, false]);
+    await page.keyboard.press('Escape');
+    updates = { version: '0.1.9', platform: 'macos', enabled: true, notify: false, latest: null };
+    await page.waitForFunction(() => document.querySelector('#updates-notice').hidden);
+    await page.locator('#menu-button').click();
+    assert.deepEqual(await updateItems(), [false, true]);
+    // In a call the call's own controls are in the menu.
+    assert.equal(await page.locator('#swap-panels').isVisible(), true);
+    assert.equal(await page.locator('#new-meeting-button').isVisible(), true);
+    await page.keyboard.press('Escape');
+
     // Speaker names come after the transcript in tab order.
     assert.ok(await page.evaluate(() => document.querySelector('#transcript')
       .compareDocumentPosition(document.querySelector('#speaker-edit')) & Node.DOCUMENT_POSITION_FOLLOWING));
@@ -143,12 +180,40 @@ const errors = [];
     assert.ok(menu.x >= 0 && menu.x + menu.width <= 400, 'the menu fits the window');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.keyboard.press('Escape');
+    // Past calls opened from the menu: closing it gives focus back to Menu, not to the hidden link.
+    await page.locator('#menu-button').click();
+    await page.locator('#menu-past-calls').click();
+    await page.locator('#archive-dialog').waitFor({ state: 'visible' });
+    await page.locator('#archive-close').click();
+    assert.equal(await focused(), 'menu-button');
+    // A delivery problem at 400 px, in both languages: Menu stays in the window, the status keeps some width.
+    delivery = problem;
+    for (const lang of ['ru', 'en']) {
+      language = lang;
+      await page.waitForFunction(lang => document.documentElement.lang === lang
+        && document.querySelector('#delivery-alert').checkVisibility(), lang);
+      const fit = await page.evaluate(() => {
+        const menuButton = document.querySelector('#menu-button').getBoundingClientRect();
+        return { scroll: document.documentElement.scrollWidth <= innerWidth,
+          menu: menuButton.left >= 0 && menuButton.right <= innerWidth,
+          status: document.querySelector('#call-status').getBoundingClientRect().width > 0 };
+      });
+      assert.deepEqual(fit, { scroll: true, menu: true, status: true }, lang);
+    }
+    language = 'ru'; delivery = healthy;
+    await page.waitForFunction(() => document.documentElement.lang === 'ru'
+      && !document.querySelector('#delivery-alert').checkVisibility());
     await page.setViewportSize({ width: 1440, height: 900 });
 
     live = false;
     await page.waitForFunction(() => document.body.dataset.view === 'home');
     assert.deepEqual(await shown(), { view: 'home', workspace: false, boundaryBar: false, home: true });
     assert.equal(await page.locator('#home-heading').count(), 1);
+    // Home has no call: no transcript, panel or new-meeting controls in the menu.
+    await page.locator('#menu-button').click();
+    assert.deepEqual(await page.evaluate(() => ['transcript-show', 'swap-panels', 'new-meeting-button']
+      .map(id => document.getElementById(id).checkVisibility())), [false, false, false]);
+    await page.keyboard.press('Escape');
 
     assert.deepEqual(errors, []);
     console.log('Shell UI: viewFor table, call and Home views switch with the state, top bar and menu: OK');

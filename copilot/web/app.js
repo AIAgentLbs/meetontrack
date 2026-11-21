@@ -567,6 +567,17 @@ elements.swapPanels.addEventListener("click", () => {
 });
 applyPanelOrder();
 
+// Focus goes back to the control that opened an overlay; a control inside the closed menu hands it to Menu.
+function returnFocus(opener) {
+  (opener?.getClientRects().length ? opener : document.querySelector("#menu-button")).focus();
+}
+// A closed dialog gives focus back to its opener: when that was a menu item, focus would fall to the page.
+// The browser restores that focus after the close event, so the check waits a task.
+document.addEventListener("close", () => setTimeout(() => {
+  const active = document.activeElement;
+  if (!active || active === document.body || !active.getClientRects().length) returnFocus(null);
+}), true);
+
 function t(key, variables = {}) {
   const template = translations[uiLanguage][key] || translations.ru[key] || key;
   return Object.entries(variables).reduce(
@@ -2519,7 +2530,7 @@ function closeArchive() {
   archiveDetailRequest += 1;
   archiveAbort?.abort();
   setArchiveMode();
-  if (restoreFocus) elements.archiveButton.focus();
+  if (restoreFocus) returnFocus(elements.archiveButton);
 }
 
 function updateLibraryMode(data) {
@@ -3393,14 +3404,14 @@ elements.projectEditRepos.addEventListener("click", () => {
 elements.archiveButton.addEventListener("click", () => {
   if (!elements.archiveDialog.hidden) closeArchive(); else void openArchive();
 });
-elements.archiveClose.addEventListener("click", () => { closeArchive(); elements.archiveButton.focus(); });
+elements.archiveClose.addEventListener("click", () => { closeArchive(); returnFocus(elements.archiveButton); });
 elements.archiveSearch.addEventListener("input", () => {
   clearTimeout(archiveSearchTimer);
   archiveSearchTimer = setTimeout(() => { void refreshArchive(); }, 250);
 });
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && !elements.archiveDialog.hidden && !document.querySelector("dialog[open]")) {
-    closeArchive(); elements.archiveButton.focus();
+    closeArchive(); returnFocus(elements.archiveButton);
   }
 });
 window.addEventListener("resize", setArchiveMode);
@@ -3487,7 +3498,7 @@ document.querySelector("#interface-language").addEventListener("change", (event)
 // Hiding only folds the panel away: recording and live transcription keep running.
 elements.transcriptHide.addEventListener("click", () => {
   applyTranscriptHidden(true);
-  document.querySelector("#menu-button").focus();
+  returnFocus(elements.transcriptShow);
   void savePreference({ transcript_hidden: true }, elements.newMeetingStatus);
 });
 elements.transcriptShow.addEventListener("click", () => {
@@ -3571,7 +3582,7 @@ document.querySelector("#settings-open").addEventListener("click", () => {
 document.querySelector("#settings-close").addEventListener("click", () => {
   document.querySelector("#settings-panel").hidden = true;
   document.querySelector("#settings-open").setAttribute("aria-expanded", "false");
-  document.querySelector("#menu-button").focus();
+  returnFocus(document.querySelector("#settings-open"));
 });
 document.querySelector("#google-check").addEventListener("click", () => void loadGoogleContext());
 for (const action of ["connect", "disconnect"]) document.querySelector(`#google-${action}`).addEventListener("click", async () => {

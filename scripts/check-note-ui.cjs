@@ -48,7 +48,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || '/Users/m/.cache/c
     assert.equal(await page.locator('#analysis-help, #auto-analysis, #analyze-button').count(), 0);
     // The brand line closes the menu; its company URL is a keyboard-accessible menu item.
     await page.locator('#menu-button').click();
-    const company = page.getByRole('menuitem', { name: 'by aiagentlbs.com', exact: true });
+    const company = page.getByRole('menuitem', { name: 'MeetOnTrack by aiagentlbs.com', exact: true });
     assert.equal(await company.count(), 1, 'company URL must be a keyboard-accessible link');
     assert.equal(await company.getAttribute('href'), 'https://aiagentlbs.com/');
     assert.equal(await company.getAttribute('target'), '_blank');
