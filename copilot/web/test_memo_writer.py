@@ -867,6 +867,31 @@ class LoopTests(unittest.TestCase):
         self.assertIsNotNone(e["retry_at"])
         self.assertEqual(fresh.plans(), [plan])
 
+    def test_restart_during_a_held_rebuild_keeps_the_memo_and_retries_once(self):
+        self.tick(NOW)
+        plan = self.writer.plans()[0]
+        self.writer.rebuild("ev1", self.agenda)
+        self.ai.gate, self.ai.entered = threading.Event(), threading.Event()
+        worker = threading.Thread(target=self.tick, args=(NOW + timedelta(minutes=1),))
+        worker.start()
+        try:
+            self.assertTrue(self.ai.entered.wait(5))
+            ai, gather = FakeAI(json.dumps(GOOD)), FakeGather(RAW)
+            ai.error = RuntimeError("boom")
+            fresh = MemoWriter(self.writer.path, ai, gather, lambda: self.lang)  # the restart
+        finally:
+            self.ai.gate.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(fresh.plans(), [plan])
+        self.assertEqual(fresh.memo_for(self.agenda["meetings"][0], [], NOW)["state"], "ready")
+        for minutes in range(5, 120, 5):
+            self.tick(NOW + timedelta(minutes=minutes), writer=fresh)
+        self.assertEqual((len(ai.calls), gather.count), (1, 1))  # the one allowed retry, then nothing
+        e = fresh.events["ev1"]
+        self.assertEqual((e["state"], e["attempts"], e["retry_at"]), ("ready", 2, None))
+        self.assertEqual(fresh.plans(), [plan])
+
     def test_recheck_without_sources_keeps_the_memo(self):
         self.tick(EV_START - timedelta(hours=5))
         self.gather.result = []
