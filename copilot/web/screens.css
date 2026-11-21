@@ -11,7 +11,8 @@
 }
 
 body[data-view="home"] .workspace,
-body[data-view="home"] .meeting-boundary-bar { display: none; }
+body[data-view="home"] .meeting-boundary-bar,
+body:not([data-view]) :is(.workspace, .meeting-boundary-bar) { display: none; }
 
 /* Top bar: Home, Past calls, one call status and Menu. Everything else lives in the menu. */
 .topbar {

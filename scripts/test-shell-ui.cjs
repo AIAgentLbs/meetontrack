@@ -13,6 +13,9 @@ const errors = [];
   const healthy = { channels: { gmail: { configured: true, state: 'sent', issues: [] } }, undelivered: [], notifications: [] };
   const problem = { ...healthy, undelivered: [{ meeting_id: 'm9', channels: ['email'], title: 'Pilot review', started_at: '2026-11-20T10:00:00+00:00' }] };
   let delivery = healthy, language = 'ru', updates = {}, title = 'Pilot review';
+  // The first state answer is held back: until it comes, no view is shown, not even Home.
+  let releaseState;
+  const firstState = new Promise(resolve => { releaseState = resolve; });
   const state = () => ({ preferences: { interface_language: language }, journal: [], frames: [], project: {}, delivery, updates,
     transcript: { meeting_id: 'm1', meeting: title, status: live ? 'recording' : 'idle', live, segments: [], speakers: [] },
     recording_health: { capture: { audio_recording: live } },
@@ -22,7 +25,10 @@ const errors = [];
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await context.route('http://shell-ui.test/**', async route => {
       const url = new URL(route.request().url());
-      if (url.pathname === '/api/state') return route.fulfill({ json: state() });
+      if (url.pathname === '/api/state') {
+        await firstState;
+        return route.fulfill({ json: state() });
+      }
       if (url.pathname.startsWith('/api/')) return route.fulfill({ json: { ok: true } });
       const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
       if (file.includes('/') || !/\.(html|js|css)$/.test(file)) return route.abort();
@@ -34,6 +40,11 @@ const errors = [];
     const page = await context.newPage();
     page.on('pageerror', error => /(shell|home)\.js/.test(error.stack || '') && errors.push(String(error.stack)));
     await page.goto('http://shell-ui.test/');
+    await page.waitForFunction(() => typeof viewFor === 'function');
+    assert.deepEqual(await page.evaluate(() => ({ view: document.body.dataset.view, home: !document.getElementById('home').hidden,
+      workspace: getComputedStyle(document.querySelector('.workspace')).display !== 'none' })),
+    { view: undefined, home: false, workspace: false }, 'nothing view-specific before the first state');
+    releaseState();
 
     const views = await page.evaluate(() => {
       const now = Date.parse('2026-11-21T12:00:00Z');
@@ -84,6 +95,10 @@ const errors = [];
       const agenda = (...meetings) => ({ meetings });
       const perms = (microphone = 'granted', call_audio = 'granted', recorder = 'running') => ({ microphone, call_audio, recorder });
       const live = { transcript: { meeting_id: 'm2', status: 'recording', live: true } };
+      // The capture marker in a snapshot checked `age` seconds ago.
+      const captured = (state, age = 5) => ({ recording_health: { checked_at: now / 1000 - age,
+        capture: { state, audio_recording: state === 'recording' } },
+      transcript: { meeting_id: 'm3', status: state === 'paused' ? 'paused' : 'recording', live: false, updated_at: at(-1) } });
       const short = status => [status.kind, status.text, status.action && `${status.action.id}${status.action.primary ? '!' : ''}`];
       const cases = {
         live: [live, agenda(call(40)), perms('denied')],
@@ -102,12 +117,23 @@ const errors = [];
         unknownEverywhere: [{}, agenda(call(40)), perms('unknown', 'unknown', 'unknown')],
         notLoaded: [{}, null, null],
         waiting: [{}, agenda(call(40)), perms()],
+        captureRecording: [captured('recording'), agenda(), perms()],
+        captureVerifying: [captured('verifying'), agenda(), perms()],
+        capturePaused: [captured('paused'), agenda(), perms()],
+        captureStalled: [captured('stalled'), agenda(), perms()],
+        captureStale: [captured('recording', 25), agenda(), perms()],
+        transcriptPaused: [{ transcript: { meeting_id: 'm4', status: 'paused', live: false, updated_at: at(-1) } }, agenda(), perms()],
       };
       const result = Object.fromEntries(Object.entries(cases).map(([name, args]) => [name, short(callStatus(...args, now))]));
       result.time = homeClock(at(40));
       result.later = homeClock(at(60));
       result.started = homeClock(at(-1));
       // Never Start recording with the microphone denied, whatever else holds.
+      // The page lost the server: a capture seen a moment ago is no longer a recording claim.
+      stateConnectionFailed = true;
+      result.disconnected = short(callStatus(...cases.captureRecording, now));
+      result.disconnectedLive = short(callStatus(...cases.live, now));
+      stateConnectionFailed = false;
       result.startWithoutMic = Object.values(cases).filter(([, , permissions]) => permissions?.microphone === 'denied')
         .some(args => callStatus(...args, now).action?.id === 'start');
       return result;
@@ -131,7 +157,18 @@ const errors = [];
       unknownEverywhere: ['waiting', `Ждет звонка в ${time}, запись включится сама`, 'start'],
       notLoaded: ['waiting', 'Ждет звонка, запись включится сама', 'start'],
       waiting: ['waiting', `Ждет звонка в ${time}, запись включится сама`, 'start'],
+      captureRecording: ['recording', 'Запись', null],
+      captureVerifying: ['recording', 'Запись', null],
+      capturePaused: ['not_recording', 'Запись не идет: запись на паузе', null],
+      captureStalled: ['not_recording', 'Запись не идет: звук перестал записываться', null],
+      captureStale: ['not_recording', 'Запись не идет: нет свежих данных от программы записи', null],
+      transcriptPaused: ['not_recording', 'Запись не идет: запись на паузе', null],
+      disconnected: ['not_recording', 'Запись не идет: нет свежих данных от программы записи', null],
+      disconnectedLive: ['not_recording', 'Запись не идет: нет свежих данных от программы записи', null],
     });
+    // The same reasons exist in English.
+    assert.deepEqual(await page.evaluate(() => ['paused', 'stalled', 'stale'].map(reason => translations.en[`status.reason.${reason}`])),
+      ['recording is paused', 'audio stopped being saved', 'no fresh data from the recorder']);
 
     const shown = () => page.evaluate(() => ({
       view: document.body.dataset.view,
@@ -145,6 +182,23 @@ const errors = [];
     assert.deepEqual(await page.evaluate(() => [document.querySelector('#call-status-text').textContent,
       document.querySelector('#call-status-text').classList.contains('rec'), document.querySelector('#call-status-action').hidden]),
     ['Запись', true, true]);
+    // Home during a call: the status offers the way back to the call, which clears the choice.
+    await page.locator('#nav-home').click();
+    await page.waitForFunction(() => document.body.dataset.view === 'home');
+    const back = page.locator('#call-status-action');
+    assert.deepEqual(await back.evaluate(node => [node.hidden, node.textContent, node.classList.contains('primary')]),
+      [false, 'Вернуться к текущему звонку', true]);
+    assert.equal(await page.evaluate(() => translations.en['action.back_to_call']), 'Back to the current call');
+    await back.click();
+    await page.waitForFunction(() => document.body.dataset.view === 'call');
+    assert.deepEqual(await page.evaluate(() => [document.querySelector('#call-status-action').hidden,
+      localStorage.getItem('meetontrack-view')]), [true, null]);
+    // The menu's Home does the same as the bar's, and the way back is there again.
+    await page.locator('#menu-button').click();
+    await page.locator('#menu-nav-home').evaluate(node => node.click());
+    await page.waitForFunction(() => document.body.dataset.view === 'home' && !document.querySelector('#call-status-action').hidden);
+    await page.locator('#call-status-action').click();
+    await page.waitForFunction(() => document.body.dataset.view === 'call');
 
     // Top bar: Home, Past calls, one call status and Menu. The delivery pill joins them only with a problem.
     const barControls = () => page.evaluate(() => [...document.querySelectorAll('.topbar button, .topbar .status')]

@@ -157,6 +157,10 @@ const translations = {
     "status.reason.mic": "нет доступа к микрофону",
     "status.reason.recorder": "программа записи не запущена",
     "status.reason.not_detected": "звонок не замечен",
+    "status.reason.paused": "запись на паузе",
+    "status.reason.stalled": "звук перестал записываться",
+    "status.reason.stale": "нет свежих данных от программы записи",
+    "action.back_to_call": "Вернуться к текущему звонку",
     "action.start": "Начать запись",
     "action.open_mic": "Открыть настройки микрофона",
     "action.open_call_audio": "Открыть настройки записи звука",
@@ -451,6 +455,10 @@ const translations = {
     "status.reason.mic": "no microphone access",
     "status.reason.recorder": "the recorder is not running",
     "status.reason.not_detected": "the call was not detected",
+    "status.reason.paused": "recording is paused",
+    "status.reason.stalled": "audio stopped being saved",
+    "status.reason.stale": "no fresh data from the recorder",
+    "action.back_to_call": "Back to the current call",
     "action.start": "Start recording",
     "action.open_mic": "Open microphone settings",
     "action.open_call_audio": "Open audio recording settings",
@@ -1128,11 +1136,15 @@ Object.assign(translations.en, {
   "recognition.unverified": "Cannot verify recording or transcription: no fresh response from the app. Audio recording was not restarted.",
 });
 
+// A recording claim needs a capture check under 20 s old from a server that still answers (shell.js uses it too).
+const recordingFresh = (health, now = Date.now()) =>
+  !stateConnectionFailed && Number.isFinite(health?.checked_at) && now / 1000 - health.checked_at < 20;
+
 function renderRecordingHealth(health = {}) {
   recordingHealth = health;
   const capture = health.capture;
   const matched = health.meeting_id && health.meeting_id === (activeTranscript?.physical_meeting_id || activeTranscript?.meeting_id);
-  const fresh = !stateConnectionFailed && Number.isFinite(health.checked_at) && Date.now() / 1000 - health.checked_at < 20;
+  const fresh = recordingFresh(health);
   elements.newMeeting.disabled = boundaryBusy || !matched || !fresh || !capture?.audio_recording;
   elements.captureStatus.hidden = !matched || !capture;
   elements.captureStatus.classList.toggle("live", Boolean(fresh && capture?.audio_recording));
@@ -3750,6 +3762,7 @@ setInterval(() => void refreshAgenda(), 60000);
 setInterval(() => {
   if (recordingHealth.checked_at && Date.now() / 1000 - recordingHealth.checked_at >= 20) {
     renderRecordingHealth(recordingHealth);
+    window.renderShell?.();
   }
 }, 1000);
 setInterval(() => void state(), 2500);

@@ -174,7 +174,7 @@ function homeRow(meeting, { next, now, supported, id, status }) {
   const actions = document.createElement("div");
   actions.className = "actions";
   // A call that is on without a recording: the fix first, Start recording when it can work, then How to fix.
-  const notRecording = next && !meeting.skip_recording && status?.kind === "not_recording";
+  const notRecording = next && !meeting.skip_recording && status?.kind === "not_recording" && status.action;
   if (notRecording) {
     const fix = status.action.id;
     for (const [index, actionId] of [...new Set([fix, ...(fix === "open_mic" ? [] : ["start"])])].entries()) {

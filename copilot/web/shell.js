@@ -18,6 +18,20 @@ function isLive(state, now = Date.now()) {
     || RECORDING_STATUSES.has(transcript.status) && now - Date.parse(transcript.updated_at || "") < LIVE_STATUS_FRESH_MS;
 }
 
+// isLive picks the view; the bar claims Recording only for capture that is running and freshly confirmed
+// (recordingFresh, the rule of the call's own capture line). Otherwise the reason it is not: paused, stalled, stale.
+function notRecordingReason(state, now = Date.now()) {
+  const health = state?.recording_health || {};
+  const capture = health.capture?.state;
+  if (capture && capture !== "inactive") {
+    if (!recordingFresh(health, now)) return "stale";
+    return capture === "paused" || capture === "stalled" ? capture : "";
+  }
+  // No capture marker (Windows): the recorder's own fresh status, read while the server still answers.
+  if (stateConnectionFailed) return "stale";
+  return state?.transcript?.status === "paused" ? "paused" : "";
+}
+
 function callKey(state, now = Date.now()) {
   return `${isLive(state, now)}:${state?.transcript?.meeting_id || ""}`;
 }
@@ -42,7 +56,11 @@ function openView(view) {
 // A permission the platform cannot read ("unknown") shows nothing; Start recording never shows without a microphone.
 function callStatus(state, agenda, permissions, now = Date.now()) {
   const action = (id, primary = true) => ({ id, label: t(`action.${id}`), primary });
-  if (isLive(state, now)) return { kind: "recording", text: t("status.recording"), action: null };
+  if (isLive(state, now)) {
+    const reason = notRecordingReason(state, now);
+    return reason ? { kind: "not_recording", text: t("status.not_recording", { reason: t(`status.reason.${reason}`) }), action: null }
+      : { kind: "recording", text: t("status.recording"), action: null };
+  }
   const next = (agenda?.meetings || []).find(meeting => Date.parse(meeting.end) > now && !meeting.skip_recording);
   const time = next && homeClock(next.start);
   const mic = permissions?.microphone === "denied";
@@ -99,6 +117,10 @@ async function statusAction(button, id) {
 function renderStatus(view) {
   if (statusError && statusError.state !== window.appState) statusError = null;
   const status = currentStatus();
+  // Another view opened by hand during a call: the way back to the call is the status's action.
+  if (isLive(window.appState) && view !== viewFor(window.appState, null)) {
+    status.action = { id: "back", label: t("action.back_to_call"), primary: true };
+  }
   const text = $("call-status-text");
   const shown = statusError?.text || status.text;
   if (text.textContent !== shown) text.textContent = shown;
@@ -184,6 +206,8 @@ function renderShortcuts() {
 }
 
 function renderShell() {
+  // Before the first state answer the view is unknown: show none rather than Home flashing over a live call.
+  if (window.appState === undefined) return;
   let manual = null;
   try {
     manual = JSON.parse(localStorage.getItem("meetontrack-view"));
@@ -236,7 +260,13 @@ $("menu-nav-home").addEventListener("click", () => openView("home"));
 $("menu-past-calls").addEventListener("click", () => $("archive-button").click());
 $("menu-updates").addEventListener("click", () => $("updates-notice").click());
 $("getting-started-open").addEventListener("click", () => $("settings-panel").hidden || $("settings-close").click());
-$("call-status-action").addEventListener("click", event => statusAction(event.currentTarget, event.currentTarget.dataset.action));
+$("call-status-action").addEventListener("click", event => {
+  if (event.currentTarget.dataset.action !== "back") return statusAction(event.currentTarget, event.currentTarget.dataset.action);
+  try {
+    localStorage.removeItem("meetontrack-view");
+  } catch {}
+  renderShell();
+});
 $("menu-notes").addEventListener("click", () => document.querySelector('[data-content-view="notes"]').click());
 
 renderShell();
