@@ -3778,9 +3778,11 @@ window.matchMedia("(max-width: 600px)").addEventListener("change", () => {
   renderDeliveryHealth(deliveryHealth);
 });
 // Back from System Settings: the permissions may have changed.
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) {
-    void state();
-    void refreshPermissions(true).then(() => window.renderShell?.());
-  }
-});
+// Coming back to the window reads the state and the permissions fresh. A window covered by System Settings
+// may never turn hidden, so focus counts as coming back too.
+function welcomeBack() {
+  void state();
+  void refreshPermissions(true).then(() => window.renderShell?.());
+}
+document.addEventListener("visibilitychange", () => document.hidden || welcomeBack());
+addEventListener("focus", welcomeBack);

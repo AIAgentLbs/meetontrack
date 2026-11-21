@@ -620,6 +620,12 @@ const checks = {
     await failing(page, 2000);
     // That read asks for a fresh answer (the server drops its cache); the polls keep the cache.
     assert.ok(page.api.permissionReads.slice(reads).includes('?fresh=1'), JSON.stringify(page.api.permissionReads));
+    // A window covered by System Settings may never turn hidden: coming back to it (focus) reads them fresh too.
+    page.api.fixture.permissions.microphone = 'granted';
+    const focusReads = page.api.permissionReads.length;
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.waitForFunction(() => !document.querySelector('#call-status-text').classList.contains('fail'), null, { timeout: 2000 });
+    assert.ok(page.api.permissionReads.slice(focusReads).includes('?fresh=1'), JSON.stringify(page.api.permissionReads));
     assert.equal(page.api.permissionReads[0], '');
   },
   async long(page, lang) {

@@ -92,8 +92,12 @@ public sealed class AmanuRuntime : IAsyncDisposable
         {
             var retry = T($"Trying again in {(int)failure.RetryIn.TotalSeconds} s.", $"Повторю через {(int)failure.RetryIn.TotalSeconds} с.");
             if (MicrophoneAccess.Read() is not (MicrophoneAccess.State.Allowed or MicrophoneAccess.State.Unknown))
-                Notify(T("Couldn't start recording: no microphone access", "Не удалось начать запись: нет доступа к микрофону"),
-                    retry, NotificationKind.Error, MicrophoneAccess.OpenSettings);
+            {
+                // Once per call: the retries that follow fail for the same reason (the wait resets with each call).
+                if (failure.RetryIn == AutoRecordPolicy.FirstRetry)
+                    Notify(T("Couldn't start recording: no microphone access", "Не удалось начать запись: нет доступа к микрофону"),
+                        retry, NotificationKind.Error, MicrophoneAccess.OpenSettings);
+            }
             else
                 Notify(T("Couldn't start recording", "Не удалось начать запись"),
                     failure.Error.Message + " " + retry, NotificationKind.Error);

@@ -45,10 +45,10 @@ clears them. Disconnect does not log out shared `gws` used for report delivery.
 
 Home reads today's and tomorrow's Google Calendar events through `gws`, the
 [Google Workspace CLI](https://github.com/googleworkspace/cli). MeetOnTrack only
-reads the calendar; it never changes an event.
+reads the calendar. It never changes an event.
 
 1. Install `gws` as its [installation guide](https://github.com/googleworkspace/cli#installation)
-   describes. With Homebrew the package is `googleworkspace-cli`; the Homebrew
+   describes. With Homebrew the package is `googleworkspace-cli`. The Homebrew
    package named `gws` is a different tool.
 2. Sign `gws` in to the Google account whose calendar MeetOnTrack should read, as
    its [authentication guide](https://github.com/googleworkspace/cli#authentication)
