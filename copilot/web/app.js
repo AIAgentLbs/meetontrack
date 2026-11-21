@@ -810,6 +810,10 @@ let transcriptSignature = "";
 let renderedMessages = "";
 let requestBusy = false;
 let autoAnalysisPrimed = false;
+// After an urgent request the server skipped (inside its 15 s gap), the time from which the next
+// poll asks again while a heard question still waits, even if the transcript has not changed.
+let urgentRetryAt = 0;
+const URGENT_GAP_MS = 15000;
 let journalSignature = "";
 let journalFilter = "notes";
 let repositoryCatalog = [];
@@ -3318,10 +3322,11 @@ async function state() {
       && data.copilot.messages.length === 0
       && data.copilot.analysis?.state === "idle";
     const analysisKey = `${data.transcript.meeting_id}:${data.transcript.status}:${data.transcript.latest_at}:${(data.meeting_chat || []).length}:${(data.meeting_chat || []).at(-1)?.id || ""}`;
+    const urgentRetryDue = Boolean(data.heard_question) && urgentRetryAt > 0 && Date.now() >= urgentRetryAt;
     if (
       (data.transcript.live || finishedWithoutAnalysis) &&
       (data.transcript.latest_at || data.meeting_chat?.length) &&
-      analysisKey !== autoAnalysisPrimed &&
+      (analysisKey !== autoAnalysisPrimed || urgentRetryDue) &&
       !requestBusy &&
       !data.copilot.busy
     ) {
@@ -3415,10 +3420,12 @@ async function saveNote() {
 async function analyze(force, urgent = false) {
   if (requestBusy) return;
   requestBusy = true;
+  urgentRetryAt = 0;
   elements.help.textContent = force ? t("analysis.searching") : t("analysis.checking");
   elements.help.classList.remove("error");
   try {
-    await post("/api/analyze", { force, urgent });
+    const result = await post("/api/analyze", { force, urgent });
+    if (urgent && result.skipped && !result.reason) urgentRetryAt = Date.now() + URGENT_GAP_MS;
   } catch (error) {
     elements.help.textContent = plainError(error);
     elements.help.classList.add("error");
