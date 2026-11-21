@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from calendar_meetings import CalendarMeetings
+from memo_writer import is_external
 from repo_preparations import RepositoryPreparations
 from private_dirs import private_dir
 
@@ -258,19 +259,21 @@ class CallPlans:
                     started, ended = datetime.fromisoformat(event["start"]), datetime.fromisoformat(event["end"])
                 except (KeyError, TypeError, ValueError):
                     continue
-                if (event["start"], event.get("title")) in seen:
+                key = event.get("id") or (event["start"], event.get("title"))
+                if key in seen:
                     continue  # An event spanning midnight comes back for both days.
-                seen.add((event["start"], event.get("title")))
+                seen.add(key)
                 hits = [plan for plan in plans if self._event_matches(plan, event, day)
                         and self._near_scheduled_time(plan, started)]
                 matched.update(plan["id"] for plan in hits)  # An ended event still owns its plan.
                 if ended < now:
                     continue
+                attendees = list(event.get("attendees") or [])
                 meetings.append({
-                    "_sort": started,
+                    "_sort": started, "event_id": str(event.get("id") or ""),
                     "start": event["start"], "end": event["end"],
                     "title": str(event.get("title") or ""), "link": str(event.get("link") or ""),
-                    "attendees": list(event.get("attendees") or []),
+                    "attendees": attendees, "external": is_external(attendees),
                     "plans": [self._summary(plan) for plan in hits],
                 })
             unscheduled += [self._summary(plan) for plan in plans

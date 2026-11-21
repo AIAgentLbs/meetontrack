@@ -45,7 +45,7 @@ class CalendarMeetings:
             "calendarId": "primary", "timeMin": start.isoformat(),
             "timeMax": end.isoformat(), "singleEvents": True,
             "maxResults": 100,
-            "fields": "items(summary,start,end,location,description,hangoutLink,attendees(email,displayName,self))",
+            "fields": "items(id,summary,start,end,location,description,hangoutLink,attendees(email,displayName,self,resource))",
         }
         events: list[dict] = []
         try:
@@ -71,6 +71,7 @@ class CalendarMeetings:
                     location = " ".join(str(raw.get(k) or "") for k in ("location", "description", "hangoutLink"))
                     match = MEETING_URL_RE.search(location)
                     events.append({
+                        "id": str(raw.get("id") or "")[:1024],
                         "title": str(raw.get("summary") or "")[:250],
                         "start": event_start.isoformat(), "end": event_end.isoformat(),
                         "link": match.group(0).rstrip("/.,);") if match else "",
@@ -78,7 +79,8 @@ class CalendarMeetings:
                         "attendees": [
                             {"email": str(person.get("email") or "")[:200],
                              "name": str(person.get("displayName") or "")[:200],
-                             "self": bool(person.get("self"))}
+                             "self": bool(person.get("self")),
+                             "resource": bool(person.get("resource"))}
                             for person in (raw.get("attendees") or [])[:50] if isinstance(person, dict)
                         ] if isinstance(raw.get("attendees"), list) else [],
                     })

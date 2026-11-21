@@ -279,6 +279,54 @@ call_date: 2026-09-29
         self.assertEqual([item["title"] for item in result["meetings"]], ["Earlier CEST", "Later UTC"])
         self.assertEqual(result["unscheduled_plans"], [])
 
+    def test_agenda_items_carry_event_id_and_external(self):
+        class FakeCalendar:
+            def available(self):
+                return True
+
+            def for_day(self, day):
+                if str(day) != "2026-09-29":
+                    return []
+                return [
+                    {"id": "ev1", "title": "Pilot review", "start": "2026-09-29T10:00:00+02:00",
+                     "end": "2026-09-29T10:30:00+02:00", "link": "",
+                     "attendees": [{"email": "me@example.org", "name": "", "self": True, "resource": False},
+                                   {"email": "anna@example.com", "name": "Anna Petrova", "self": False,
+                                    "resource": False}]},
+                    {"id": "", "title": "Focus time", "start": "2026-09-29T11:00:00+02:00",
+                     "end": "2026-09-29T11:30:00+02:00", "link": "", "attendees": []},
+                ]
+
+        from datetime import datetime
+        now = datetime.fromisoformat("2026-09-29T09:00:00+02:00")
+        plans = CallPlans(self.root / "absent.json", self.state, calendar=FakeCalendar())
+        meetings = plans.agenda(now)["meetings"]
+        self.assertEqual([(m["event_id"], m["external"]) for m in meetings], [("ev1", True), ("", False)])
+
+    def test_two_events_same_start_and_title_but_different_ids_both_listed(self):
+        overnight = {"id": "ev3", "title": "Overnight", "start": "2026-09-29T23:30:00+02:00",
+                     "end": "2026-09-30T00:30:00+02:00", "link": "", "attendees": []}
+
+        class FakeCalendar:
+            def available(self):
+                return True
+
+            def for_day(self, day):
+                if str(day) == "2026-09-30":
+                    return [dict(overnight)]  # An event spanning midnight comes back for both days.
+                return [
+                    {"id": "ev1", "title": "Pilot review", "start": "2026-09-29T10:00:00+02:00",
+                     "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": []},
+                    {"id": "ev2", "title": "Pilot review", "start": "2026-09-29T10:00:00+02:00",
+                     "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": []},
+                    dict(overnight),
+                ]
+
+        from datetime import datetime
+        plans = CallPlans(self.root / "absent.json", self.state, calendar=FakeCalendar())
+        meetings = plans.agenda(datetime.fromisoformat("2026-09-29T09:00:00+02:00"))["meetings"]
+        self.assertEqual([m["event_id"] for m in meetings], ["ev1", "ev2", "ev3"])
+
 
 if __name__ == "__main__":
     unittest.main()
