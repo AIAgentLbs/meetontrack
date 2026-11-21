@@ -1,10 +1,31 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from call_plan import CallPlans
 from repo_preparations import RepositoryPreparations
+
+APP_PLAN_FOR_EV1 = {
+    "id": "app-0123456789abcdef", "event_id": "ev1", "written_by": "app",
+    "starts_at": "2026-09-29T10:00:00+02:00", "title": "Pilot review", "intro": "Agree the pilot scope.",
+    "meeting_link": "", "attendee_aliases": ["Anna Petrova"], "title_aliases": ["Pilot review"],
+    "source_label": "MeetOnTrack", "items": [{"id": "q1", "kind": "question", "text": "Who signs off?"}],
+    "memo_markdown": "# Pilot review\nAgree the pilot scope.",
+}
+NOW = datetime.fromisoformat("2026-09-29T09:00:00+02:00")
+
+
+def calendar_of(events_by_day):
+    class FakeCalendar:
+        def available(self):
+            return True
+
+        def for_day(self, day):
+            return [dict(event) for event in events_by_day.get(str(day), [])]
+
+    return FakeCalendar()
 
 
 class CallPlanTests(unittest.TestCase):
@@ -326,6 +347,80 @@ call_date: 2026-09-29
         plans = CallPlans(self.root / "absent.json", self.state, calendar=FakeCalendar())
         meetings = plans.agenda(datetime.fromisoformat("2026-09-29T09:00:00+02:00"))["meetings"]
         self.assertEqual([m["event_id"] for m in meetings], ["ev1", "ev2", "ev3"])
+
+
+    def test_app_plan_is_third_source_matched_by_event_id(self):
+        same = {"title": "Pilot review", "start": "2026-09-29T10:00:00+02:00",
+                "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": []}
+        calendar = calendar_of({"2026-09-29": [{**same, "id": "ev1"}, {**same, "id": "ev2"}]})
+        plans = CallPlans(self.root / "absent.json", self.state, None, calendar,
+                          app_plans=lambda: [APP_PLAN_FOR_EV1])
+        result = plans.agenda(NOW)
+        first, second = result["meetings"]
+        self.assertEqual([p["id"] for p in first["plans"]], [APP_PLAN_FOR_EV1["id"]])
+        self.assertEqual(first["plans"][0]["written_by"], "app")
+        self.assertEqual(second["plans"], [])  # Same title and time, another event: not its plan.
+        self.assertEqual(result["unscheduled_plans"], [])
+
+    def test_agenda_memo_gets_the_item_and_its_raw_hits(self):
+        calendar = calendar_of({"2026-09-29": [{"id": "ev1", "title": "Pilot review",
+                                                "start": "2026-09-29T10:00:00+02:00",
+                                                "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": []}]})
+        plans = CallPlans(self.root / "absent.json", self.state, None, calendar,
+                          app_plans=lambda: [APP_PLAN_FOR_EV1])
+        calls = []
+        meeting = plans.agenda(NOW, memo=lambda item, hits: calls.append((item, hits)) or {"state": "x"})["meetings"][0]
+        self.assertEqual(meeting["memo"], {"state": "x"})
+        item, hits = calls[0]
+        self.assertNotIn("plans", item)
+        self.assertNotIn("_sort", item)
+        self.assertEqual(item["event_id"], "ev1")
+        self.assertEqual(hits, [APP_PLAN_FOR_EV1])
+        self.assertNotIn("memo", plans.agenda(NOW)["meetings"][0])
+
+    def test_file_plan_wins_over_app_plan_for_same_meeting(self):
+        active = self._repo({"PREP.md": (
+            "---\ncall_date: 2026-09-29\n---\n# Sales kit: Acme / Alex Sample\n"
+            "## Опросник\n1. Who checks documents?\n")})
+        calendar = calendar_of({"2026-09-29": [{"id": "ev1", "title": "Weekly sync",
+                                                "start": "2026-09-29T10:00:00+02:00",
+                                                "end": "2026-09-29T10:30:00+02:00", "link": "",
+                                                "attendees": [{"email": "a@example.com", "name": "Alex Sample"}]}]})
+        app_plan = {**APP_PLAN_FOR_EV1, "attendee_aliases": ["Alex Sample"]}
+        plans = CallPlans(self.root / "absent.json", self.state, active, calendar, app_plans=lambda: [app_plan])
+        meeting = plans.agenda(NOW)["meetings"][0]
+        self.assertEqual([p["written_by"] for p in meeting["plans"]], ["file"])
+        file_plan_id = meeting["plans"][0]["id"]
+        # A live call with a generic capture title during ev1: both plans are calendar candidates.
+        generic = {**self.meeting, "meeting_id": "live-generic", "meeting": "Google Chrome Helper",
+                   "remote_attendees": [], "started_at": "2026-09-29T08:02:00Z"}
+        self.assertEqual(plans.snapshot(generic)["id"], file_plan_id)
+        # A live call whose attendee names match both plans.
+        named = {**self.meeting, "meeting_id": "live-named", "started_at": "2026-09-29T08:02:00Z"}
+        self.assertEqual(plans.snapshot(named)["id"], file_plan_id)
+
+    def test_app_plan_follows_rescheduled_event(self):
+        calendar = calendar_of({"2026-09-30": [{"id": "ev1", "title": "Moved call",
+                                                "start": "2026-09-30T15:00:00+02:00",
+                                                "end": "2026-09-30T15:30:00+02:00", "link": "", "attendees": []}]})
+        plans = CallPlans(self.root / "absent.json", self.state, None, calendar,
+                          app_plans=lambda: [APP_PLAN_FOR_EV1])
+        result = plans.agenda(NOW)
+        self.assertEqual([p["id"] for p in result["meetings"][0]["plans"]], [APP_PLAN_FOR_EV1["id"]])
+        self.assertEqual(result["unscheduled_plans"], [])
+
+    def test_preparations_json_untouched(self):
+        calendar = calendar_of({"2026-09-29": [{"id": "ev1", "title": "Pilot review",
+                                                "start": "2026-09-29T10:00:00+02:00",
+                                                "end": "2026-09-29T10:30:00+02:00", "link": "", "attendees": []}]})
+        plans = CallPlans(self.config, self.state, None, calendar, app_plans=lambda: [APP_PLAN_FOR_EV1])
+        before = (self.config.read_bytes(), self.config.stat().st_mtime_ns)
+        plans.agenda(NOW)
+        live = {**self.meeting, "meeting_id": "live", "remote_attendees": ["Anna Petrova"],
+                "started_at": "2026-09-29T08:02:00Z"}
+        self.assertIsNotNone(plans.snapshot(live))
+        self.assertEqual((self.config.read_bytes(), self.config.stat().st_mtime_ns), before)
+        self.assertEqual(list(self.root.glob("*-prep.md")), [])
 
 
 if __name__ == "__main__":

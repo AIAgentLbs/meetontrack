@@ -7,6 +7,7 @@ import re
 import threading
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlsplit
 
 from calendar_meetings import CalendarMeetings
@@ -55,12 +56,14 @@ class CallPlans:
         self, config_path: Path, state_path: Path,
         repositories_path: Path | None = None,
         calendar: CalendarMeetings | None = None,
+        app_plans: Callable[[], list[dict]] | None = None,
     ) -> None:
         self.config_path = config_path
         self.state_path = state_path
         self.lock = threading.RLock()
         self.repositories = RepositoryPreparations(repositories_path) if repositories_path else None
         self.calendar = calendar
+        self.app_plans = app_plans  # plans the memo writer wrote, matched to their calendar event by id
 
     def _plans(self, transcript: dict) -> list[dict]:
         try:
@@ -110,6 +113,8 @@ class CallPlans:
                     found for found in self.repositories.for_date(local_date)
                     if found["source_path"] not in used_sources
                 )
+        if self.app_plans:
+            plans.extend(self.app_plans())  # last: a confirmed match picks a file plan first
         return plans
 
     def _state(self) -> dict:
@@ -221,11 +226,20 @@ class CallPlans:
                 continue
             matches += [plan for plan in plans
                         if plan not in matches and self._event_matches(plan, event, started.astimezone().date())]
-        return matches
+        return self._files_first(matches)
+
+    @staticmethod
+    def _files_first(plans: list[dict]) -> list[dict]:
+        """A plan the person wrote (a file) hides the one the app wrote for the same meeting."""
+        files = [plan for plan in plans if plan.get("written_by") != "app"]
+        return files or plans
 
     @staticmethod
     def _event_matches(plan: dict, event: dict, day: date) -> bool:
-        """A plan for this day whose alias is in the event title or attendee names, or whose link is the event's."""
+        """A plan for this day whose alias is in the event title or attendee names, or whose link is the event's.
+        An app-written plan belongs to its own event only, whatever day the event moved to."""
+        if plan.get("event_id"):
+            return plan["event_id"] == event.get("id")
         if CallPlans._scheduled_day(plan) != day:
             return False
         event_title = _normal(" ".join([str(event.get("title") or ""), *(
@@ -243,8 +257,10 @@ class CallPlans:
         planned_link = str(plan.get("meeting_link") or "").rstrip("/")
         return name_hit or bool(event_link and planned_link and event_link == planned_link)
 
-    def agenda(self, now: datetime | None = None) -> dict:
-        """Today's and tomorrow's calendar meetings, each with its matched plans (none = no memo).
+    def agenda(self, now: datetime | None = None,
+               memo: Callable[[dict, list[dict]], dict] | None = None) -> dict:
+        """Today's and tomorrow's calendar meetings, each with its matched plans (none = no memo)
+        and, when `memo` is given, its `memo` object from the meeting and its matched plans.
 
         Works with no live call; calendar reads and repository scans are cached by their owners.
         """
@@ -263,21 +279,25 @@ class CallPlans:
                 if key in seen:
                     continue  # An event spanning midnight comes back for both days.
                 seen.add(key)
-                hits = [plan for plan in plans if self._event_matches(plan, event, day)
-                        and self._near_scheduled_time(plan, started)]
+                hits = self._files_first([
+                    plan for plan in plans if self._event_matches(plan, event, day)
+                    and (plan.get("event_id") or self._near_scheduled_time(plan, started))])
                 matched.update(plan["id"] for plan in hits)  # An ended event still owns its plan.
                 if ended < now:
                     continue
                 attendees = list(event.get("attendees") or [])
-                meetings.append({
-                    "_sort": started, "event_id": str(event.get("id") or ""),
+                item = {
+                    "event_id": str(event.get("id") or ""),
                     "start": event["start"], "end": event["end"],
                     "title": str(event.get("title") or ""), "link": str(event.get("link") or ""),
                     "attendees": attendees, "external": is_external(attendees),
-                    "plans": [self._summary(plan) for plan in hits],
-                })
-            unscheduled += [self._summary(plan) for plan in plans
-                            if plan["id"] not in matched and self._scheduled_day(plan) == day]
+                }
+                if memo:
+                    item["memo"] = memo(dict(item), hits)
+                meetings.append({**item, "_sort": started, "plans": [self._summary(plan) for plan in hits]})
+            unscheduled += [self._summary(plan) for plan in plans  # an app plan is never unscheduled
+                            if plan["id"] not in matched and not plan.get("event_id")
+                            and self._scheduled_day(plan) == day]
         return {"calendar": bool(self.calendar and self.calendar.available()),
                 "meetings": [{k: v for k, v in item.items() if k != "_sort"}
                              for item in sorted(meetings, key=lambda item: item["_sort"])],
@@ -306,6 +326,7 @@ class CallPlans:
     def _summary(plan: dict) -> dict:
         return {"id": plan["id"], "title": str(plan.get("title") or "")[:200],
                 "source_label": str(plan.get("source_label") or "")[:200],
+                "written_by": "app" if plan.get("written_by") == "app" else "file",
                 "links": _links(plan), **_memo(plan)}
 
     def _plan_for(self, transcript: dict, state: dict) -> dict | None:
@@ -324,7 +345,7 @@ class CallPlans:
         calendar_matches = self._calendar_candidates(plans, transcript)
         if len(calendar_matches) == 1:
             return calendar_matches[0]
-        tentative = [plan for plan in plans if self._time_fallback(plan, transcript)]
+        tentative = self._files_first([plan for plan in plans if self._time_fallback(plan, transcript)])
         return tentative[0] if len(tentative) == 1 else None
 
     def snapshot(self, transcript: dict) -> dict | None:
