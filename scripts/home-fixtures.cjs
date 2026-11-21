@@ -80,6 +80,8 @@ function build(name) {
       ]);
     },
     calendar_off: () => agenda([], { calendar: false, calendar_state: 'not_connected' }),
+    calendar_off_with_plans: () => agenda([], { calendar: false, calendar_state: 'not_connected',
+      unscheduled_plans: [plan('plan-2', 'Contract draft review', 'Check the draft before sending it.')] }),
     tool_missing: () => agenda([], { calendar: false, calendar_state: 'tool_missing', skip_recording_supported: false }),
     no_meetings: () => agenda([]),
     load_failed: () => null, // /api/agenda answers 500
@@ -94,7 +96,7 @@ function build(name) {
 // name -> {agenda, state, permissions}, rebuilt on every read so the times stay relative to now.
 const states = Object.defineProperties({}, Object.fromEntries(
   ['ready', 'preparing', 'nothing_found', 'failed', 'skipped', 'adapter', 'no_skip_support', 'long',
-    'calendar_off', 'tool_missing', 'no_meetings', 'load_failed']
+    'calendar_off', 'calendar_off_with_plans', 'tool_missing', 'no_meetings', 'load_failed']
     .map(name => [name, { enumerable: true, get: () => build(name) }])));
 
 // Serves the real UI files and the fixture. The returned object records POST bodies; a test can set

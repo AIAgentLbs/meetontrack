@@ -11,7 +11,7 @@ const { states, open } = require('./home-fixtures.cjs');
 const shots = fs.mkdtempSync(path.join(os.tmpdir(), 'home-ui-'));
 const scriptErrors = page => page.errors.filter(error => /(shell|home)\.js/.test(error));
 const texts = (page, selector) => page.locator(selector).allInnerTexts();
-const EMPTY = ['calendar_off', 'tool_missing', 'no_meetings', 'load_failed'];
+const EMPTY = ['calendar_off', 'calendar_off_with_plans', 'tool_missing', 'no_meetings', 'load_failed'];
 const rowOf = (page, title) => page.locator('#home .row', { has: page.locator('.mtitle', { hasText: title }) });
 
 // Rules for every fixture, width, scheme and language.
@@ -247,6 +247,13 @@ const checks = {
     await page.waitForFunction(() => document.querySelector('#project-dialog').open);
     assert.equal(await page.evaluate(() => document.querySelector('#google-context-settings').open), true);
   },
+  async calendar_off_with_plans(page, lang) {
+    // One calendar block, then the plans without an event under their own heading.
+    assert.deepEqual(await page.locator('#home .col > *').evaluateAll(nodes => nodes.map(node => node.className)), ['empty', 'day', 'row']);
+    assert.match(await page.locator('#home h2.day').innerText(), /^(Подготовка без события|Preparation without)/);
+    assert.equal(await rowOf(page, 'Contract draft review').count(), 1);
+    assert.equal(await page.locator('#home .empty button, #home .empty a').count(), 1);
+  },
   async tool_missing(page, lang) {
     const block = await emptyState(page, lang, [
       { ru: 'Нет программы для чтения календаря', en: 'The calendar reader is not installed' },
@@ -254,19 +261,28 @@ const checks = {
     const link = block.locator('a.ql');
     assert.deepEqual([await link.innerText(), await link.getAttribute('href'), await link.getAttribute('target'), await link.getAttribute('rel')],
       [lang === 'ru' ? 'Как ее установить' : 'How to install it',
-        'https://github.com/AIAgentLbs/meetontrack/blob/main/docs/CONTEXT_SOURCES.md', '_blank', 'noopener noreferrer']);
+        'https://github.com/AIAgentLbs/meetontrack/blob/main/docs/CONTEXT_SOURCES.md#install-the-calendar-reader-gws', '_blank', 'noopener noreferrer']);
   },
   async no_meetings(page, lang) {
-    await emptyState(page, lang, [{ ru: 'Сегодня и завтра звонков нет', en: 'No calls today or tomorrow' },
-      { ru: 'Прошедшие звонки открываются сверху.', en: 'Past calls open from the top bar.' }], 0);
+    await emptyState(page, lang, [{ ru: 'Больше звонков сегодня и завтра нет', en: 'No more calls today or tomorrow' },
+      { ru: 'Прошедшие звонки - в меню сверху.', en: 'Past calls are in the top bar and the menu.' }], 0);
   },
   async load_failed(page, lang) {
     const block = await emptyState(page, lang, [{ ru: 'Не удалось загрузить звонки', en: 'Could not load your calls' },
-      { ru: 'Проверьте, что MeetOnTrack запущен, и попробуйте еще раз.', en: 'Check that MeetOnTrack is running and try again.' }], 1);
-    // Retry fetches the agenda again; a good answer replaces the block with the rows.
+      { ru: 'Попробуем снова сами, или нажмите Повторить.', en: 'We will keep trying, or press Retry.' }], 1);
+    // Retry is disabled while it fetches; a failed fetch gives it back, focused.
+    const retry = block.locator('button', { hasText: /^(Повторить|Retry)$/ });
+    let reopen;
+    page.api.gate = new Promise(resolve => { reopen = resolve; });
+    await Promise.all([page.waitForRequest(request => request.url().endsWith('/api/agenda')), retry.click()]);
+    assert.equal(await retry.isDisabled(), true);
+    page.api.gate = null;
+    reopen();
+    await page.waitForFunction(() => !document.querySelector('#home .empty button:disabled'));
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.key), 'empty|reload');
+    // A good answer replaces the block with the rows.
     page.api.fixture.agenda = states.ready.agenda;
-    await Promise.all([page.waitForResponse(response => response.url().endsWith('/api/agenda')),
-      block.locator('button', { hasText: /^(Повторить|Retry)$/ }).click()]);
+    await Promise.all([page.waitForResponse(response => response.url().endsWith('/api/agenda')), retry.click()]);
     await page.locator('#home .row.next').waitFor();
     assert.equal(await page.locator('#home .empty').count(), 0);
   },
@@ -323,7 +339,13 @@ const checks = {
               await page.setViewportSize({ width, height: 900 });
               await page.emulateMedia({ colorScheme: scheme });
               await generic(page, lang, label);
-              if (width === 400 && !EMPTY.includes(fixture)) await narrow(page, label);
+              if (width === 400 && !EMPTY.includes(fixture)) {
+                await narrow(page, label);
+                // The smallest window the Mac app allows.
+                await page.setViewportSize({ width, height: 480 });
+                await narrow(page, `${label}-480`);
+                await page.setViewportSize({ width, height: 900 });
+              }
               await page.screenshot({ path: path.join(shots, `${label}.png`), fullPage: true });
             }
           }

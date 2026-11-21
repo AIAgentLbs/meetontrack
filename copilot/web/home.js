@@ -3,7 +3,7 @@
 const homeErrors = new Map(); // row key -> message key of a skip or retry that failed
 const homeOpenMemos = new Set(); // row keys whose full memo is open
 const homeBusy = new Set(); // button keys whose POST and agenda refresh are in flight
-const HOME_TOOL_HELP = "https://github.com/AIAgentLbs/meetontrack/blob/main/docs/CONTEXT_SOURCES.md";
+const HOME_TOOL_HELP = "https://github.com/AIAgentLbs/meetontrack/blob/main/docs/CONTEXT_SOURCES.md#install-the-calendar-reader-gws";
 let homeSignature = "";
 
 const homeKey = meeting => meeting.event_id || `${meeting.start}|${meeting.title}`;
@@ -84,12 +84,28 @@ async function homeAction(button, key, path, body) {
     renderHome(window.agendaData, window.appState);
     await refreshAgenda();
   } finally {
-    homeBusy.delete(id);
-    const current = [...document.querySelectorAll("#home [data-key]")].find(node => node.dataset.key === id);
-    if (current) {
-      current.disabled = false;
-      if (document.activeElement === document.body) current.focus();
-    }
+    homeRelease(id);
+  }
+}
+
+// Retry on the load-failed block: busy while the agenda is fetched again.
+async function homeReload(button) {
+  homeBusy.add(button.dataset.key);
+  button.disabled = true;
+  try {
+    await refreshAgenda();
+  } finally {
+    homeRelease(button.dataset.key);
+  }
+}
+
+// The button with this key, if it is still on Home, is enabled again and gets focus back from body.
+function homeRelease(id) {
+  homeBusy.delete(id);
+  const current = [...document.querySelectorAll("#home [data-key]")].find(node => node.dataset.key === id);
+  if (current) {
+    current.disabled = false;
+    if (document.activeElement === document.body) current.focus();
   }
 }
 
@@ -270,7 +286,7 @@ function renderHome(agenda, state, now = Date.now()) {
   // Not loaded yet shows nothing; otherwise one empty-state block when there are no rows to show.
   const calendar = agenda?.calendar_state;
   if (failed) {
-    column.append(homeEmpty("home.load_failed", homeButton(t("home.retry"), "primary", "empty|reload", () => refreshAgenda())));
+    column.append(homeEmpty("home.load_failed", homeButton(t("home.retry"), "primary", "empty|reload", event => homeReload(event.currentTarget))));
   } else if (calendar === "tool_missing") {
     column.append(homeEmpty("home.tool", Object.assign(externalLink(t("home.tool_link"), HOME_TOOL_HELP), { className: "ql" })));
   } else if (calendar === "not_connected") {
