@@ -12,6 +12,8 @@ const errors = [];
   const root = path.resolve(__dirname, '../copilot/web');
   const saved = [];
   let preferences = { interface_language: 'ru' };
+  let plan = { meeting_id: 't', title: 'Pilot review', items: [{ id: 'p1', kind: 'question', status: 'open', text: 'Who owns the pilot?' }],
+    score: { total: 1, resolved: 0, by_kind: {} }, links: [] };
   const journal = [
     { id: 'n1', category: 'NOTE', source: 'user_note', text: 'Моя заметка про бюджет', meeting_id: 't', created_at: '2026-10-22T10:01:30+00:00' },
     { id: 'a1', category: 'ASK', source: 'copilot', text: 'Кто отвечает за пилот?', meeting_id: 't', status: 'open' },
@@ -29,6 +31,7 @@ const errors = [];
       // An older server could still send a stored analysis message: the Chat ignores it.
       { role: 'assistant', kind: 'insight', text: 'RISK — Нет бюджета\nSIGNAL_UPDATE: {"id":"r1"}', at: '2026-10-22T10:03:00+00:00' },
     ] },
+    call_plan: plan,
     fact_checks: { web: true, items: [{ id: 'f1', status: 'confirmed', claim: 'Пилот в понедельник', segment: { source: 'system', speaker: 'Anna' } }] },
   });
   try {
@@ -57,6 +60,17 @@ const errors = [];
       return page;
     };
     let page = await open();
+
+    // The Preparation tab is open and the plan goes away (a new call has none): Call overview shows, never a blank pane.
+    await page.locator('#call-plan-tab').click();
+    assert.equal(await page.locator('#call-plan').isVisible(), true);
+    plan = null;
+    await page.evaluate(() => renderCallPlan(null));
+    assert.equal(await page.locator('#call-plan-tab').isHidden(), true);
+    assert.equal(await page.locator('#call-board').isVisible(), true, 'Call overview takes the pane');
+    assert.equal(await page.locator('[data-content-view="board"]').getAttribute('aria-selected'), 'true');
+    await page.close();
+    page = await open();  // the rest runs without a plan
 
     // One chat tab only: the meeting chat tab, its counter and empty text are gone.
     const tabs = await page.locator('[data-content-view]').evaluateAll(nodes => nodes.filter(node => !node.hidden).map(node => node.textContent.trim()));

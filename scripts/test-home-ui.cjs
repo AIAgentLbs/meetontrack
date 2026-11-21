@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const { states, open } = require('./home-fixtures.cjs');
+const { states, open, SEAMS, goStale } = require('./home-fixtures.cjs');
 
 const shots = fs.mkdtempSync(path.join(os.tmpdir(), 'home-ui-'));
 const scriptErrors = page => page.errors.filter(error => /(shell|home)\.js/.test(error));
@@ -65,6 +65,13 @@ async function generic(page, lang, label) {
     titled: !cut || status.title === status.textContent };
     return { scroll: document.documentElement.scrollWidth <= width, spill, clipped, text: document.body.innerText, sizes: [...sizes], torn, bar };
   });
+  // R35: "Do not record" is off; the bar, Home and the menu never mention skipping unless a seam switched it on.
+  if (!page.api.fixture.agenda?.skip_recording_supported) {
+    const skipping = await page.evaluate(() => ['home.skip', 'home.skipped', 'shell.key.skip', 'home.cannot_skip', 'home.recording_active']
+      .map(key => t(key)).filter(text => document.body.innerText.includes(text) || document.getElementById('app-menu').textContent.includes(text)));
+    assert.deepEqual(skipping, [], `${label}: skipping mentioned`);
+    assert.equal(await page.locator('[data-key$="|skip"]').count(), 0, `${label}: a skip control`);
+  }
   assert.doesNotMatch(result.bar.text, /Нет свежих реплик|No recent utterances|^$/, `${label}: the bar shows the call status`);
   assert.equal(result.bar.inside, true, `${label}: the call status inside the window`);
   assert.equal(result.bar.titled, true, `${label}: a cut call status has its full text in the title`);
@@ -150,7 +157,7 @@ const checks = {
       tabbed.push(await page.evaluate(() => document.activeElement.textContent.replace('↵', '').trim()));
     }
     assert.deepEqual(tabbed, order.slice(1));
-    assert.equal(order.length, 4);
+    assert.equal(order.length, 3, 'sources, Open memo, call link: no Do not record (R35)');
     // Open memo: primary with the key label on the next row, plain on the others, toggles the full memo.
     const openMemo = row.locator('.actions button[aria-controls]');
     assert.match(await openMemo.innerText(), /^(Открыть мемо|Open memo)/);
@@ -173,45 +180,6 @@ const checks = {
     await row.locator('.bg button.ql').click();
     assert.equal(await panel.isVisible(), true);
     assert.equal(await page.evaluate(() => document.activeElement.href), 'https://example.com/proposal');
-    // Do not record: posts the choice; a 409 keeps the row as it was and says why.
-    page.api.responses['/api/agenda/skip-recording'] = { status: 409, json: { ok: false, error: 'recorder_cannot_skip' } };
-    await row.locator('button.quiet').click();
-    await row.locator('.row-error').waitFor();
-    assert.match(await row.locator('.row-error').innerText(),
-      lang === 'ru' ? /^Программа записи не умеет пропускать звонок\. Обновите приложение\.$/ : /^The recorder cannot skip a call\. Update the app\.$/);
-    assert.equal(await row.locator('button.quiet').count(), 1);
-    const post = page.api.posts.find(item => item.path === '/api/agenda/skip-recording');
-    assert.deepEqual(Object.keys(post.body).sort(), ['end', 'event_id', 'skip', 'start', 'title']);
-    assert.equal(post.body.skip, true);
-    assert.equal(post.body.event_id, 'evt-ready');
-    // A recording started meanwhile (the server knows it before Home does): the row says how to skip the call.
-    page.api.responses['/api/agenda/skip-recording'] = { status: 409, json: { ok: false, error: 'recording_active' } };
-    await row.locator('button.quiet').click();
-    await page.waitForFunction(() => /Сейчас идет запись|recording is in progress/.test(document.querySelector('#home .row.next .row-error')?.textContent));
-    assert.equal(await row.locator('.row-error').innerText(), lang === 'ru'
-      ? 'Сейчас идет запись. Остановите ее, чтобы не записывать звонок.'
-      : 'A recording is in progress. Stop it first to skip this call.');
-    delete page.api.responses['/api/agenda/skip-recording'];
-    // R32: while any recording runs, Home offers no Do not record, for the call on now or one that has not started.
-    const next = page.api.fixture.agenda.meetings[0];
-    page.api.fixture.state = { ...page.api.fixture.state,
-      transcript: { meeting_id: 'm1', meeting: 'Pilot review', status: 'recording', live: true, segments: [], speakers: [],
-        started_at: new Date(Date.now() - 40 * 60000).toISOString() },
-      recording_health: { checked_at: Date.now() / 1000 + 60, capture: { state: 'recording', audio_recording: true } } };
-    await page.waitForFunction(() => document.body.dataset.view === 'call');
-    await page.locator('#nav-home').click();
-    for (const minutes of [-2, 3]) {
-      Object.assign(next, { start: new Date(Date.now() + minutes * 60000).toISOString(), end: new Date(Date.now() + (minutes + 30) * 60000).toISOString() });
-      await page.evaluate(() => refreshAgenda());
-      await page.waitForFunction(minutes => (minutes < 0 ? /идет сейчас|on now/ : /через|in /)
-        .test(document.querySelector('#home .row.next .soon')?.textContent), minutes);
-      assert.equal(await row.locator('button.quiet').count(), 0, `no Do not record during a recording (${minutes} min)`);
-    }
-    // Undo of a skip stays during a recording.
-    next.skip_recording = true;
-    await page.evaluate(() => refreshAgenda());
-    await row.locator('[data-key$="|skip"]').waitFor();
-    assert.equal(await row.locator('[data-key$="|skip"]').innerText(), lang === 'ru' ? 'Вернуть' : 'Undo');
   },
   // The opened memo is part of the row: one toggle, real section headings, no repeat of the digest above it,
   // links by their labels only, the materials as plain underlined links.
@@ -292,8 +260,7 @@ const checks = {
       [lang === 'ru' ? 'Выбрать ИИ' : 'Choose the AI']);
     // Nothing to do here: one quiet Retry now link at most, no Check the AI, then the call's own actions.
     assert.deepEqual(await row.locator('.actions > *').evaluateAll(nodes => nodes.map(node => [node.textContent, node.className])),
-      lang === 'ru' ? [['Повторить сейчас', 'ql'], ['Открыть ссылку на звонок', 'ql'], ['Не записывать этот звонок', 'quiet']]
-        : [['Retry now', 'ql'], ['Open the call link', 'ql'], ['Do not record this call', 'quiet']]);
+      lang === 'ru' ? [['Повторить сейчас', 'ql'], ['Открыть ссылку на звонок', 'ql']] : [['Retry now', 'ql'], ['Open the call link', 'ql']]);
     // A second click while the POST is in flight posts nothing more.
     let release;
     page.api.responses['/api/memo/rebuild'] = new Promise(resolve => { release = resolve; });
@@ -372,9 +339,85 @@ const checks = {
     assert.match(await panel.innerText(), /Check the draft before sending it\./);
     assert.ok((await panel.boundingBox()).width > 300, 'the opened memo is as wide as the title column');
   },
-  async no_skip_support(page) {
-    assert.equal(await page.locator('#home .row.next .goal').count(), 1);
-    assert.equal(await page.locator('#home').getByText(/Не записывать|Do not record/).count(), 0);
+  // A refresh failed after the rows loaded: the rows stay with one quiet line saying since when, and Retry.
+  async stale(page, lang) {
+    const line = page.locator('#home .stale');
+    const time = await page.evaluate(() => homeClock(window.agendaLoadedAt));
+    assert.equal(await line.innerText(), lang === 'ru' ? `Не удалось обновить звонки, показаны данные на ${time}. Повторить`
+      : `Could not refresh your calls, showing them as of ${time}. Retry`);
+    assert.equal(await page.locator('#home .row').count(), 3, 'the rows stay');
+    assert.equal(await page.locator('#home .col > *').first().evaluate(node => node.classList.contains('stale')), true, 'the line comes first');
+    assert.equal(await page.locator('#home .empty').count(), 0);
+    // Retry: busy while it fetches; a good answer removes the line.
+    const retry = line.locator('button');
+    let reopen;
+    page.api.gate = new Promise(resolve => { reopen = resolve; });
+    page.api.fixture.agenda = states.ready.agenda;
+    await Promise.all([page.waitForRequest(request => request.url().endsWith('/api/agenda')), retry.click()]);
+    assert.equal(await retry.isDisabled(), true);
+    page.api.gate = null;
+    reopen();
+    await line.waitFor({ state: 'detached' });
+    assert.equal(await page.locator('#home .row').count(), 3);
+  },
+  // Test seam: the skip code kept for MEETONTRACK-173, switched on by the fixture (never shipped in this release).
+  async skip_seam(page, lang) {
+    const row = page.locator('#home .row.next');
+    // A stale agenda disables the actions that depend on current event times, until a refresh succeeds.
+    await goStale(page);
+    assert.equal(await row.locator('button.quiet').isDisabled(), true, 'no Do not record on stale times');
+    page.api.fixture.agenda = states.skip_seam.agenda;
+    await page.evaluate(() => refreshAgenda());
+    await page.locator('#home .stale').waitFor({ state: 'detached' });
+    assert.equal(await row.locator('button.quiet').isDisabled(), false);
+    // Keys: N skips the next call, and the menu lists it.
+    await page.locator('#menu-button').click();
+    assert.match(await page.locator('#menu-shortcuts').innerText(), /Не записывать следующий звонок|Do not record the next call/);
+    await page.keyboard.press('Escape');
+    page.api.responses['/api/agenda/skip-recording'] = { status: 409, json: { ok: false, error: 'recorder_cannot_skip' } };
+    await page.evaluate(() => document.activeElement.blur());
+    await Promise.all([page.waitForRequest(request => request.url().endsWith('/api/agenda/skip-recording')), page.keyboard.press('n')]);
+    await row.locator('.row-error').waitFor();
+    page.api.posts.length = 0;
+    // Do not record: posts the choice; a 409 keeps the row as it was and says why.
+    page.api.responses['/api/agenda/skip-recording'] = { status: 409, json: { ok: false, error: 'recorder_cannot_skip' } };
+    await row.locator('button.quiet').click();
+    await row.locator('.row-error').waitFor();
+    assert.match(await row.locator('.row-error').innerText(),
+      lang === 'ru' ? /^Программа записи не умеет пропускать звонок\. Обновите приложение\.$/ : /^The recorder cannot skip a call\. Update the app\.$/);
+    assert.equal(await row.locator('button.quiet').count(), 1);
+    const post = page.api.posts.find(item => item.path === '/api/agenda/skip-recording');
+    assert.deepEqual(Object.keys(post.body).sort(), ['end', 'event_id', 'skip', 'start', 'title']);
+    assert.equal(post.body.skip, true);
+    assert.equal(post.body.event_id, 'evt-ready');
+    // A recording started meanwhile (the server knows it before Home does): the row says how to skip the call.
+    page.api.responses['/api/agenda/skip-recording'] = { status: 409, json: { ok: false, error: 'recording_active' } };
+    await row.locator('button.quiet').click();
+    await page.waitForFunction(() => /Сейчас идет запись|recording is in progress/.test(document.querySelector('#home .row.next .row-error')?.textContent));
+    assert.equal(await row.locator('.row-error').innerText(), lang === 'ru'
+      ? 'Сейчас идет запись. Остановите ее, чтобы не записывать звонок.'
+      : 'A recording is in progress. Stop it first to skip this call.');
+    delete page.api.responses['/api/agenda/skip-recording'];
+    // R32: while any recording runs, Home offers no Do not record, for the call on now or one that has not started.
+    const next = page.api.fixture.agenda.meetings[0];
+    page.api.fixture.state = { ...page.api.fixture.state,
+      transcript: { meeting_id: 'm1', meeting: 'Pilot review', status: 'recording', live: true, segments: [], speakers: [],
+        started_at: new Date(Date.now() - 40 * 60000).toISOString() },
+      recording_health: { checked_at: Date.now() / 1000 + 60, capture: { state: 'recording', audio_recording: true } } };
+    await page.waitForFunction(() => document.body.dataset.view === 'call');
+    await page.locator('#nav-home').click();
+    for (const minutes of [-2, 3]) {
+      Object.assign(next, { start: new Date(Date.now() + minutes * 60000).toISOString(), end: new Date(Date.now() + (minutes + 30) * 60000).toISOString() });
+      await page.evaluate(() => refreshAgenda());
+      await page.waitForFunction(minutes => (minutes < 0 ? /идет сейчас|on now/ : /через|in /)
+        .test(document.querySelector('#home .row.next .soon')?.textContent), minutes);
+      assert.equal(await row.locator('button.quiet').count(), 0, `no Do not record during a recording (${minutes} min)`);
+    }
+    // Undo of a skip stays during a recording.
+    next.skip_recording = true;
+    await page.evaluate(() => refreshAgenda());
+    await row.locator('[data-key$="|skip"]').waitFor();
+    assert.equal(await row.locator('[data-key$="|skip"]').innerText(), lang === 'ru' ? 'Вернуть' : 'Undo');
   },
   async calendar_off(page, lang) {
     const block = await emptyState(page, lang, [{ ru: 'Календарь не подключен', en: 'The calendar is not connected' },
@@ -476,7 +519,9 @@ const checks = {
   async mic_missing(page, lang) {
     await failing(page);
     const time = await nextClock(page);
-    const text = lang === 'ru' ? `Нет доступа к микрофону: запись в ${time} не включится` : `No microphone access: the ${time} call will not be recorded`;
+    // macOS (this fixture): the call audio is still recorded, only the owner's voice is lost.
+    const text = lang === 'ru' ? `Нет доступа к микрофону: ваш голос в звонке в ${time} не запишется`
+      : `No microphone access: your voice in the ${time} call will not be recorded`;
     assert.equal(await page.locator('#call-status-text').innerText(), text);
     const action = page.locator('#call-status-action');
     assert.equal(await action.innerText(), lang === 'ru' ? 'Открыть настройки микрофона' : 'Open microphone settings');
@@ -513,6 +558,10 @@ const checks = {
     // The pill names the problem in a few words and never cuts them; the meeting is named in the dialog it opens.
     const pill = page.locator('#delivery-alert');
     await pill.waitFor();
+    // Windows (this fixture): a denied microphone means the recording does not start.
+    const time = await nextClock(page);
+    assert.equal(await page.locator('#call-status-text').innerText(), lang === 'ru'
+      ? `Нет доступа к микрофону: запись в ${time} не включится` : `No microphone access: the ${time} call will not be recorded`);
     for (const width of [1440, 1024, 960, 760, 400]) {
       await page.setViewportSize({ width, height: 900 });
       await frames(page);
@@ -641,8 +690,7 @@ const checks = {
     const row = page.locator('#home .row.next');
     const actions = await row.locator('.actions > *').evaluateAll(nodes => nodes.map(node => [node.textContent.replace('↵', ''), node.className]));
     assert.deepEqual(actions, lang === 'ru'
-      ? [['Открыть мемо', 'primary'], ['Открыть ссылку на звонок', 'ql'], ['Не записывать этот звонок', 'quiet']]
-      : [['Open memo', 'primary'], ['Open the call link', 'ql'], ['Do not record this call', 'quiet']]);
+      ? [['Открыть мемо', 'primary'], ['Открыть ссылку на звонок', 'ql']] : [['Open memo', 'primary'], ['Open the call link', 'ql']]);
     assert.equal(await page.locator('#home').getByText(fix).count(), 0, 'the fix is not repeated in the row');
     // The bar's fix posts once while it is in flight.
     let release;
@@ -677,8 +725,8 @@ const checks = {
       nodes.filter(node => node.checkVisibility()).map(node => [node.querySelector('.mi').textContent, node.querySelector('kbd').textContent]));
     const key = await page.evaluate(() => (/Mac/.test(navigator.platform) ? '⌘⇧R' : 'Alt+Shift+R'));
     assert.deepEqual(shortcuts, lang === 'ru'
-      ? [['Открыть мемо следующего звонка', '↵'], ['Начать запись', key], ['Открыть ссылку на звонок', 'J'], ['Не записывать следующий звонок', 'N']]
-      : [["Open the next call's memo", '↵'], ['Start recording', key], ['Open the call link', 'J'], ['Do not record the next call', 'N']]);
+      ? [['Открыть мемо следующего звонка', '↵'], ['Начать запись', key], ['Открыть ссылку на звонок', 'J']]
+      : [["Open the next call's memo", '↵'], ['Start recording', key], ['Open the call link', 'J']]);
     assert.equal(await page.locator('#menu-shortcuts').getAttribute('aria-label'), lang === 'ru' ? 'Клавиши' : 'Keys');
     // A change while the menu is open does not rebuild the list under the focused item.
     const link = page.locator('#menu-shortcuts [role="menuitem"]', { hasText: /ссылку|link/ });
@@ -773,15 +821,17 @@ const checks = {
     await page.locator('#startup-record').waitFor({ timeout: 2000 });
     await page.locator('#getting-started-close').click();
     await page.waitForFunction(() => !document.querySelector('#call-status-text').classList.contains('fail'));
-    // J opens the call link in a new tab, N skips the next call.
+    // J opens the call link in a new tab; N does nothing while "Do not record" is off (R35).
     await page.context().route('https://example.com/**', route => route.fulfill({ body: 'call' }));
     await page.evaluate(() => document.activeElement.blur());
     const [tab] = await Promise.all([page.context().waitForEvent('page'), page.keyboard.press('j')]);
     assert.equal(tab.url(), 'https://example.com/call/evt-ready');
     await tab.close();
     await page.evaluate(() => document.activeElement.blur());
-    await Promise.all([page.waitForRequest(request => request.url().endsWith('/api/agenda/skip-recording')), page.keyboard.press('n')]);
-    assert.equal(page.api.posts.at(-1).body.skip, true);
+    const posted = page.api.posts.length;
+    await page.keyboard.press('n');
+    await page.waitForTimeout(300);
+    assert.equal(page.api.posts.length, posted, 'N posts nothing');
     // Key labels: the bar's Start recording shows its key at 1440, not at 1024; Open memo (primary) keeps it at 1024.
     const start = page.locator('#call-status-action');
     assert.match(await start.innerText(), START);
@@ -870,6 +920,7 @@ const checks = {
           await page.locator('#home :is(.row, .empty)').first().waitFor({ timeout: 5000 });
           if (MENU.includes(fixture)) await page.locator('#menu-button').click();
           if (OPEN_MEMO.includes(fixture)) await pressOpenMemo(page);
+          if (fixture === 'stale') await goStale(page);
           for (const width of [1440, 1024, 400]) {
             for (const scheme of ['light', 'dark']) {
               const label = `${fixture}-${width}-${scheme}-${lang}`;

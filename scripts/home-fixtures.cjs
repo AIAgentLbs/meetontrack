@@ -75,7 +75,8 @@ function build(name, lang = 'en') {
   // Tomorrow at 10:00 local time: always on the next calendar day, so it always crosses midnight.
   const nothing = (start, id = 'evt-nothing') => meeting(id, start, 30, L.first, [nina],
     { memo: memo('nothing_found') });
-  const agenda = (meetings, extra = {}) => ({ calendar: true, calendar_state: 'connected', skip_recording_supported: true,
+  // As shipped (R35): the server never offers "Do not record". SEAMS below switch the skip code on explicitly.
+  const agenda = (meetings, extra = {}) => ({ calendar: true, calendar_state: 'connected', skip_recording_supported: false,
     meetings: meetings.sort((a, b) => Date.parse(a.start) - Date.parse(b.start)), unscheduled_plans: [], ...extra });
   const agendas = {
     ready: () => agenda([ready(), preparing(now + 120 * MIN), nothing(at10)]),
@@ -88,7 +89,8 @@ function build(name, lang = 'en') {
       meeting('evt-choice', now + 180 * MIN, 30, L.followup, [anna],
         { memo: memo('failed', { reason: 'ai_needs_choice', retry_at: iso(now + 30 * MIN) }) }),
     ]),
-    skipped: () => agenda([ready({ skip_recording: true }), nothing(at10)]),
+    skipped: () => agenda([ready({ skip_recording: true }), nothing(at10)], { skip_recording_supported: true }),
+    skip_seam: () => agenda([ready(), preparing(now + 120 * MIN), nothing(at10)], { skip_recording_supported: true }),
     adapter: () => {
       const strip = item => { delete item.memo; return item; };
       return agenda([
@@ -97,7 +99,6 @@ function build(name, lang = 'en') {
         strip(meeting('evt-solo', at10, 60, L.focus, [])),
       ], { unscheduled_plans: [plan('plan-2', L.draft, L.draftText)] });
     },
-    no_skip_support: () => agenda([ready(), preparing(now + 120 * MIN)], { skip_recording_supported: false }),
     long: () => {
       const people = Array.from({ length: 10 }, (_, index) => ({ name: L.participant(index + 1),
         email: `participant.number${index + 1}.with.a.long.address@subdomain.example.org`, self: false }));
@@ -122,12 +123,15 @@ function build(name, lang = 'en') {
     not_recording: () => agenda([ready({ start: iso(now - 5 * MIN), end: iso(now + 25 * MIN) }), nothing(at10)]),
     // The next call's memo opened (the check and the critique renders press Open memo first).
     ready_memo_open: () => agenda([ready(), preparing(now + 120 * MIN), nothing(at10)]),
+    // Loaded once, then a refresh failed (the runner and the renders fail it after the first load).
+    stale: () => agenda([ready(), preparing(now + 120 * MIN), nothing(at10)]),
     menu_open: () => agenda([ready(), nothing(at10)]),
     menu_narrow: () => agenda([ready(), nothing(at10)]),
     keys: () => agenda([ready(), nothing(at10)]),
   };
   const permissions = { microphone: 'granted', call_audio: 'granted', recorder: 'running',
-    ...{ mic_missing: { microphone: 'denied' }, mic_missing_delivery: { microphone: 'denied' }, not_recording: { recorder: 'stopped' } }[name] };
+    ...{ mic_missing: { microphone: 'denied', platform: 'macos' }, mic_missing_delivery: { microphone: 'denied', platform: 'windows' },
+      not_recording: { recorder: 'stopped' } }[name] };
   const state = { preferences: {}, journal: [], frames: [], project: {}, updates: {},
     delivery: { channels: {}, undelivered: [], notifications: [] },
     transcript: { meeting_id: '', status: 'idle', live: false, segments: [], speakers: [] },
@@ -140,7 +144,7 @@ function build(name, lang = 'en') {
 
 // name -> {agenda, state, permissions}, rebuilt on every read so the times stay relative to now.
 const states = Object.defineProperties({}, Object.fromEntries(
-  ['ready', 'ready_memo_open', 'preparing', 'nothing_found', 'failed', 'skipped', 'adapter', 'no_skip_support', 'long',
+  ['ready', 'ready_memo_open', 'stale', 'preparing', 'nothing_found', 'failed', 'skipped', 'skip_seam', 'adapter', 'long',
     'calendar_off', 'calendar_off_with_plans', 'tool_missing', 'no_meetings', 'load_failed',
     'mic_missing', 'mic_missing_delivery', 'not_recording', 'menu_open', 'menu_narrow', 'keys']
     .map(name => [name, { enumerable: true, get: () => build(name) }])));
@@ -198,4 +202,14 @@ async function open(browser, { fixture, width = 1440, scheme = 'light', lang = '
   return page;
 }
 
-module.exports = { states, build, route, open };
+// Fixtures that switch on the "Do not record" code kept for MEETONTRACK-173 (a test seam; never shipped, never rendered).
+const SEAMS = ['skipped', 'skip_seam'];
+
+// A refresh after the first load fails: the rows stay, marked as not current.
+async function goStale(page) {
+  page.api.fixture.agenda = null;
+  await page.evaluate(() => refreshAgenda());
+  await page.locator('#home .stale').waitFor();
+}
+
+module.exports = { states, build, route, open, SEAMS, goStale };

@@ -71,7 +71,11 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
     return { kind: "not_recording", text: t("status.not_recording", { reason: t(`status.reason.${reason}`) }),
       action: action({ mic: "open_mic", recorder: "open_recorder", not_detected: "start" }[reason]) };
   }
-  if (next && mic) return { kind: "mic_missing", text: t("status.mic_missing", { time }), action: action("open_mic") };
+  // macOS still records the call audio without the microphone (only the owner's voice is lost); Windows does not start.
+  if (next && mic) {
+    return { kind: "mic_missing", text: t(permissions.platform === "macos" ? "status.mic_missing_mac" : "status.mic_missing", { time }),
+      action: action("open_mic") };
+  }
   if (next && permissions?.call_audio === "denied") {
     return { kind: "mic_missing", text: t("status.call_audio_missing", { time }), action: action("open_call_audio") };
   }

@@ -143,11 +143,18 @@ class RouteTests(unittest.TestCase):
 
     def test_routes(self):
         with mock.patch.object(server, 'PERMISSIONS', FakeProbe()), \
-                mock.patch.object(server, 'recorder_running', return_value=False):
+                mock.patch.object(server, 'recorder_running', return_value=False), \
+                mock.patch.object(server.sys, 'platform', 'darwin'):
             status, payload = self.request('GET', '/api/permissions')
         self.assertEqual(status, 200)
+        # The platform says what a denied microphone costs: on macOS the call audio is still recorded.
         self.assertEqual(json.loads(payload), {'ok': True, 'microphone': 'denied', 'call_audio': 'granted',
-                                               'recorder': 'stopped', 'auto_record': True})
+                                               'recorder': 'stopped', 'auto_record': True, 'platform': 'macos'})
+        for platform, expected in (('win32', 'windows'), ('linux', 'other')):
+            with self.subTest(platform=platform), mock.patch.object(server, 'PERMISSIONS', FakeProbe()), \
+                    mock.patch.object(server, 'recorder_running', return_value=False), \
+                    mock.patch.object(server.sys, 'platform', platform):
+                self.assertEqual(json.loads(self.request('GET', '/api/permissions')[1])['platform'], expected)
 
         with mock.patch.object(server, 'open_settings') as opener:
             status, _ = self.request('POST', '/api/permissions/open', {'which': 'microphone'},

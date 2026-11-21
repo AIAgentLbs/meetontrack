@@ -164,6 +164,7 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
 .state { margin-top: 6px; color: var(--muted); }
 .state b { color: var(--text); font-weight: 600; }
 .row-error { margin-top: 10px; }
+.stale { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
 .home .status-text { white-space: normal; overflow: visible; }
 /* Problem line: red only for the mark. */
 .fail { display: inline-block; position: relative; padding-left: 16px; font-weight: 600; color: var(--text); white-space: normal; }

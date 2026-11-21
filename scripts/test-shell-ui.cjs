@@ -146,6 +146,9 @@ const errors = [];
         skippedThenNext: [{}, agenda(call(-3, 30, { skip_recording: true }), call(60)), perms('denied')],
         ended: [{}, agenda(call(-40)), perms('denied', 'denied', 'stopped')],
         micMissing: [{}, agenda(call(40)), perms('denied', 'denied')],
+        // On macOS a denied microphone still records the call audio (only the owner's voice is lost); Windows does not start.
+        micMissingMac: [{}, agenda(call(40)), { ...perms('denied'), platform: 'macos' }],
+        micMissingWindows: [{}, agenda(call(40)), { ...perms('denied'), platform: 'windows' }],
         callAudioMissing: [{}, agenda(call(40)), perms('granted', 'denied')],
         micDeniedNoCall: [{}, agenda(), perms('denied', 'denied', 'stopped')],
         unknownEverywhere: [{}, agenda(call(40)), perms('unknown', 'unknown', 'unknown')],
@@ -198,6 +201,8 @@ const errors = [];
       skippedThenNext: ['mic_missing', `Нет доступа к микрофону: запись в ${later} не включится`, 'open_mic!'],
       ended: ['waiting', 'Ждет звонка', null],
       micMissing: ['mic_missing', `Нет доступа к микрофону: запись в ${time} не включится`, 'open_mic!'],
+      micMissingMac: ['mic_missing', `Нет доступа к микрофону: ваш голос в звонке в ${time} не запишется`, 'open_mic!'],
+      micMissingWindows: ['mic_missing', `Нет доступа к микрофону: запись в ${time} не включится`, 'open_mic!'],
       callAudioMissing: ['mic_missing', `Нет доступа к звуку звонка: запись в ${time} будет без собеседника`, 'open_call_audio!'],
       micDeniedNoCall: ['waiting', 'Ждет звонка', null],
       unknownEverywhere: ['waiting', `Ждет звонка в ${time}, запись включится сама`, 'start'],

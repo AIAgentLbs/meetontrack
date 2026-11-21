@@ -227,7 +227,7 @@ function homeMemo(plan, memo, title, key, id, primary) {
   return { panel, button, show: () => { toggle(true); links.querySelector("a")?.focus(); } };
 }
 
-function homeRow(meeting, { next, now, supported, id, recording }) {
+function homeRow(meeting, { next, now, supported, id, recording, stale }) {
   const key = homeKey(meeting);
   const memo = meeting.memo || memoFromPlans(meeting);
   const plan = (meeting.plans || []).find(item => item.id === memo.plan_id);
@@ -297,12 +297,14 @@ function homeRow(meeting, { next, now, supported, id, recording }) {
   }
   const skip = value => event => homeAction(event.currentTarget, key, "/api/agenda/skip-recording",
     { event_id: meeting.event_id || "", start: meeting.start, end: meeting.end, title: meeting.title, skip: value });
+  // A skip names the call by its times: not on a stale agenda, whose times may have moved.
+  const timed = button => Object.assign(button, { disabled: button.disabled || Boolean(stale) });
   if (meeting.skip_recording) {
     actions.append(textNode("span", "status-text", t("home.skipped")));
-    if (supported) actions.append(homeButton(t("home.unskip"), "ql", `${key}|skip`, skip(false)));
+    if (supported) actions.append(timed(homeButton(t("home.unskip"), "ql", `${key}|skip`, skip(false))));
   } else if (next && supported && meeting.start && !recording) {
     // R32: not while any recording runs; the recorders read the skip only before they start (the server says 409).
-    actions.append(homeButton(t("home.skip"), "quiet", `${key}|skip`, skip(true)));
+    actions.append(timed(homeButton(t("home.skip"), "quiet", `${key}|skip`, skip(true))));
   }
   if (actions.childElementCount) main.append(actions);
   if (homeErrors.has(key)) {
@@ -341,7 +343,10 @@ function renderHome(agenda, state, now = Date.now()) {
   // Not loaded at all, or the calendar could not be read: never shown as an empty day.
   const failed = !agenda && Boolean(window.agendaFailed) || agenda?.calendar_state === "failed";
   const recording = isLive(state, now);
+  // A refresh failed after rows loaded: they stay, marked with the time they were read.
+  const stale = Boolean(agenda && window.agendaFailed);
   const signature = JSON.stringify([uiLanguage, new Date(now).toDateString(), Boolean(agenda), failed, agenda?.calendar_state,
+    stale && window.agendaLoadedAt,
     meetings, unscheduled, agenda?.skip_recording_supported, [...homeErrors], recording, agenda?.failed_days]);
   if (signature === homeSignature) {
     // Same rows: only the time left changes, in place, so focus, scroll and an open memo stay.
@@ -366,6 +371,12 @@ function renderHome(agenda, state, now = Date.now()) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   };
   const failedDay = date => column.append(textNode("h2", "day", homeDayTitle(`${date}T12:00:00`, now)), loadFailed());
+  if (stale) {
+    const line = textNode("p", "stale", `${t("home.stale", { time: homeClock(window.agendaLoadedAt) })} `);
+    line.setAttribute("role", "status");
+    line.append(homeButton(t("home.retry"), "ql", "stale|reload", event => homeReload(event.currentTarget)));
+    column.append(line);
+  }
   if (failed && !failedDays.length) {
     column.append(loadFailed());
   } else if (calendar === "tool_missing") {
@@ -382,7 +393,8 @@ function renderHome(agenda, state, now = Date.now()) {
     while (failedDays.length && failedDays[0] < localDay(meeting.start)) failedDay(failedDays.shift());
     const title = homeDayTitle(meeting.start, now);
     if (title !== day) column.append(textNode("h2", "day", (day = title)));
-    column.append(homeRow(meeting, { next: meeting === next, now, supported: agenda.skip_recording_supported, id: `home-memo-${index++}`, recording }));
+    column.append(homeRow(meeting, { next: meeting === next, now, supported: agenda.skip_recording_supported, id: `home-memo-${index++}`,
+      recording, stale }));
   }
   failedDays.forEach(failedDay);
   if (unscheduled.length) {

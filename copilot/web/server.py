@@ -2897,6 +2897,16 @@ def recorder_running() -> bool | None:
     return answer
 
 
+# ponytail: "Do not record" is off for this release whatever the recorder says (R35): a skip the server accepts can
+# still lose to a recorder start already under way. MEETONTRACK-173 brings it back as a recorder-owned skip by event
+# under the start lock. The recorder and server skip code stays; tests switch it on through this flag.
+SKIP_RECORDING_ENABLED = False
+
+
+def skip_recording_supported() -> bool:
+    return SKIP_RECORDING_ENABLED and PERMISSIONS.snapshot()["skip_recording"]
+
+
 def agenda_payload(now=None) -> dict:
     """The agenda with the calendar's state, whether the recorder honours "do not record", and each choice.
     A calendar day that could not be read is "failed" with the rows of the day that loaded, never an empty day."""
@@ -2905,9 +2915,12 @@ def agenda_payload(now=None) -> dict:
     agenda["calendar_state"] = "failed" if agenda.get("failed_days") else state
     # A call booked after a skip ends that skip before it, on the days that loaded; a cancelled one gives it back
     # only when a connected calendar read both days.
-    SKIPS.clip(agenda["meetings"], restore=complete_agenda(agenda, state))
-    agenda["skip_recording_supported"] = PERMISSIONS.snapshot()["skip_recording"]
-    agenda["meetings"] = [{**meeting, "skip_recording": SKIPS.skipped(meeting)} for meeting in agenda["meetings"]]
+    supported = skip_recording_supported()
+    if supported:
+        SKIPS.clip(agenda["meetings"], restore=complete_agenda(agenda, state))
+    agenda["skip_recording_supported"] = supported
+    agenda["meetings"] = [{**meeting, "skip_recording": supported and SKIPS.skipped(meeting)}
+                          for meeting in agenda["meetings"]]
     return agenda
 
 
@@ -3136,7 +3149,8 @@ class Handler(BaseHTTPRequestHandler):
             running = recorder_running()
             self._json({"ok": True, "microphone": state["microphone"], "call_audio": state["call_audio"],
                         "recorder": "unknown" if running is None else "running" if running else "stopped",
-                        "auto_record": auto_record_enabled()})
+                        "auto_record": auto_record_enabled(),
+                        "platform": {"darwin": "macos", "win32": "windows"}.get(sys.platform, "other")})
         elif path == "/api/ai":
             # The one choice, each task's state with it (a task the choice cannot do is
             # unavailable with its reason) and the last Check AI result per task.
@@ -3304,7 +3318,7 @@ class Handler(BaseHTTPRequestHandler):
                         for field, limit in limits.items()):
                     raise ValueError("A call needs event_id, start, end, title and skip.")
                 meeting = {field: payload[field] for field in limits}
-                if not PERMISSIONS.snapshot()["skip_recording"]:
+                if not skip_recording_supported():
                     self._json({"ok": False, "error": "recorder_cannot_skip"}, HTTPStatus.CONFLICT)
                 else:
                     agenda = PLANS.agenda(datetime.now().astimezone())

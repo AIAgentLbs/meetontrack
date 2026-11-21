@@ -118,6 +118,7 @@ const translations = {
     "home.reason.error": "ошибка при подготовке",
     "home.retry_at": "Ничего делать не нужно, попробуем снова в {time}.",
     "home.retry": "Повторить",
+    "home.stale": "Не удалось обновить звонки, показаны данные на {time}.",
     "home.retry_now": "Повторить сейчас",
     "home.choose_ai": "Выбрать ИИ",
     "home.action_failed": "Не получилось. Попробуйте еще раз.",
@@ -161,6 +162,7 @@ const translations = {
     "status.waiting_at_manual": "Ждет звонка в {time}",
     "status.recording": "Запись",
     "status.mic_missing": "Нет доступа к микрофону: запись в {time} не включится",
+    "status.mic_missing_mac": "Нет доступа к микрофону: ваш голос в звонке в {time} не запишется",
     "status.call_audio_missing": "Нет доступа к звуку звонка: запись в {time} будет без собеседника",
     "status.not_recording": "Запись не идет: {reason}",
     "status.reason.mic": "нет доступа к микрофону",
@@ -425,6 +427,7 @@ const translations = {
     "home.reason.error": "something went wrong",
     "home.retry_at": "Nothing to do, we will try again at {time}.",
     "home.retry": "Retry",
+    "home.stale": "Could not refresh your calls, showing them as of {time}.",
     "home.retry_now": "Retry now",
     "home.choose_ai": "Choose the AI",
     "home.action_failed": "That did not work. Try again.",
@@ -468,6 +471,7 @@ const translations = {
     "status.waiting_at_manual": "Waiting for the {time} call",
     "status.recording": "Recording",
     "status.mic_missing": "No microphone access: the {time} call will not be recorded",
+    "status.mic_missing_mac": "No microphone access: your voice in the {time} call will not be recorded",
     "status.call_audio_missing": "No access to call audio: the {time} call will be recorded without the other side",
     "status.not_recording": "Not recording: {reason}",
     "status.reason.mic": "no microphone access",
@@ -2153,12 +2157,13 @@ async function refreshPermissions(fresh = false) {
 }
 
 // Today's and tomorrow's meetings, polled for Home (home.js renders them), with the permissions. A failed fetch
-// keeps the last agenda; before the first one arrives Home says it could not load them.
+// keeps the last agenda, marked stale on Home; before the first one arrives Home says it could not load them.
 async function refreshAgenda() {
   const permissions = refreshPermissions();
   try {
     window.agendaData = await getJSON("/api/agenda");
     window.agendaFailed = false;
+    window.agendaLoadedAt = Date.now();
   } catch {
     window.agendaFailed = true;
   }
@@ -2168,6 +2173,10 @@ async function refreshAgenda() {
 
 function renderCallPlan(plan) {
   currentCallPlan = plan;
+  // The open Preparation tab going away hands the pane to Call overview, never a blank one.
+  if (!plan && elements.callPlanTab.getAttribute("aria-selected") === "true") {
+    document.querySelector('[data-content-view="board"]').click();
+  }
   elements.callPlanTab.hidden = !plan;
   if (!plan) {
     callPlanSignature = "";

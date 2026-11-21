@@ -218,7 +218,44 @@ class FakeProbe:
         return {'microphone': 'granted', 'call_audio': 'granted', 'skip_recording': self.supported}
 
 
+class SkipSwitchedOffTests(unittest.TestCase):
+    """R35: "Do not record" is off in this release whatever the recorder says (MEETONTRACK-173)."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.path = Path(directory.name) / 'skip-recording.json'
+        self.path.write_text('{"version": 1, "calls": []}')
+
+    def test_shipped_default_is_off(self):
+        self.assertIs(server.SKIP_RECORDING_ENABLED, False)
+
+    def test_agenda_offers_no_skip_and_shows_no_stored_one(self):
+        skips = FakeSkips()
+        with mock.patch.object(server, 'PLANS', FakePlans()), mock.patch.object(server, 'SKIPS', skips), \
+                mock.patch.object(server, 'PERMISSIONS', FakeProbe(True)):
+            payload = server.agenda_payload(NOW)
+        self.assertIs(payload['skip_recording_supported'], False)
+        self.assertEqual([item['skip_recording'] for item in payload['meetings']], [False, False])
+        self.assertIsNone(skips.clipped, 'the skip file is not touched')
+
+    def test_route_answers_409_and_never_writes_the_file(self):
+        before = self.path.read_bytes()
+        port = serve(self)
+        with mock.patch.object(server, 'SKIPS', SkipRecording(self.path)), \
+                mock.patch.object(server, 'PERMISSIONS', FakeProbe(True)):
+            status, body = request(port, 'POST', '/api/agenda/skip-recording', {**meeting('evt-1'), 'skip': True})
+        self.assertEqual((status, body), (409, {'ok': False, 'error': 'recorder_cannot_skip'}))
+        self.assertEqual(self.path.read_bytes(), before)
+
+
 class AgendaRouteTests(unittest.TestCase):
+    def setUp(self):
+        # Test seam: these cover the skip code kept for MEETONTRACK-173, so they switch it on explicitly.
+        switch = mock.patch.object(server, 'SKIP_RECORDING_ENABLED', True)
+        switch.start()
+        self.addCleanup(switch.stop)
+
     def test_agenda_payload_fields(self):
         with mock.patch.object(server, 'PLANS', FakePlans()), mock.patch.object(server, 'SKIPS', FakeSkips()), \
                 mock.patch.object(server, 'PERMISSIONS', FakeProbe(True)):
