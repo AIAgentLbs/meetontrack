@@ -58,6 +58,7 @@ from stt import STTService
 from local_context import LocalContext
 from memo_writer import MemoWriter, folder_sources, moment, past_reports, search_words
 from private_dirs import private_dir
+from recording_control import RecordingControl
 
 
 HOST = "127.0.0.1"
@@ -87,6 +88,7 @@ TRANSCRIPT_FILE = HOME / ".local/share/meeting-copilot/meeting-copilot-live.json
 MEMOS_FILE = HOME / ".local/share/meeting-copilot/memos.json"
 BOUND_MEMOS_DIR = HOME / ".local/share/meeting-copilot/bound-memos"
 SKIP_RECORDING_FILE = TRANSCRIPT_FILE.with_name("skip-recording.json")
+RECORDING_STOP_FILE = TRANSCRIPT_FILE.with_name("recording-stop.json")
 SESSION_FILE = HOME / ".config/meeting-copilot/SESSION.md"
 MANIFEST_FILE = HOME / ".config/meeting-copilot/repos.json"
 ACTIVE_REPOS_FILE = HOME / ".config/meeting-copilot/active-repos.json"
@@ -2476,6 +2478,9 @@ ASK формулируй как одну короткую реплику, кот
 TRANSCRIPT = TranscriptState()
 PERMISSIONS = RecorderProbe(RECOGNITION_GUARD.binary)
 SKIPS = SkipRecording(SKIP_RECORDING_FILE)
+# The id the page shows in /api/state (a logical id after a boundary split); annotated_snapshot is defined further down.
+RECORDING_CONTROL = RecordingControl(RECOGNITION_GUARD.binary, RECORDING_STOP_FILE,
+                                     lambda: annotated_snapshot()["meeting_id"])
 PLANS = CallPlans(PREPARATIONS_FILE, CALL_PLAN_STATE_FILE, ACTIVE_REPOS_FILE,
                  CalendarMeetings(enabled=lambda: "calendar" in GOOGLE_CONTEXT.enabled_sources()),
                  app_plans=lambda: MEMOS.plans(),  # late-bound: MEMOS is defined further down
@@ -3193,6 +3198,7 @@ class Handler(BaseHTTPRequestHandler):
                     "all_repositories": repository_count(MANIFEST_FILE),
                     "project": scope,
                     "delivery": ARCHIVE.delivery_health(),
+                    "recording_control": RECORDING_CONTROL.snapshot(),
                 }
             )
         elif path == "/api/agenda":
@@ -3311,6 +3317,20 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": False, "error": "open_failed"}, HTTPStatus.INTERNAL_SERVER_ERROR)
                 else:
                     self._json({"ok": True})
+            elif path in ("/api/recording/stop", "/api/recording/resume"):
+                meeting_id = payload.get("meeting_id")
+                if not isinstance(meeting_id, str) or not 0 < len(meeting_id) <= 1024:
+                    raise ValueError("Send meeting_id: the call shown on the page")
+                try:  # answered here: the handler below would turn ValueError into 400
+                    if path == "/api/recording/stop":
+                        self._json({"ok": True, **RECORDING_CONTROL.stop(meeting_id)})
+                    else:
+                        RECORDING_CONTROL.resume(meeting_id)
+                        self._json({"ok": True})
+                except ValueError as exc:  # meeting_changed, too_late
+                    self._json({"ok": False, "error": str(exc)}, HTTPStatus.CONFLICT)
+                except RuntimeError as exc:  # stop_failed, resume_failed; no system text reaches the page
+                    self._json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
             elif path == "/api/agenda/skip-recording":
                 limits = {"event_id": 1024, "start": 64, "end": 64, "title": 300}
                 if not isinstance(payload.get("skip"), bool) or any(
@@ -3944,6 +3964,8 @@ def main() -> None:
     health_worker.start()
     threading.Thread(target=UPDATES.loop, args=(TRANSCRIPT.stop,), name="release-monitor", daemon=True).start()
     threading.Thread(target=FACT_CHECKS.loop, args=(TRANSCRIPT.stop,), name="fact-checks", daemon=True).start()
+    # Sends the deferred `record stop` even with no page open, and after a restart.
+    threading.Thread(target=RECORDING_CONTROL.loop, args=(TRANSCRIPT.stop,), name="recording-stop", daemon=True).start()
     threading.Thread(target=REBUILDS.loop, args=(TRANSCRIPT.stop, lambda: TRANSCRIPT.status in ARCHIVE_BUSY),
                      name="analysis-rebuilds", daemon=True).start()
     threading.Thread(target=MEMOS.loop, args=(TRANSCRIPT.stop, lambda: capture_recording() or TRANSCRIPT.status in ARCHIVE_BUSY,

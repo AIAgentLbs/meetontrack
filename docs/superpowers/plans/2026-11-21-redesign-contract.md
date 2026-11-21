@@ -115,7 +115,7 @@ existing `plans[]` (`has_memo`), so Home works with either.
 ```
 
 `unknown` means the platform cannot tell; the UI then shows nothing.
-`POST /api/permissions/open` with `{"which": "microphone" | "call_audio"}`
+`POST /api/permissions/open` with `{"which": "microphone" | "call_audio" | "sound_output"}`
 opens the system settings page for that permission.
 
 ## Recording control (plan 3)
@@ -131,9 +131,13 @@ undo window.
   `record stop` at `until` (`stopped_at` + 30 s). A recorder that cannot pause
   is stopped at once and `until` is null. A `meeting_id` other than the live
   one answers 409 `{"ok": false, "error": "meeting_changed"}`.
-- `POST /api/recording/resume` before `until` sends `record resume` and
-  cancels the pending stop, `{"ok": true}`; otherwise 409
-  `{"ok": false, "error": "too_late"}`.
+- `POST /api/recording/resume` with `{"meeting_id": "..."}` before `until`
+  sends `record resume` and cancels the pending stop, `{"ok": true}`;
+  otherwise 409 `{"ok": false, "error": "too_late"}`. A `meeting_id` other
+  than the live one answers 409 `meeting_changed`, and no recorder command
+  runs.
+- A failed recorder command answers 500 `{"ok": false, "error":
+  "stop_failed" | "resume_failed"}`; a failed resume keeps the pending stop.
 - `/api/state` gains `recording_control`:
   `{"stopping": {"meeting_id", "stopped_at", "until"} | null,
   "last_stop": {"meeting_id", "stopped_at"} | null}`. Plan 4 reads
