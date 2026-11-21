@@ -56,6 +56,7 @@ const errors = [];
       // Other panels get a bare {ok: true} stub here; only errors raised by app.js are this test's business.
       page.on('pageerror', error => /app\.js/.test(error.stack || '') && errors.push(String(error.stack)));
       await page.goto('http://overview-ui.test/');
+      await page.evaluate(() => openCallPanel('board'));
       await page.locator('#call-board .board-item').first().waitFor();
       return page;
     };
@@ -142,6 +143,7 @@ const errors = [];
     preferences = { ...preferences, interface_language: 'en' };
     await page.reload();
     await page.waitForFunction(() => document.documentElement.lang === 'en');
+    await page.evaluate(() => openCallPanel('board'));
     await page.locator('#call-board [data-status-filter="open"]').waitFor();
     assert.equal(await page.locator('#call-board .board-filters').getAttribute('aria-label'), 'Show items with status');
     assert.match(await page.locator('#call-board .board-empty').first().textContent(), /All statuses are hidden/);

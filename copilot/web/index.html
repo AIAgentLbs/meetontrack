@@ -209,11 +209,42 @@
       <p id="startup-message" role="status"></p>
     </section>
     <section id="home" class="home" aria-labelledby="home-heading" hidden></section>
+    <section id="call" class="call" aria-labelledby="call-name" hidden>
+      <div class="feed">
+        <div class="col">
+          <h2 id="call-name" class="call-name"></h2>
+          <div id="call-problem"></div>
+          <div id="call-slot" aria-live="polite"></div>
+          <p id="call-note" class="feed-note" hidden></p>
+          <section id="call-earlier" class="earlier" aria-labelledby="call-earlier-open" hidden></section>
+        </div>
+      </div>
+      <div class="dock">
+        <div class="col">
+          <div class="dock-row">
+            <button id="call-earlier-open" type="button" aria-expanded="false" aria-controls="call-earlier"></button>
+            <span class="spacer"></span>
+            <button id="call-transcript-open" type="button" data-i18n="call.transcript">Расшифровка</button>
+            <button id="call-board-open" type="button" data-i18n="call.board">Доска</button>
+          </div>
+          <form id="call-ask" class="ask">
+            <span class="ask-field">
+              <input id="call-question" type="text" maxlength="8000" autocomplete="off" aria-label="Вопрос про этот звонок" data-i18n-aria-label="call.ask_label" placeholder="Спросить про звонок" data-i18n-placeholder="call.ask_placeholder" />
+              <kbd aria-hidden="true">/</kbd>
+            </span>
+            <button id="call-send" type="submit"><span data-i18n="call.send">Спросить</span> <kbd aria-hidden="true">↵</kbd></button>
+            <button id="call-more" class="ask-more" type="button" aria-expanded="false" aria-controls="call-more-menu" hidden></button>
+            <div id="call-more-menu" class="menu" role="menu" hidden></div>
+          </form>
+        </div>
+      </div>
+    </section>
     <main class="workspace">
+      <button id="call-back" class="ql" type="button" data-i18n="call.back" hidden>Вернуться к звонку</button>
       <section class="transcript-pane" aria-labelledby="transcript-heading">
         <div class="pane-header">
           <div>
-            <h1 id="transcript-heading" data-i18n="transcript.heading">Ход созвона</h1>
+            <h1 id="transcript-heading" tabindex="-1" data-i18n="transcript.heading">Ход созвона</h1>
             <div class="meeting-title" id="meeting-title" data-i18n="meeting.connecting">Подключение к записи...</div>
             <p class="status-strip" aria-live="polite">
               <span class="status" id="capture-status" hidden><i></i><span></span></span>

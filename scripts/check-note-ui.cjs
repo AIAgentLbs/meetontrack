@@ -58,6 +58,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || '/Users/m/.cache/c
     assert.equal(await page.locator('#note-help, label[for="question"], #copilot-heading').count(), 0);
     assert.equal(await page.locator('#question').getAttribute('aria-label'), 'Вопрос или заметка к текущему созвону');
     assert.equal(await page.locator('#note-button').textContent(), 'Сохранить заметку');
+    await page.evaluate(() => openCallPanel('notes'));
     await page.locator('#question').fill('Follow up on the pilot');
     await page.locator('#note-button').click();
     await page.waitForFunction(() => document.querySelector('#question').value === '');

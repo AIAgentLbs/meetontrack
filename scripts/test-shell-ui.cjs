@@ -243,9 +243,10 @@ const errors = [];
       workspace: getComputedStyle(document.querySelector('.workspace')).display !== 'none',
       boundaryBar: getComputedStyle(document.querySelector('.meeting-boundary-bar')).display !== 'none',
       home: !document.getElementById('home').hidden,
+      call: !document.getElementById('call').hidden,
     }));
     await page.waitForFunction(() => window.appState && document.body.dataset.view === 'call');
-    assert.deepEqual(await shown(), { view: 'call', workspace: true, boundaryBar: true, home: false });
+    assert.deepEqual(await shown(), { view: 'call', workspace: false, boundaryBar: true, home: false, call: true });
     // In a call the bar says Recording with the accent dot, and has no action in this plan.
     assert.deepEqual(await page.evaluate(() => [document.querySelector('#call-status-text').textContent,
       document.querySelector('#call-status-text').classList.contains('rec'), document.querySelector('#call-status-action').hidden]),
@@ -311,17 +312,17 @@ const errors = [];
     await page.mouse.click(700, 600);
     assert.equal(await page.locator('#app-menu').isVisible(), false, 'a click outside closes the menu');
 
-    // Settings open over the call: the workspace does not move.
+    // Settings open over the call: the call view does not move.
     const box = selector => page.locator(selector).boundingBox();
-    const before = await box('.workspace');
+    const before = await box('#call');
     await page.locator('#menu-button').click();
     await page.locator('#settings-open').click();
     await page.locator('#settings-panel').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#app-menu').isVisible(), false, 'choosing an item closes the menu');
-    const [panel, after] = [await box('#settings-panel'), await box('.workspace')];
-    assert.equal(after.y, before.y, 'the workspace top does not move');
+    const [panel, after] = [await box('#settings-panel'), await box('#call')];
+    assert.equal(after.y, before.y, 'the call view top does not move');
     assert.ok(panel.x < after.x + after.width && panel.x + panel.width > after.x
-      && panel.y < after.y + after.height && panel.y + panel.height > after.y, 'settings overlap the workspace');
+      && panel.y < after.y + after.height && panel.y + panel.height > after.y, 'settings overlap the call view');
     await page.locator('#settings-close').click();
     assert.equal(await focused(), 'menu-button');
 
@@ -402,7 +403,7 @@ const errors = [];
 
     live = false;
     await page.waitForFunction(() => document.body.dataset.view === 'home');
-    assert.deepEqual(await shown(), { view: 'home', workspace: false, boundaryBar: false, home: true });
+    assert.deepEqual(await shown(), { view: 'home', workspace: false, boundaryBar: false, home: true, call: false });
     assert.equal(await page.locator('#home-heading').count(), 1);
     // On Home the bar shows the call status, never the transcript's old idle line.
     await page.waitForFunction(() => document.querySelector('#call-status-text').textContent === 'Запись включится сама, когда начнется звонок');

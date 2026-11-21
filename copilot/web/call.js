@@ -125,4 +125,198 @@ function lastPhrase(state) {
   return text.length > 90 ? `…${text.slice(-90)}` : text;
 }
 
-function renderCall(state) {} // the feed and the dock (Task 6)
+// The feed: the call's name, a problem when a side is not heard, the one slot, the paused note and the earlier
+// hints. Each part is rebuilt only when what it shows changes, so focus and an open source line survive the poll.
+let callPending = null; // {question, at}: the person's own question, sent, its answer not back yet
+let callEarlierOpen = false;
+const callWhereOpen = new Set(); // keys of the hints whose source is open
+const callSignatures = {};
+
+const callHintKey = hint => `${hint.kind}|${hint.at}|${hint.text}`;
+function callButton(className, label, onClick) {
+  const button = textNode("button", className, label);
+  button.type = "button";
+  button.addEventListener("click", onClick);
+  return button;
+}
+// Rebuilt only when its description changes.
+function callPart(id, description, build) {
+  const signature = JSON.stringify([uiLanguage, description]);
+  if (callSignatures[id] === signature) return;
+  callSignatures[id] = signature;
+  $(id).replaceChildren(...(description ? build(description) : []));
+}
+
+async function callOpenSettings(which) {
+  try {
+    await post("/api/permissions/open", { which });
+  } catch (error) {
+    statusError = { text: plainError(error), state: window.appState };
+    renderShell();
+  }
+}
+
+// One problem at a time, the other side first: without its sound there are no hints on what it says.
+function callProblem(state, now) {
+  const beat = heartbeat(state, now);
+  const side = beat.other.state === "not_heard" ? "other" : beat.you.state === "not_heard" ? "you" : null;
+  if (!side) return null;
+  const since = beat[side].since;
+  return { side, title: since === null ? t(`call.${side}_lost_now`) : t(`call.${side}_lost`, { time: homeClock(since) }) };
+}
+
+// What the slot shows: the pending own question, then the hint picked, a heard question, or the waiting line.
+function callSlot(state, current, now) {
+  const own = current?.kind === "own" ? current : null;
+  if (callPending && ((own && own.at > callPending.at) || (!requestBusy && !state?.copilot?.busy))) callPending = null;
+  if (callPending) return { type: "pending", label: t("call.own"), question: callPending.question };
+  if (own) return { type: "own", label: own.label, question: own.question, text: own.text };
+  if (current?.kind === "answer") return { type: "answer", label: current.label, question: current.question, text: current.text };
+  const heard = state?.heard_question;
+  if (heard?.text) {
+    const speaker = String(heard.speaker || "").trim();
+    const label = speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
+    return { type: "heard", label: callLabel(label, callAt(heard.at)), question: String(heard.text) };
+  }
+  if (current) {
+    const key = callHintKey(current);
+    return { type: "hint", key, label: current.label, text: current.text, source: current.source, detail: current.detail,
+      open: callWhereOpen.has(key) };
+  }
+  const beat = heartbeat(state, now);
+  return { type: "waiting", text: t(beat.you.state === "heard" || beat.other.state === "heard" ? "call.waiting_heard" : "call.waiting") };
+}
+
+function callSlotNodes(slot) {
+  const nodes = [textNode("p", "say", slot.label || "")];
+  if (slot.type === "waiting") return [textNode("p", "waiting", slot.text), textNode("p", "heard-wait", t("call.waiting_help"))];
+  if (slot.question) nodes.push(textNode("p", "heard-q", slot.question));
+  if (slot.type === "pending" || slot.type === "heard") nodes.push(textNode("p", "heard-wait", t("call.heard_wait")));
+  if (slot.type === "own") {
+    nodes.push(textNode("p", "own-answer", readableAnswer(slot.text)));
+    const actions = document.createElement("p");
+    actions.className = "why-acts";
+    actions.append(callButton("ql", t("call.open_chat"), () => openCallPanel("chat")));
+    nodes.push(actions);
+  }
+  if (slot.type === "answer" || slot.type === "hint") nodes.push(textNode("p", "hint", slot.text));
+  if (slot.type === "hint" && slot.source) {
+    // The source line is one line; Where this comes from opens it whole, with the rest of the detail.
+    const why = textNode("p", "why", slot.source);
+    const more = document.createElement("div");
+    more.className = "why-more";
+    more.id = "call-why-more";
+    more.append(...[slot.source, ...slot.detail].map(line => textNode("p", "", line)));
+    why.hidden = slot.open;
+    more.hidden = !slot.open;
+    const actions = document.createElement("p");
+    actions.className = "why-acts";
+    const where = callButton("ql", t(slot.open ? "call.where_hide" : "call.where"), () => {
+      if (callWhereOpen.has(slot.key)) callWhereOpen.delete(slot.key);
+      else callWhereOpen.add(slot.key);
+      renderCall(window.appState);
+      $("call-slot").querySelector(".why-acts button").focus();
+    });
+    where.setAttribute("aria-expanded", String(slot.open));
+    where.setAttribute("aria-controls", more.id);
+    actions.append(where);
+    nodes.push(why, more, actions);
+  }
+  return nodes;
+}
+
+function renderCall(state) {
+  const now = Date.now();
+  const transcript = state?.transcript || {};
+  const name = transcript.display_meeting || transcript.meeting || "";
+  if ($("call-name").textContent !== name) $("call-name").textContent = name;
+
+  callPart("call-problem", callProblem(state, now), problem => {
+    const box = document.createElement("div");
+    box.className = "problem";
+    const heading = document.createElement("h3");
+    heading.append(textNode("span", "fail", problem.title));
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const other = problem.side === "other";
+    actions.append(
+      callButton("primary", t(other ? "action.sound_output" : "action.open_mic"), () => callOpenSettings(other ? "sound_output" : "microphone")),
+      // One target for How to fix everywhere: the guide's recording step, as in the bar (F17).
+      callButton("ql", t("action.how_to_fix"), () => openGuideStep("startup-audio-heading", "startup-recorder")),
+    );
+    box.append(heading, textNode("p", "", t(other ? "call.other_lost_text" : "call.you_lost_text")), actions);
+    return [box];
+  });
+
+  const pick = pickHint(state, now);
+  callPart("call-slot", callSlot(state, pick.current, now), callSlotNodes);
+
+  // The analysis failed: hints pause until the next try, five minutes after it (F3).
+  const analysis = state?.copilot?.analysis;
+  const retry = analysis?.state === "error" ? callAt(analysis.at) : null;
+  const note = retry === null ? null : t("call.paused", { time: homeClock(retry + 300000) });
+  $("call-note").hidden = !note;
+  callPart("call-note", note, text => [`${text} `, callButton("ql", t("call.check_ai"), () => $("getting-started-open").click())]);
+
+  const earlier = pick.earlier.map(hint => ({ label: hint.label, text: hint.text, source: hint.source }));
+  const open = $("call-earlier-open");
+  const count = t("call.earlier", { n: earlier.length });
+  if (open.textContent !== count) open.textContent = count;
+  open.setAttribute("aria-expanded", String(callEarlierOpen));
+  $("call-earlier").hidden = !callEarlierOpen;
+  callPart("call-earlier", earlier, list => {
+    if (!list.length) return [textNode("p", "earlier-empty", t("call.earlier_empty"))];
+    const items = document.createElement("ul");
+    items.append(...list.map(hint => {
+      const item = document.createElement("li");
+      item.append(textNode("p", "say", hint.label), textNode("p", "earlier-hint", hint.text));
+      if (hint.source) item.append(textNode("p", "why", hint.source));
+      return item;
+    }));
+    return [items];
+  });
+}
+
+// The transcript or the board (and the chat and notes tabs) opened as a panel over the feed. Focus goes to the
+// panel's heading, and back to the control that opened it when the panel closes.
+let callOpener = null;
+function openCallPanel(panel) {
+  const body = document.body;
+  const wasOpen = Boolean(body.dataset.callPanel);
+  if (panel) {
+    if (!wasOpen) callOpener = document.activeElement === body ? null : document.activeElement;
+    body.dataset.callPanel = panel;
+    if (panel !== "transcript") document.querySelector(`[data-content-view="${panel}"]`).click();
+  } else {
+    delete body.dataset.callPanel;
+  }
+  renderShell();
+  if (panel) (panel === "transcript" ? $("transcript-heading") : document.querySelector(`[data-content-view="${panel}"]`)).focus();
+  else if (wasOpen) returnFocus(callOpener);
+}
+
+addEventListener("DOMContentLoaded", () => {
+  $("call-earlier-open").addEventListener("click", () => {
+    callEarlierOpen = !callEarlierOpen;
+    renderCall(window.appState);
+  });
+  $("call-transcript-open").addEventListener("click", () => openCallPanel("transcript"));
+  $("call-board-open").addEventListener("click", () => openCallPanel("board"));
+  $("call-back").addEventListener("click", () => openCallPanel(null));
+  // The question goes out only when ask() takes it; otherwise it stays in the field (F4).
+  $("call-ask").addEventListener("submit", event => {
+    event.preventDefault();
+    const field = $("call-question");
+    const question = field.value.trim();
+    if (!question || !window.callAsk(question)) return;
+    callPending = { question, at: Date.now() };
+    field.value = "";
+    renderCall(window.appState);
+  });
+});
+// Escape closes the panel, unless a menu, a dialog or an overlay is open: that one closes first.
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape" || !document.body.dataset.callPanel || document.querySelector(`${OVERLAYS}, #call-more-menu:not([hidden])`)) return;
+  event.preventDefault();
+  openCallPanel(null);
+}, true);

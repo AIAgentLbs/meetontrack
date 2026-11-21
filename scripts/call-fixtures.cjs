@@ -58,8 +58,17 @@ function build(name, lang = 'en', now = Date.now()) {
     meeting: L.review, source: 'copilot', created_at: ago(age), logical_event: true, ...extra });
   const planItem = (index, status = 'open') => ({ id: `q${index + 1}`, kind: 'question', text: L.questions[index], status,
     evidence: '', updated_at: '', source: '' });
-  const plan = statuses => ({ id: 'plan-1', meeting_id: 'm1', match: 'confirmed', title: L.review, intro: '',
-    source_label: L.company, links: [], items: statuses.map((status, index) => planItem(index, status)) });
+  // call_plan.py snapshot: the score is always there (app.js renderCallPlan reads it).
+  const plan = statuses => {
+    const items = statuses.map((status, index) => planItem(index, status));
+    const count = (status, kind) => items.filter(item => item.status === status && (!kind || item.kind === kind)).length;
+    const by_kind = Object.fromEntries(['question', 'risk', 'objection'].map(kind => [kind,
+      { resolved: count('resolved', kind), clarify: count('clarify', kind), total: items.filter(item => item.kind === kind).length }]));
+    return { id: 'plan-1', meeting_id: 'm1', match: 'confirmed', title: L.review, intro: '', source_label: L.company, links: [], items,
+      memo_markdown: '', memo_url: '', talk_track_markdown: '', has_memo: false,
+      score: { resolved: count('resolved'), clarify: count('clarify'), total: items.length,
+        percent: Math.round(100 * count('resolved') / items.length), by_kind } };
+  };
   const refuted = age => ({ id: `fc-${age}`, category: 'FACT_CHECK', source: 'fact_check', meeting_id: 'm1', meeting: L.review,
     created_at: ago(age + 20 * SEC), status: 'refuted', claim: L.claim, quote: L.claim, query: 'pilot offices',
     segment: { source: 'system', speaker: L.anna }, timestamp: ago(age + 25 * SEC), fact: L.fact,

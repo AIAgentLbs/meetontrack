@@ -146,6 +146,30 @@ const translations = {
     "call.own": "Ответ на ваш вопрос",
     "call.at": "{label} · {time}",
     "call.from_memo": "Из мемо, вопрос {n}",
+    "call.where": "Откуда подсказка",
+    "call.where_hide": "Свернуть",
+    "call.heard_wait": "Ответ готовится, обычно несколько секунд. Появится здесь же.",
+    "call.waiting_heard": "Разговор слышно. Подсказка появится здесь, когда будет что сказать или спросить.",
+    "call.waiting": "Запись идет. Подсказка появится здесь, когда будет что сказать или спросить.",
+    "call.waiting_help": "Свой вопрос можно задать внизу. Весь разговор текстом в «Расшифровке», вопросы и риски на «Доске».",
+    "call.paused": "Подсказки на паузе: ИИ не ответил. Запись идет, следующая попытка в {time}.",
+    "call.other_lost": "Собеседника не слышно с {time}",
+    "call.other_lost_now": "Собеседника не слышно",
+    "call.other_lost_text": "Вас слышно. Подсказки по словам собеседника вернутся, когда звук появится.",
+    "call.you_lost": "Вас не слышно с {time}",
+    "call.you_lost_now": "Вас не слышно",
+    "call.you_lost_text": "Собеседника слышно. Ваши слова не попадут в расшифровку, пока микрофон не вернется.",
+    "action.sound_output": "Выбрать, откуда слушать звонок",
+    "call.earlier": "Прошлые подсказки ({n})",
+    "call.earlier_empty": "Прошлых подсказок пока нет.",
+    "call.transcript": "Расшифровка",
+    "call.board": "Доска",
+    "call.ask_placeholder": "Спросить про звонок",
+    "call.ask_label": "Вопрос про этот звонок",
+    "call.send": "Спросить",
+    "call.open_chat": "Открыть в чате",
+    "call.back": "Вернуться к звонку",
+    "call.check_ai": "Проверить ИИ в настройках",
     "meeting.connecting": "Подключение к записи...",
     "status.checking": "Проверка",
     "shell.home": "Главная",
@@ -465,6 +489,30 @@ const translations = {
     "call.own": "Answer to your question",
     "call.at": "{label} · {time}",
     "call.from_memo": "From the memo, question {n}",
+    "call.where": "Where this comes from",
+    "call.where_hide": "Hide",
+    "call.heard_wait": "The answer is being prepared, usually a few seconds. It will appear here.",
+    "call.waiting_heard": "The conversation is heard. A hint appears here when there is something to say or ask.",
+    "call.waiting": "Recording. A hint appears here when there is something to say or ask.",
+    "call.waiting_help": "You can ask your own question below. The whole conversation is in Transcript, questions and risks are on the Board.",
+    "call.paused": "Hints paused: the AI did not answer. Recording continues, next try at {time}.",
+    "call.other_lost": "The other side is not heard since {time}",
+    "call.other_lost_now": "The other side is not heard",
+    "call.other_lost_text": "You are heard. Hints on what the other side says come back once their sound does.",
+    "call.you_lost": "You are not heard since {time}",
+    "call.you_lost_now": "You are not heard",
+    "call.you_lost_text": "The other side is heard. Your words are not transcribed until the microphone is back.",
+    "action.sound_output": "Choose where to listen to the call from",
+    "call.earlier": "Earlier hints ({n})",
+    "call.earlier_empty": "No earlier hints yet.",
+    "call.transcript": "Transcript",
+    "call.board": "Board",
+    "call.ask_placeholder": "Ask about this call",
+    "call.ask_label": "A question about this call",
+    "call.send": "Ask",
+    "call.open_chat": "Open in chat",
+    "call.back": "Back to the call",
+    "call.check_ai": "Check the AI in settings",
     "meeting.connecting": "Connecting to the recording...",
     "status.checking": "Checking",
     "shell.home": "Home",
@@ -3382,11 +3430,14 @@ async function post(path, payload) {
   return data;
 }
 
-async function ask(question) {
+// True when the question went out; false when it did not (empty, or another request holds the line):
+// the Call view's ask field keeps its text then (F4).
+function ask(question) {
   const clean = question.trim();
-  if (!clean || requestBusy) return;
+  if (!clean || requestBusy) return false;
   requestBusy = true;
-  elements.question.value = "";
+  // Asked from the Call view's own field: a note being written in the composer stays.
+  if (elements.question.value.trim() === clean) elements.question.value = "";
   elements.help.textContent = t("help.ai");
   elements.help.classList.remove("error");
   const pending = document.createElement("article");
@@ -3399,6 +3450,12 @@ async function ask(question) {
   elements.chat.scrollTop = elements.chat.scrollHeight;
   chatPinnedToLatest = true;
   updateChatLatestButton();
+  void sendQuestion(clean);
+  return true;
+}
+window.callAsk = ask;
+
+async function sendQuestion(clean) {
   try {
     await post("/api/chat", { question: clean });
   } catch (error) {

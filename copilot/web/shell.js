@@ -247,6 +247,12 @@ function renderShell() {
   const view = viewFor(window.appState, manual);
   document.body.dataset.view = view;
   $("home").hidden = view !== "home";
+  // The Call view: the feed, or one panel over it (call.js openCallPanel). Another view closes the panel.
+  if (view !== "call") delete document.body.dataset.callPanel;
+  const panel = Boolean(document.body.dataset.callPanel);
+  $("call").hidden = view !== "call" || panel;
+  $("call-back").hidden = !panel;
+  if (view === "call") renderCall(window.appState);
   if (view === "home") $("nav-home").setAttribute("aria-current", "page");
   else $("nav-home").removeAttribute("aria-current");
   renderHome(window.agendaData, window.appState);
@@ -332,6 +338,7 @@ $("call-status-action").addEventListener("click", event => {
   } catch {}
   renderShell();
 });
-$("menu-notes").addEventListener("click", () => document.querySelector('[data-content-view="notes"]').click());
+$("menu-notes").addEventListener("click", () => (document.body.dataset.view === "call" ? openCallPanel("notes")
+  : document.querySelector('[data-content-view="notes"]').click()));
 
 renderShell();
