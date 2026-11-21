@@ -92,7 +92,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
         {
             var retry = T($"Trying again in {(int)failure.RetryIn.TotalSeconds} s.", $"Повторю через {(int)failure.RetryIn.TotalSeconds} с.");
             if (MicrophoneAccess.Read() is not (MicrophoneAccess.State.Allowed or MicrophoneAccess.State.Unknown))
-                Notify(T("Not recording your voice: no microphone access", "Ваш голос не записывается: нет доступа к микрофону"),
+                Notify(T("Couldn't start recording: no microphone access", "Не удалось начать запись: нет доступа к микрофону"),
                     retry, NotificationKind.Error, MicrophoneAccess.OpenSettings);
             else
                 Notify(T("Couldn't start recording", "Не удалось начать запись"),
