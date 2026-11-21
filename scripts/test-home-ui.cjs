@@ -265,7 +265,7 @@ const checks = {
   },
   async no_meetings(page, lang) {
     await emptyState(page, lang, [{ ru: 'Больше звонков сегодня и завтра нет', en: 'No more calls today or tomorrow' },
-      { ru: 'Прошедшие звонки - в меню сверху.', en: 'Past calls are in the top bar and the menu.' }], 0);
+      { ru: 'Прошедшие звонки - сверху или в меню.', en: 'Past calls are in the top bar and the menu.' }], 0);
   },
   async load_failed(page, lang) {
     const block = await emptyState(page, lang, [{ ru: 'Не удалось загрузить звонки', en: 'Could not load your calls' },

@@ -129,7 +129,7 @@ const translations = {
     "home.calendar_off_text": "Звонки и мемо появятся после подключения.",
     "home.calendar_connect": "Подключить календарь",
     "home.empty_title": "Больше звонков сегодня и завтра нет",
-    "home.empty_text": "Прошедшие звонки - в меню сверху.",
+    "home.empty_text": "Прошедшие звонки - сверху или в меню.",
     "home.load_failed_title": "Не удалось загрузить звонки",
     "home.load_failed_text": "Попробуем снова сами, или нажмите Повторить.",
     "meeting.connecting": "Подключение к записи...",
