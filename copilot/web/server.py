@@ -3462,9 +3462,6 @@ class Handler(BaseHTTPRequestHandler):
                     "speaker": item.get("speaker", ""),
                     "window_title": item.get("window_title", ""),
                 }})
-            elif path == "/api/refresh":
-                TRANSCRIPT.trigger.set()
-                self._json({"ok": True})
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
         except (BoundaryConflict, BoundaryUnavailable) as exc:

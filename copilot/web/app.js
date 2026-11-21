@@ -61,7 +61,6 @@ const elements = {
   send: document.querySelector("#send-button"),
   note: document.querySelector("#note-button"),
   help: document.querySelector("#composer-help"),
-  refresh: document.querySelector("#refresh-button"),
   journal: document.querySelector("#journal"),
   callPlan: document.querySelector("#call-plan"),
   callBoard: document.querySelector("#call-board"),
@@ -91,14 +90,19 @@ const translations = {
     "home.title": "Ближайшие встречи",
     "meeting.connecting": "Подключение к записи...",
     "status.checking": "Проверка",
-    "nav.repositories": "Контекст встречи",
-    "nav.meetings": "История встреч",
+    "shell.home": "Главная",
+    "shell.past_calls": "Прошедшие звонки",
+    "shell.menu": "Меню",
+    "shell.settings": "Настройки",
+    "shell.settings_note": "ИИ, распознавание речи, источники, куда отправлять отчет",
+    "shell.sources": "Источники",
+    "shell.getting_started": "Начало работы",
+    "shell.updates": "Обновления",
     "language.label": "Язык интерфейса",
     "aria.transcript_view": "Вид левой панели",
     "aria.copilot_view": "Режим правой панели",
     "aria.journal_filter": "Фильтр журнала",
     "aria.workspace_filter": "Чат и сигналы встречи",
-    "common.refresh": "Обновить",
     "nav.swap_panels": "Поменять панели",
     "common.close": "Закрыть",
     "common.cancel": "Отмена",
@@ -318,14 +322,19 @@ const translations = {
     "home.title": "Upcoming meetings",
     "meeting.connecting": "Connecting to the recording...",
     "status.checking": "Checking",
-    "nav.repositories": "Meeting context",
-    "nav.meetings": "Meeting history",
+    "shell.home": "Home",
+    "shell.past_calls": "Past calls",
+    "shell.menu": "Menu",
+    "shell.settings": "Settings",
+    "shell.settings_note": "AI, speech recognition, sources, where the report goes",
+    "shell.sources": "Sources",
+    "shell.getting_started": "Getting started",
+    "shell.updates": "Updates",
     "language.label": "Interface language",
     "aria.transcript_view": "Left pane view",
     "aria.copilot_view": "Right pane view",
     "aria.journal_filter": "Journal filter",
     "aria.workspace_filter": "Meeting chat and signals",
-    "common.refresh": "Refresh",
     "nav.swap_panels": "Swap panels",
     "common.close": "Close",
     "common.cancel": "Cancel",
@@ -662,7 +671,7 @@ let recognitionResumeError = "";
 let noteBusy = false;
 let chatPinnedToLatest = true;
 Object.assign(translations.en, {
-  "nav.meetings": "Meetings", "archive.title": "Meetings",
+  "archive.title": "Meetings",
   "library.search": "Search titles, participants and content", "library.return": "Return to current call",
   "library.hide": "Hide library", "library.no_results": "No meetings match this search.",
   "library.recording": "Recording",
@@ -685,7 +694,7 @@ Object.assign(translations.en, {
   "library.rebuild_failed": "Could not build the analysis. Check AI access in Getting started; it is retried automatically."
 });
 Object.assign(translations.ru, {
-  "nav.meetings": "Встречи", "archive.title": "Встречи",
+  "archive.title": "Встречи",
   "library.search": "Поиск по названию, участникам и содержимому", "library.return": "Вернуться к текущему звонку",
   "library.hide": "Скрыть историю", "library.no_results": "По этому запросу встречи не найдены.",
   "library.recording": "Записывается",
@@ -1147,7 +1156,7 @@ function renderDeliveryHealth(health = {}) {
     const family = undelivered.some(item => item.uncertain) ? "unsure_many" : "undelivered_many";
     problems.push(t(`delivery.${family}.${new Intl.PluralRules(uiLanguage).select(undelivered.length)}`, { count: undelivered.length }));
   }
-  elements.deliveryAlert.hidden = !Object.keys(channels).length;
+  elements.deliveryAlert.hidden = !problems.length;
   elements.deliveryAlert.dataset.state = problems.length ? "action_required" : "idle";
   elements.deliveryAlert.dataset.action = authChannels.length && !undelivered.length ? "settings" : "archive";
   elements.deliveryAlert.textContent = problems.join(" · ") || t("delivery.button");
@@ -3120,7 +3129,6 @@ async function state() {
     // A change made here while this request ran wins over the older snapshot.
     if (epoch === preferenceEpoch && !preferenceSaves) applyPreferences(data.preferences || {});
     window.appState = data;
-    window.renderShell?.();
     const project = data.project || {};
     window.renderReleaseUpdates(data.updates || {});
     window.renderGettingStartedStatus?.(data);
@@ -3130,7 +3138,7 @@ async function state() {
     const projectKind = project.kind || "all";
     const hint = projectKind === "all" ? "project.all_hint"
       : project.confidence === "manual" ? "project.manual_hint" : "project.auto_hint";
-    elements.repoStatus.textContent = document.documentElement.lang === "en" ? "Context sources" : "Источники контекста";
+    elements.repoStatus.textContent = t("shell.sources");
     const repositoryList = scopedRepositories
       .map((repo) => `${repo.name}: ${repo.path}`)
       .join("\n");
@@ -3138,6 +3146,7 @@ async function state() {
     stateConnectionFailed = false;
     renderTranscript(data.transcript);
     renderRecordingHealth(data.recording_health || {});
+    window.renderShell?.();
     updateLibraryMode(data);
     renderFrames(data.frames || []);
     renderFrameStatus(data.frame_capture || {});
@@ -3181,6 +3190,7 @@ async function state() {
       elements.captureStatus.classList.add("error");
       elements.captureStatus.lastChild.textContent = t("capture.disconnected");
     }
+    window.renderShell?.();
     elements.help.textContent = plainError(error);
     elements.help.classList.add("error");
   } finally {
@@ -3354,16 +3364,6 @@ elements.translationJump.addEventListener("click", () => {
   else document.querySelector("#getting-started-open")?.click();
 });
 
-elements.refresh.addEventListener("click", async () => {
-  elements.refresh.disabled = true;
-  try {
-    await post("/api/refresh", {});
-    setTimeout(() => void state(), 1400);
-  } finally {
-    setTimeout(() => { elements.refresh.disabled = false; }, 1800);
-  }
-});
-
 elements.captureFrame.addEventListener("click", async () => {
   elements.captureFrame.disabled = true;
   elements.captureFrame.textContent = t("frames.capturing");
@@ -3487,7 +3487,7 @@ document.querySelector("#interface-language").addEventListener("change", (event)
 // Hiding only folds the panel away: recording and live transcription keep running.
 elements.transcriptHide.addEventListener("click", () => {
   applyTranscriptHidden(true);
-  elements.transcriptShow.focus();
+  document.querySelector("#menu-button").focus();
   void savePreference({ transcript_hidden: true }, elements.newMeetingStatus);
 });
 elements.transcriptShow.addEventListener("click", () => {
@@ -3571,7 +3571,7 @@ document.querySelector("#settings-open").addEventListener("click", () => {
 document.querySelector("#settings-close").addEventListener("click", () => {
   document.querySelector("#settings-panel").hidden = true;
   document.querySelector("#settings-open").setAttribute("aria-expanded", "false");
-  document.querySelector("#settings-open").focus();
+  document.querySelector("#menu-button").focus();
 });
 document.querySelector("#google-check").addEventListener("click", () => void loadGoogleContext());
 for (const action of ["connect", "disconnect"]) document.querySelector(`#google-${action}`).addEventListener("click", async () => {

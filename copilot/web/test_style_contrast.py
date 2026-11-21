@@ -1,5 +1,5 @@
 """MEETONTRACK-22: text tokens keep WCAG AA 4.5:1 on every surface, in both themes,
-and no rule shrinks text below 11px."""
+and no rule shrinks text below 11px. MEETONTRACK-165: borders reach 3:1."""
 import re
 import unittest
 from pathlib import Path
@@ -11,6 +11,12 @@ SURFACES = ("--page", "--surface", "--surface-strong", "--surface-muted", "--acc
 
 def tokens(block):
     return dict(re.findall(r"(--[\w-]+):\s*(#[0-9a-fA-F]{6});", block))
+
+
+def themes():
+    light = tokens(CSS.split("@media (prefers-color-scheme: dark)")[0].split("}")[0])
+    dark_block = re.search(r"@media \(prefers-color-scheme: dark\)\s*{\s*:root\s*{([^}]*)}", CSS).group(1)
+    return (("light", light), ("dark", {**light, **tokens(dark_block)}))
 
 
 def luminance(hex_color):
@@ -26,14 +32,17 @@ def contrast(a, b):
 
 class StyleContrastTests(unittest.TestCase):
     def test_text_tokens_meet_aa_on_every_surface_in_both_themes(self):
-        light = tokens(CSS.split("@media (prefers-color-scheme: dark)")[0].split("}")[0])
-        dark_block = re.search(r"@media \(prefers-color-scheme: dark\)\s*{\s*:root\s*{([^}]*)}", CSS).group(1)
-        dark = {**light, **tokens(dark_block)}
-        for theme, values in (("light", light), ("dark", dark)):
+        for theme, values in themes():
             for text in TEXT:
                 for surface in SURFACES:
                     with self.subTest(theme=theme, text=text, surface=surface):
                         self.assertGreaterEqual(contrast(values[text], values[surface]), 4.5)
+
+    def test_border_token_reaches_3_to_1(self):
+        for theme, values in themes():
+            for surface in ("--page", "--surface", "--surface-strong"):
+                with self.subTest(theme=theme, surface=surface):
+                    self.assertGreaterEqual(contrast(values["--line-strong"], values[surface]), 3.0)
 
     def test_no_text_below_11px(self):
         sizes = [int(size) for size in re.findall(r"font-size:\s*(\d+)px", CSS)]

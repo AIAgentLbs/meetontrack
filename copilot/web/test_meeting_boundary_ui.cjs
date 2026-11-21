@@ -40,20 +40,24 @@ const assert = require('assert/strict');
   try {
     const page = await browser.newPage({viewport:{width:1440,height:1000}});
     const errors = []; page.on('pageerror', e => errors.push(e.message));
+    // The first-run guide has been seen: it opens over the call and would cover it.
+    await page.addInitScript(() => localStorage.setItem('meetontrack-started', '1'));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
+    // New meeting lives in the menu.
     const button = page.locator('#new-meeting-button');
-    await button.waitFor({timeout:3000});
+    const openNew = async () => { await page.locator('#menu-button').click(); await button.click(); };
+    await button.waitFor({state:'attached',timeout:3000});
     await page.locator('.boundary-provenance').filter({hasText:'Реплика пересекает границу'}).waitFor({timeout:3000});
-    await button.click();
+    await openNew();
     assert.equal(requests.length,0,'Opening confirmation must not start a meeting');
     assert.equal(await page.locator('#new-meeting-heading').textContent(),'Начать новую встречу?');
     assert.equal(await page.locator('#new-meeting-confirm').textContent(),'Да, начать новую встречу');
     await page.keyboard.press('Escape');
     assert.equal(requests.length,0,'Escape must cancel without writes');
-    await button.click();
+    await openNew();
     await page.locator('#new-meeting-cancel').click();
     assert.equal(requests.length,0,'Cancel must not write');
-    await button.click();
+    await openNew();
     loseResponse = true;
     await page.locator('#new-meeting-title').fill('Second');
     await page.locator('#new-meeting-confirm').click();
@@ -66,7 +70,7 @@ const assert = require('assert/strict');
     await page.waitForFunction(() => document.querySelector('#new-meeting-status').textContent.includes('Second'));
     assert.equal(await button.isDisabled(),false,'Physical health must still match logical meeting');
     conflict = true;
-    await button.click(); await page.locator('#new-meeting-confirm').click();
+    await openNew(); await page.locator('#new-meeting-confirm').click();
     await page.locator('#new-meeting-error').filter({hasText:/./}).waitFor();
     assert.equal(await page.locator('#new-meeting-dialog').evaluate(el=>el.open),true);
     await page.locator('#new-meeting-cancel').click();
@@ -75,8 +79,8 @@ const assert = require('assert/strict');
     await page.locator('#archive-detail .archive-audio-range').filter({hasText:'5:00'}).waitFor();
     assert.equal(await page.locator('#archive-detail .boundary-provenance').count(),1,'History must disclose crossing speech');
     await page.locator('#archive-close').click();
-    await page.locator('#settings-open').click(); await page.locator('#interface-language').selectOption('en'); await page.locator('#settings-close').click();
-    await button.click();
+    await page.locator('#menu-button').click(); await page.locator('#settings-open').click(); await page.locator('#interface-language').selectOption('en'); await page.locator('#settings-close').click();
+    await openNew();
     assert.equal(await page.locator('#new-meeting-heading').textContent(),'Start a new meeting?');
     assert.equal(await page.locator('#new-meeting-confirm').textContent(),'Yes, start new meeting');
     if (process.env.MEETING_UI_SCREENSHOT_DIR) {

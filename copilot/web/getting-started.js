@@ -5,7 +5,6 @@
   const word = (english, russian) => en() ? english : russian;
   let current = {}, recording = false, starting = false;
   const labels = {
-    "getting-started-open": ["Getting started", "Начать работу"],
     "getting-started-heading": ["Start using MeetOnTrack", "Начать работу с MeetOnTrack"],
     "getting-started-close": ["Close", "Закрыть"],
     "getting-started-intro": ["Start a call, see both sides in the transcript, then ask a question. Recording and local speech recognition need no paid API key. AI answers use the AI tool you choose below and its account limits.", "Начните звонок, увидьте обе стороны в стенограмме и задайте вопрос. Для записи и локальной расшифровки платный ключ не нужен. Ответы ИИ используют выбранный ниже инструмент ИИ и лимиты его аккаунта."],

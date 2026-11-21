@@ -39,16 +39,21 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || '/Users/m/.cache/c
       }
       return route.fulfill({ json: payload });
     });
+    // The first-run guide has been seen: it opens over the call and would cover it.
+    await page.addInitScript(() => localStorage.setItem('meetontrack-started', '1'));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.waitForFunction(() => document.documentElement.lang === 'ru');
     // The Analyse now button, the auto-analysis switch and their helper line are gone;
     // the main screen keeps no explanation line for them.
     assert.equal(await page.locator('#analysis-help, #auto-analysis, #analyze-button').count(), 0);
-    const company = page.getByRole('link', { name: 'by aiagentlbs.com', exact: true });
+    // The brand line closes the menu; its company URL is a keyboard-accessible menu item.
+    await page.locator('#menu-button').click();
+    const company = page.getByRole('menuitem', { name: 'by aiagentlbs.com', exact: true });
     assert.equal(await company.count(), 1, 'company URL must be a keyboard-accessible link');
     assert.equal(await company.getAttribute('href'), 'https://aiagentlbs.com/');
     assert.equal(await company.getAttribute('target'), '_blank');
     assert.match(await company.getAttribute('rel'), /noopener/);
+    await page.keyboard.press('Escape');
     // Owner 2026-10-22: no explanatory text around the composer, no visible label above it.
     assert.equal(await page.locator('#note-help, label[for="question"], #copilot-heading').count(), 0);
     assert.equal(await page.locator('#question').getAttribute('aria-label'), 'Вопрос или заметка к текущему созвону');
@@ -57,11 +62,11 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || '/Users/m/.cache/c
     await page.locator('#note-button').click();
     await page.waitForFunction(() => document.querySelector('#question').value === '');
     assert.deepEqual(saved, [{ text: 'Follow up on the pilot' }]);
-    await page.locator('#settings-open').click(); await page.locator('#interface-language').selectOption('en'); await page.locator('#settings-close').click();
+    await page.locator('#menu-button').click(); await page.locator('#settings-open').click(); await page.locator('#interface-language').selectOption('en'); await page.locator('#settings-close').click();
     assert.equal(await page.locator('#note-button').textContent(), 'Save note');
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('#note-button').isVisible(), true);
-    await page.locator('#settings-open').click(); await page.locator('#interface-language').selectOption('ru'); await page.locator('#settings-close').click();
+    await page.locator('#menu-button').click(); await page.locator('#settings-open').click(); await page.locator('#interface-language').selectOption('ru'); await page.locator('#settings-close').click();
     await page.screenshot({ path: '/tmp/meeting-copilot-note-mobile.png', fullPage: true });
     assert.deepEqual(errors, []);
     console.log('Note UI: no helper text, labelled input, real save handler, mobile: OK');
