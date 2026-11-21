@@ -39,22 +39,11 @@ def covers(meeting: dict, now: datetime) -> bool:
     return _zoned(meeting.get("start")) - LEAD <= now < _zoned(meeting.get("end"))
 
 
-def recording_call(meeting: dict, now: datetime, capture_started: datetime | None) -> str:
-    """Which call a running capture is, for a skip of `meeting`: "this" when it began inside the call's window (or
-    its start is unknown), "previous" when an earlier call's recording runs on into this call, "" otherwise.
-    The recorders read the skip only before they start, so neither can be stopped by it (home.js homeRecordingCall)."""
-    start, end = _zoned(meeting.get("start")), _zoned(meeting.get("end"))
-    if not start - LEAD <= now < end:
-        return ""
-    if capture_started is None or capture_started >= start - LEAD:
-        return "this"
-    return "previous" if now >= start else ""
-
-
-def _clipped(calls: list[dict], meetings) -> list[dict]:
+def _clipped(calls: list[dict], meetings, restore: bool) -> list[dict]:
     """Each skip ends five minutes before the next call that is not skipped, so joining that call early records it.
-    The end the person chose stays in `scheduled_end`, so a cancelled next call gives the skip its window back.
-    A call that starts inside a skip without its own calendar event stays skipped: the recorders match by time."""
+    The end the person chose stays in `scheduled_end`. A shortened skip gets its window back only with `restore`
+    (a connected calendar that read both days no longer has the call that shortened it); a partial read or a
+    calendar turned off keeps the shorter skip. A call inside a skip without its own calendar event stays skipped."""
     skipped = {call["key"] for call in calls}
     starts = []
     for meeting in meetings:
@@ -68,10 +57,11 @@ def _clipped(calls: list[dict], meetings) -> list[dict]:
     for call in calls:
         try:
             start, end = _zoned(call.get("start")), _zoned(call.get("scheduled_end") or call.get("end"))
+            current = _zoned(call.get("end")) if not restore else end
         except ValueError:
             result.append(call)
             continue
-        limit = min((moment for moment in starts if start < moment < end), default=end)
+        limit = min((moment for moment in starts if start < moment < current), default=current)
         result.append({**call, "end": limit.isoformat(), "scheduled_end": end.isoformat()})
     return result
 
@@ -98,9 +88,9 @@ class SkipRecording:
         key = self.key(meeting)
         return any(call["key"] == key for call in self._calls())
 
-    def set(self, meeting: dict, skip: bool, now: datetime, meetings=()) -> None:
-        """Store or drop one call's skip; `meetings` (the agenda) end every skip before the next call.
-        None (the calendar could not be read) leaves the stored ends as they are."""
+    def set(self, meeting: dict, skip: bool, now: datetime, meetings=(), restore: bool = False) -> None:
+        """Store or drop one call's skip; `meetings` (the days of the agenda that loaded) end every skip before the
+        next call, and `restore` (see _clipped) lets a shortened skip have its window back."""
         start, end = _zoned(meeting.get("start")), _zoned(meeting.get("end"))
         if not start < end:
             raise ValueError("A call must end after it starts.")
@@ -117,14 +107,14 @@ class SkipRecording:
             if skip:
                 calls.append({"key": key, "event_id": str(meeting.get("event_id") or ""),
                               "start": meeting["start"], "end": meeting["end"], "scheduled_end": meeting["end"]})
-            self._write(calls if meetings is None else _clipped(calls, meetings))
+            self._write(_clipped(calls, meetings, restore))
 
-    def clip(self, meetings) -> None:
+    def clip(self, meetings, restore: bool = False) -> None:
         """End stored skips before a call booked after them, or give a skip its window back when that call is gone;
         writes only when something changes."""
         with self.lock:
             calls = self._calls()
-            clipped = _clipped(calls, meetings)
+            clipped = _clipped(calls, meetings, restore)
             if clipped != calls:
                 self._write(clipped)
 

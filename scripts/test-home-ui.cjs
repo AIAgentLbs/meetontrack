@@ -171,41 +171,34 @@ const checks = {
     assert.deepEqual(Object.keys(post.body).sort(), ['end', 'event_id', 'skip', 'start', 'title']);
     assert.equal(post.body.skip, true);
     assert.equal(post.body.event_id, 'evt-ready');
-    // The call is already being recorded (the server knows it before Home does): the row says how to stop it.
-    page.api.responses['/api/agenda/skip-recording'] = { status: 409, json: { ok: false, error: 'already_recording' } };
+    // A recording started meanwhile (the server knows it before Home does): the row says how to skip the call.
+    page.api.responses['/api/agenda/skip-recording'] = { status: 409, json: { ok: false, error: 'recording_active' } };
     await row.locator('button.quiet').click();
-    await page.waitForFunction(() => /уже идет|already being recorded/.test(document.querySelector('#home .row.next .row-error')?.textContent));
+    await page.waitForFunction(() => /Сейчас идет запись|recording is in progress/.test(document.querySelector('#home .row.next .row-error')?.textContent));
     assert.equal(await row.locator('.row-error').innerText(), lang === 'ru'
-      ? 'Запись этого звонка уже идет. Остановить ее можно в программе записи.'
-      : 'This call is already being recorded. You can stop it in the recorder.');
+      ? 'Сейчас идет запись. Остановите ее, чтобы не записывать звонок.'
+      : 'A recording is in progress. Stop it first to skip this call.');
     delete page.api.responses['/api/agenda/skip-recording'];
-    // During a call Home does not offer Do not record for the call being recorded: a skip cannot stop it.
+    // R32: while any recording runs, Home offers no Do not record, for the call on now or one that has not started.
     const next = page.api.fixture.agenda.meetings[0];
-    Object.assign(next, { start: new Date(Date.now() - 2 * 60000).toISOString(), end: new Date(Date.now() + 28 * 60000).toISOString() });
     page.api.fixture.state = { ...page.api.fixture.state,
-      transcript: { meeting_id: 'm1', meeting: 'Pilot review', status: 'recording', live: true, segments: [], speakers: [] },
+      transcript: { meeting_id: 'm1', meeting: 'Pilot review', status: 'recording', live: true, segments: [], speakers: [],
+        started_at: new Date(Date.now() - 40 * 60000).toISOString() },
       recording_health: { checked_at: Date.now() / 1000 + 60, capture: { state: 'recording', audio_recording: true } } };
     await page.waitForFunction(() => document.body.dataset.view === 'call');
     await page.locator('#nav-home').click();
+    for (const minutes of [-2, 3]) {
+      Object.assign(next, { start: new Date(Date.now() + minutes * 60000).toISOString(), end: new Date(Date.now() + (minutes + 30) * 60000).toISOString() });
+      await page.evaluate(() => refreshAgenda());
+      await page.waitForFunction(minutes => (minutes < 0 ? /идет сейчас|on now/ : /через|in /)
+        .test(document.querySelector('#home .row.next .soon')?.textContent), minutes);
+      assert.equal(await row.locator('button.quiet').count(), 0, `no Do not record during a recording (${minutes} min)`);
+    }
+    // Undo of a skip stays during a recording.
+    next.skip_recording = true;
     await page.evaluate(() => refreshAgenda());
-    await page.waitForFunction(() => document.body.dataset.view === 'home' && /идет сейчас|on now/.test(document.querySelector('#home .row.next .soon')?.textContent));
-    assert.equal(await row.locator('button.quiet').count(), 0, 'no Do not record for the call being recorded');
-    // An earlier call's recording that runs on into this call: offered, and the server's answer says what happens.
-    page.api.fixture.state.transcript.started_at = new Date(Date.now() - 40 * 60000).toISOString();
-    await page.evaluate(() => refreshAgenda());
-    await row.locator('button.quiet').waitFor();
-    page.api.responses['/api/agenda/skip-recording'] = { status: 409, json: { ok: false, error: 'previous_call_recording' } };
-    await row.locator('button.quiet').click();
-    await page.waitForFunction(() => /предыдущего|previous call/.test(document.querySelector('#home .row.next .row-error')?.textContent));
-    assert.equal(await row.locator('.row-error').innerText(), lang === 'ru'
-      ? 'Еще идет запись предыдущего звонка, этот звонок попадает в нее. Остановить ее можно в программе записи.'
-      : 'The previous call is still being recorded and this call is going into it. You can stop it in the recorder.');
-    delete page.api.responses['/api/agenda/skip-recording'];
-    // An earlier recording before this call starts: Do not record still holds for this call's own start.
-    Object.assign(next, { start: new Date(Date.now() + 3 * 60000).toISOString(), end: new Date(Date.now() + 33 * 60000).toISOString() });
-    await page.evaluate(() => refreshAgenda());
-    await page.waitForFunction(() => /через|in /.test(document.querySelector('#home .row.next .soon')?.textContent));
-    assert.equal(await row.locator('button.quiet').count(), 1, 'Do not record for a call an earlier recording has not reached');
+    await row.locator('[data-key$="|skip"]').waitFor();
+    assert.equal(await row.locator('[data-key$="|skip"]').innerText(), lang === 'ru' ? 'Вернуть' : 'Undo');
   },
   async preparing(page, lang) {
     const status = page.locator('#home .row.next [role="status"]');
@@ -380,6 +373,25 @@ const checks = {
       node.matches('h2.day') ? 'day' : node.matches('.row') ? 'row' : node.matches('.empty') ? 'failed' : node.tagName));
     assert.ok(partial.includes('row') && partial.at(-1) === 'failed' && partial.at(-2) === 'day', JSON.stringify(partial));
     assert.equal(await page.locator('#home .empty button').innerText(), lang === 'ru' ? 'Повторить' : 'Retry');
+    // The failed day goes in place by the local date of the headings, also for a call written in another offset:
+    // today failed, tomorrow 00:30 local loaded (its ISO text carries a date that is still today at -10:00).
+    const local = ms => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+    const at = new Date(); at.setDate(at.getDate() + 1); at.setHours(0, 30, 0, 0);
+    const minus10 = ms => `${new Date(ms - 10 * 3600000).toISOString().slice(0, 19)}-10:00`;
+    const late = { ...states.ready.agenda.meetings[0], event_id: 'evt-late', start: minus10(at.getTime()), end: minus10(at.getTime() + 30 * 60000) };
+    const order = () => page.evaluate(() => [...document.querySelectorAll('#home .col > *')].map(node =>
+      node.matches('h2.day') ? node.textContent : node.matches('.row') ? 'row' : node.matches('.empty') ? 'failed' : node.tagName));
+    page.api.fixture.agenda = { ...states.ready.agenda, meetings: [late], unscheduled_plans: [], calendar_state: 'failed', failed_days: [local(Date.now())] };
+    await page.evaluate(() => refreshAgenda());
+    await page.waitForFunction(() => document.querySelectorAll('#home .row').length === 1);
+    let shown = await order();
+    assert.ok(/Сегодня|Today/.test(shown[0]) && shown[1] === 'failed' && /Завтра|Tomorrow/.test(shown[2]) && shown[3] === 'row', JSON.stringify(shown));
+    // Only the failed day changes (the same row): Home redraws with the retry under the right date.
+    page.api.fixture.agenda = { ...page.api.fixture.agenda, failed_days: [local(at.getTime())] };
+    await page.evaluate(() => refreshAgenda());
+    await page.waitForFunction(() => document.querySelector('#home .col > :last-child')?.matches('.empty'));
+    shown = await order();
+    assert.ok(/Завтра|Tomorrow/.test(shown[0]) && shown[1] === 'row' && shown.at(-1) === 'failed', JSON.stringify(shown));
   },
   async mic_missing(page, lang) {
     await failing(page);

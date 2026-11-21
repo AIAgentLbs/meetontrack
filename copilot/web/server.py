@@ -28,7 +28,7 @@ import hidden_consoles
 hidden_consoles.install()  # before any helper starts: no console windows on Windows
 from archive import MeetingArchive
 from permissions import RecorderProbe, open_settings
-from skip_recording import SkipRecording, recording_call
+from skip_recording import SkipRecording
 from analysis_rebuild import WINDOW as ANALYSIS_WINDOW, AnalysisRebuilds, chunk_key, transcript_chunks, transcript_signature
 from canonical_transcript import canonical_segments
 from meeting_boundaries import MeetingBoundaries, BoundaryConflict, BoundaryUnavailable
@@ -2812,23 +2812,19 @@ def agenda_payload(now=None) -> dict:
     """The agenda with the calendar's state, whether the recorder honours "do not record", and each choice.
     A calendar day that could not be read is "failed" with the rows of the day that loaded, never an empty day."""
     agenda = PLANS.agenda(now)
-    if agenda.get("failed_days"):
-        agenda["calendar_state"] = "failed"  # a partial agenda neither clips nor restores stored skips
-    else:
-        agenda["calendar_state"] = PLANS.calendar.state() if PLANS.calendar else "tool_missing"
-        SKIPS.clip(agenda["meetings"])  # a call booked after a skip ends that skip before it; a cancelled one gives it back
+    state = PLANS.calendar.state() if PLANS.calendar else "tool_missing"
+    agenda["calendar_state"] = "failed" if agenda.get("failed_days") else state
+    # A call booked after a skip ends that skip before it, on the days that loaded; a cancelled one gives it back
+    # only when a connected calendar read both days.
+    SKIPS.clip(agenda["meetings"], restore=complete_agenda(agenda, state))
     agenda["skip_recording_supported"] = PERMISSIONS.snapshot()["skip_recording"]
     agenda["meetings"] = [{**meeting, "skip_recording": SKIPS.skipped(meeting)} for meeting in agenda["meetings"]]
     return agenda
 
 
-def capture_started() -> datetime | None:
-    """When the running capture began, from the live transcript; None when unknown."""
-    try:
-        started = datetime.fromisoformat(str(TRANSCRIPT.physical_snapshot().get("started_at") or "").replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return started if started.tzinfo else None
+def complete_agenda(agenda: dict, state: str) -> bool:
+    """A connected calendar read both days: only then may a shortened skip have its window back."""
+    return state == "connected" and not agenda.get("failed_days")
 
 
 def auto_record_enabled() -> bool:
@@ -3223,15 +3219,14 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": False, "error": "recorder_cannot_skip"}, HTTPStatus.CONFLICT)
                 else:
                     agenda = PLANS.agenda(datetime.now().astimezone())
-                    # Checked after the calendar read, right before the write: a recording may have started meanwhile.
-                    # The recorders read the file only before they start, so a skip cannot stop a running recording.
-                    now = datetime.now().astimezone()
-                    running = payload["skip"] and recording_call(meeting, now, capture_started())
-                    if running and capture_recording():
-                        error = "already_recording" if running == "this" else "previous_call_recording"
-                        self._json({"ok": False, "error": error}, HTTPStatus.CONFLICT)
+                    # R32: no skip while any recording runs (the recorders read the file only before they start, so
+                    # a skip cannot stop it). Checked after the calendar read, right before the write. Undo stays.
+                    if payload["skip"] and capture_recording():
+                        self._json({"ok": False, "error": "recording_active"}, HTTPStatus.CONFLICT)
                     else:
-                        SKIPS.set(meeting, payload["skip"], now, None if agenda.get("failed_days") else agenda["meetings"])
+                        state = PLANS.calendar.state() if PLANS.calendar else "tool_missing"
+                        SKIPS.set(meeting, payload["skip"], datetime.now().astimezone(), agenda["meetings"],
+                                  restore=complete_agenda(agenda, state))
                         self._json({"ok": True})
             elif path == "/api/getting-started/start-recording":
                 run = subprocess.run([str(RECOGNITION_GUARD.binary), "record", "start"],

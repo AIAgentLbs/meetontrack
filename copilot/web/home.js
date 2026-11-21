@@ -82,7 +82,7 @@ async function homeAction(button, key, path, body) {
     homeErrors.delete(key);
   } catch (error) {
     homeErrors.set(key, error.status !== 409 || path !== "/api/agenda/skip-recording" ? "home.action_failed"
-      : ["already_recording", "previous_call_recording"].includes(error.message) ? `home.${error.message}` : "home.cannot_skip");
+      : error.message === "recording_active" ? "home.recording_active" : "home.cannot_skip");
   }
   try {
     renderHome(window.agendaData, window.appState);
@@ -163,16 +163,6 @@ function homeMemo(plan, key, id, primary) {
   }
   toggle(!panel.hidden);
   return { panel, button, show: () => { toggle(true); links.querySelector("a")?.focus(); } };
-}
-
-// Which call a running capture is (skip_recording.recording_call): "this" when it began inside the call's window
-// or its start is unknown, "previous" when an earlier call's recording runs on into this call, "" otherwise.
-function homeRecordingCall(meeting, state, now) {
-  const lead = Date.parse(meeting.start) - 5 * 60000;
-  if (!isLive(state, now) || now < lead || now >= Date.parse(meeting.end)) return "";
-  const started = Date.parse(state?.transcript?.started_at || "");
-  if (!(started < lead)) return "this";
-  return now >= Date.parse(meeting.start) ? "previous" : "";
 }
 
 function homeRow(meeting, { next, now, supported, id, status, recording }) {
@@ -256,8 +246,8 @@ function homeRow(meeting, { next, now, supported, id, status, recording }) {
   if (meeting.skip_recording) {
     actions.append(textNode("span", "status-text", t("home.skipped")));
     if (supported) actions.append(homeButton(t("home.unskip"), "ql", `${key}|skip`, skip(false)));
-  } else if (next && supported && meeting.start && homeRecordingCall(meeting, recording, now) !== "this") {
-    // Not for the call being recorded: the recorders read the skip only before they start (the server says 409).
+  } else if (next && supported && meeting.start && !recording) {
+    // R32: not while any recording runs; the recorders read the skip only before they start (the server says 409).
     actions.append(homeButton(t("home.skip"), "quiet", `${key}|skip`, skip(true)));
   }
   if (actions.childElementCount) main.append(actions);
@@ -297,10 +287,10 @@ function renderHome(agenda, state, now = Date.now()) {
   // Not loaded at all, or the calendar could not be read: never shown as an empty day.
   const failed = !agenda && Boolean(window.agendaFailed) || agenda?.calendar_state === "failed";
   const status = callStatus(state, agenda, window.permissionsData, now);
-  const recording = isLive(state, now) ? state : null;
+  const recording = isLive(state, now);
   const signature = JSON.stringify([uiLanguage, new Date(now).toDateString(), Boolean(agenda), failed, agenda?.calendar_state,
     meetings, unscheduled, agenda?.skip_recording_supported, [...homeErrors], status.kind, status.action?.id,
-    next && homeRecordingCall(next, recording, now)]);
+    recording, agenda?.failed_days]);
   if (signature === homeSignature) {
     // Same rows: only the time left changes, in place, so focus, scroll and an open memo stay.
     const soon = home.querySelector(".soon");
@@ -318,6 +308,11 @@ function renderHome(agenda, state, now = Date.now()) {
   const loadFailed = () => homeEmpty("home.load_failed", homeButton(t("home.retry"), "primary", "empty|reload", event => homeReload(event.currentTarget)));
   // One calendar day could not be read: the other day's rows stay, the failed day says so in its place.
   const failedDays = failed && meetings.length ? [...(agenda.failed_days || [])].sort() : [];
+  // The local date of a call, as its heading counts it (its ISO text may carry another offset's date).
+  const localDay = iso => {
+    const date = new Date(iso);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  };
   const failedDay = date => column.append(textNode("h2", "day", homeDayTitle(`${date}T12:00:00`, now)), loadFailed());
   if (failed && !failedDays.length) {
     column.append(loadFailed());
@@ -330,7 +325,7 @@ function renderHome(agenda, state, now = Date.now()) {
   }
   let day = "", index = 0;
   for (const meeting of meetings) {
-    while (failedDays.length && failedDays[0] < meeting.start.slice(0, 10)) failedDay(failedDays.shift());
+    while (failedDays.length && failedDays[0] < localDay(meeting.start)) failedDay(failedDays.shift());
     const title = homeDayTitle(meeting.start, now);
     if (title !== day) column.append(textNode("h2", "day", (day = title)));
     column.append(homeRow(meeting, { next: meeting === next, now, supported: agenda.skip_recording_supported, id: `home-memo-${index++}`, status, recording }));

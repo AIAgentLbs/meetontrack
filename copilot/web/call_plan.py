@@ -282,6 +282,8 @@ class CallPlans:
                     "attendees": list(event.get("attendees") or []),
                     "plans": [self._summary(plan) for plan in hits],
                 })
+            if day.isoformat() in failed:
+                continue  # its dated memos may belong to an event: unknown until the day loads
             unscheduled += [self._summary(plan) for plan in plans
                             if plan["id"] not in matched and self._scheduled_day(plan) == day]
         return {"calendar": bool(self.calendar and self.calendar.available()),
