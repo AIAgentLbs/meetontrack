@@ -119,7 +119,14 @@ function hintCandidates(state) {
     const quote = uiLanguage === "ru" ? `«${said}»` : `“${said}”`;
     const line = callLine(item.fact);
     const cut = callCut(line.verb === "clarify" ? line.rest : line.line);
-    hints.push({ kind: "check", tier: 2, at, label: callCheckLabel(cut.text), question: "", ...cut, source: t("call.source", { text: speaker ? `${speaker}: ${quote}` : quote }), detail: [] });
+    // What was said, then what it is checked against: the client's words are never labelled a source (O1).
+    const said_line = speaker ? t("call.said", { name: speaker, quote }) : quote;
+    const ref = item.sources?.[0];
+    let name = ref?.title || "";
+    try { name ||= ref?.url ? new URL(ref.url).hostname.replace(/^www\./, "") : ""; } catch {}
+    const what = ref?.quote && !callSame(ref.quote, cut.text) ? `: ${ref.quote}` : "";
+    const per = name ? ` · ${t("call.per", { source: name })}${what}` : "";
+    hints.push({ kind: "check", tier: 2, at, label: callCheckLabel(cut.text), question: "", ...cut, source: `${said_line}${per}`, detail: [] });
   }
   const questions = (state?.call_plan?.items || []).filter(item => item.kind === "question");
   const next = questions.findIndex(item => item.status !== "resolved");
@@ -259,7 +266,7 @@ function callProblem(state, now) {
 // What the slot shows: the pending own question, then the hint picked, a heard question, or the waiting line.
 // Stopped (the undo window, the final stop, or a stop not yet acknowledged): one plain line, and the person's own
 // question and its answer still show, since the ask field keeps working.
-function callSlot(state, current, now, stopped = null, clock = "") {
+function callSlot(state, current, now, stopped = null) {
   const own = current?.kind === "own" ? current : null;
   if (callPending && !callPending.queued && ((own && own.at > callPending.at) || (!requestBusy && !state?.copilot?.busy))) callPending = null;
   // A failed Ask shows for the hold every error gets, until a newer hint, and never over a stop (I1).
@@ -270,7 +277,7 @@ function callSlot(state, current, now, stopped = null, clock = "") {
   // The undo window: hints pause, the bar says when the recording stops (G2). The final stop: saved, and the
   // way to this meeting's results (G3).
   if (stopped) return { type: "stopped", final: stopped === "stopped_final",
-    until: stopped === "stopped" ? callAt(state?.recording_control?.stopping?.until) : null, clock,
+    until: stopped === "stopped" ? callAt(state?.recording_control?.stopping?.until) : null,
     text: t({ stop_failed: "call.stop_pending", stopped: "call.stopped", stopped_final: "call.saved" }[stopped]) };
   // Who asked, in quotes, then Answer over the line, as in Earlier (B6, K3).
   if (current?.kind === "answer") {
@@ -297,7 +304,7 @@ function callSlotNodes(slot) {
   if (slot.type === "stopped") {
     // The undo window says what comes next, counting down in place (L3); the bar already says it stopped.
     if (slot.until !== null && slot.until !== undefined) {
-      const [before, after = ""] = t("call.stopped_until", { clock: slot.clock }).split("{time}");
+      const [before, after = ""] = t("call.stopped_until").split("{time}");
       const line = textNode("p", "waiting", before);
       line.append(callTime(slot.until, "left"), after);
       return [line];
@@ -413,7 +420,7 @@ function renderCall(state) {
   // A retry time that has passed is not shown: the next try comes with the next analysis.
   const paused = retry === null || stopped ? null : retry > now ? t("call.paused_retry", { n: Math.ceil((retry - now) / 60000) }) : t("call.paused_next");
   const pick = pickHint(state, now);
-  const slot = callSlot(state, pick.current, now, stopped, status.clock);
+  const slot = callSlot(state, pick.current, now, stopped);
   // Nothing else to show: the pause is the main line, one message (D2). Under a hint it stays a note.
   const pausedSlot = paused && slot.type === "waiting";
   callPart("call-slot", pausedSlot ? { type: "paused", text: t("call.paused"), retry: paused } : slot, callSlotNodes);
@@ -548,7 +555,8 @@ function openCallPanel(panel) {
   renderShell();
   // The tab bar is hidden in Call (C1): focus goes to the panel itself.
   const target = { transcript: "transcript-heading", board: "call-board", chat: "chat", notes: "journal", plan: "call-plan" }[panel];
-  if (target) { $(target).tabIndex = -1; $(target).focus(); }
+  // Without scrolling: focusing the tall board scrolled its pane past Back to the call at 400 px (O3).
+  if (target) { $(target).tabIndex = -1; $(target).focus({ preventScroll: true }); }
   else if (wasOpen) returnFocus(callOpener);
 }
 

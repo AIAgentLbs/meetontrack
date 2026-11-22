@@ -628,7 +628,7 @@ async function callBar(browser) {
   // the one countdown is in the feed; no heartbeat.
   page = await callPage(browser, 'stopped', { at: Date.now() });
   assert.match(await text(page, '#call-status-text'), /^Stopped \d\d:\d\d$/);
-  const left = async () => Number((await text(page, '#call-slot p')).match(/ in (\d+)/)[1]);
+  const left = async () => Number((await text(page, '#call-slot p')).match(/^In (\d+)/)[1]);
   const seconds = await left();
   // A screen reader hears the stop once, not every second (Minor 2): the bar's text is not a live region.
   assert.equal(await page.$eval('#call-status-text', node => node.getAttribute('aria-live')), null);
@@ -721,7 +721,7 @@ async function callBar(browser) {
   // RU at 400 px: the number and «сек» never part (D4), in the one countdown, the feed's (N2).
   page = await callPage(browser, 'stopped', { width: 400, lang: 'ru', data: 'ru' });
   assert.match(await text(page, '#call-status-text'), /^Остановлено \d\d:\d\d$/);
-  assert.match(await text(page, '#call-slot p'), / через \d+\u00a0сек,/);
+  assert.match(await text(page, '#call-slot p'), /^Через \d+\u00a0сек можно/);
   await page.context().close();
 
   // No capture marker and nobody heard yet: silence is never "not heard".
@@ -1146,7 +1146,7 @@ async function fixWave(browser) {
     assert.equal(await page.locator('#call-problem > *').count(), 0, `${fixture}: no problem card`);
     // One plain line (G2, G3, L3): what comes next in the undo window, the recording saved after the final stop.
     assert.match(await text(page, '#call-slot p'), fixture === 'stopped'
-      ? /^Recording stopped at \d\d:\d\d\. The results appear here in \d+\u00a0sec, until then you can resume recording\.$/
+      ? /^In \d+\u00a0sec you can open the call results, until then you can resume recording\.$/
       : /^The recording is saved\.$/, fixture);
     assert.equal(await page.locator('#call-question').isEnabled(), true);
     await page.fill('#call-question', 'What did Anna say about the budget?');
@@ -1210,16 +1210,16 @@ async function polish(browser) {
   for (const name of NAMES) for (const lang of ['en', 'ru']) {
     assert.doesNotMatch(JSON.stringify(build(name, lang).state.journal.map(item => [item.text, item.reply, item.evidence])), /\b\d\d:\d\d\b/, `${name} ${lang}`);
   }
-  // G2, H1, N2: the bar says Stopped at the call's clock, Resume in Stop's place; the feed counts down to the results.
-  // The one time in the feed is that elapsed clock (G1), never a time of day.
-  for (const [lang, bar, feed] of [['ru', /^Остановлено (\d\d:\d\d)$/, /^Запись остановлена на (\d\d:\d\d)\. Итоги появятся здесь через \d+\u00a0сек/],
-    ['en', /^Stopped (\d\d:\d\d)$/, /^Recording stopped at (\d\d:\d\d)\. The results appear here in \d+\u00a0sec/]]) {
+  // G2, H1, N2, O2: the bar says Stopped at the call's clock, Resume in Stop's place; the feed counts down to when the
+  // results open. The one time on screen is that elapsed clock (G1), never a time of day.
+  for (const [lang, bar, feed] of [['ru', /^Остановлено (\d\d:\d\d)$/, /^Через \d+\u00a0сек можно будет открыть итоги/],
+    ['en', /^Stopped (\d\d:\d\d)$/, /^In \d+\u00a0sec you can open the call results/]]) {
     const page = await callPage(browser, 'stopped', { lang, data: lang, at });
     const clock = (await text(page, '#call-status-text')).match(bar)?.[1];
     assert.ok(clock, lang);
     assert.equal(await page.locator('#call-stop').innerText(), lang === 'ru' ? 'Продолжить запись' : 'Resume recording');
-    assert.equal((await text(page, '#call-slot')).match(feed)?.[1], clock, lang);
-    assert.doesNotMatch((await page.locator('#call').innerText()).replace(clock, ''), /больше не будет|No more hints|\d:\d\d/, lang);
+    assert.match(await text(page, '#call-slot'), feed, lang);
+    assert.doesNotMatch(await page.locator('#call').innerText(), /больше не будет|No more hints|\d:\d\d/, lang);
     await page.context().close();
   }
   // G3: the final stop says the recording is saved and opens this meeting's results.
@@ -1279,9 +1279,10 @@ async function polish(browser) {
     const lines = await page.locator('#call-earlier .earlier-hint').allTextContents();
     assert.ok(lines.includes(lang === 'ru' ? 'Старт в марте или в апреле?' : 'Does the start fall in March or in April?'), lines.join(' | '));
     assert.equal((await page.locator('#call-earlier').innerText()).split(build('earlier_open', lang).state.journal[1].text).length - 1, 1, `${lang}: question once`);
-    // One source prefix across Call (G5 addendum): "Источник:" / "Source:", never "Основание" / "Evidence".
+    // One source prefix across Call (G5 addendum): "Источник:" / "Source:", never "Основание" / "Evidence"; a fact
+    // check says who said what and what it is checked against instead (O1).
     for (const source of await page.locator('#call-earlier .why').allTextContents()) {
-      assert.match(source, lang === 'ru' ? /^Источник: \S/ : /^Source: \S/, source);
+      assert.match(source, lang === 'ru' ? /^Источник: \S|· По \S/ : /^Source: \S|· Per \S/, source);
     }
     assert.doesNotMatch(await page.locator('#call').innerText(), /Основание|Evidence/, lang);
     const clipped = await page.$$eval('#call-earlier .why', nodes => nodes.filter(node => node.scrollWidth > node.clientWidth + 1).length);
@@ -1323,8 +1324,8 @@ async function polish(browser) {
 async function round3(browser) {
   const plain = value => String(value).replace(/\u00a0/g, ' ').trim();
   // H1 (P1): the stopping state reads as stopped, in the bar and in the feed, never as the AI's pause.
-  for (const [lang, bar, feed] of [['ru', /^Остановлено \d\d:\d\d$/, /^Запись остановлена на \d\d:\d\d\. Итоги появятся здесь через \d+ сек/],
-    ['en', /^Stopped \d\d:\d\d$/, /^Recording stopped at \d\d:\d\d\. The results appear here in \d+ sec/]]) {
+  for (const [lang, bar, feed] of [['ru', /^Остановлено \d\d:\d\d$/, /^Через \d+ сек можно будет открыть итоги/],
+    ['en', /^Stopped \d\d:\d\d$/, /^In \d+ sec you can open the call results/]]) {
     const page = await callPage(browser, 'stopped', { lang, data: lang });
     assert.match(plain(await text(page, '#call-status-text')), bar);
     assert.match(plain(await text(page, '#call-slot p')), feed);
@@ -1520,7 +1521,7 @@ async function round4(browser) {
     await page.clock.runFor(3000);
     assert.equal(plain(await text(page, '#call-status-text')), bar, `${width}: the clock is frozen`);
     assert.match(plain(await text(page, '#call-slot p')),
-      /^Запись остановлена на \d\d:\d\d\. Итоги появятся здесь через \d+ сек, до тех пор запись можно продолжить\.$/);
+      /^Через \d+ сек можно будет открыть итоги, до тех пор запись можно продолжить\.$/); // O2
     assert.doesNotMatch(`${await page.locator('#call').innerText()} ${await page.locator('.topbar').innerText()}`, /сохранит|Продолжить можно еще/);
     assert.equal(await visible(page, '#call-status-action'), false, `${width}: no second Resume`);
     const resume = await page.$eval('#call-stop', node => ({ ...node.getBoundingClientRect().toJSON(), text: node.innerText.trim(),
@@ -1537,6 +1538,42 @@ async function round4(browser) {
     assert.ok(centered <= 2, `${width}: Resume label off centre by ${centered}px`);
     await page.click('#call-stop');
     await expectPost(page, '/api/recording/resume', { meeting_id: 'm1' });
+    await page.context().close();
+  }
+  // O1: a fact check in Earlier keeps what was said apart from what it is checked against; the client's words are never
+  // labelled a source. RU names the speaker without a past verb, which would guess a gender from the name (H3).
+  for (const [lang, line] of [['ru', 'Анна Петрова: «Наш пилот в прошлом году охватил все региональные офисы.» · По example.com'],
+    ['en', 'Anna Petrova said: “Our pilot last year covered every regional office.” · Per example.com']]) {
+    const page = await callPage(browser, 'earlier_open', { lang, data: lang });
+    await page.click('#call-earlier-open');
+    const lines = await page.locator('#call-earlier .why').allTextContents();
+    assert.ok(lines.includes(line), `${lang}: ${lines.join(' | ')}`);
+    assert.ok(!lines.some(text => /^(Источник|Source): [^:«“]+: [«“]/.test(text)), `${lang}: a quote labelled a source`);
+    await page.context().close();
+  }
+  {
+    const page = await callPage(browser, 'waiting');
+    const source = await page.evaluate(() => pickHint({ fact_checks: { items: [{ status: 'refuted', fact: 'Two offices.', quote: 'Five offices.',
+      segment: { speaker: 'Anna Petrova' }, checked_at: new Date().toISOString(),
+      sources: [{ kind: 'kb', title: 'Pilot report', quote: 'Two of five offices joined.' }] }] } }, Date.now()).current.source);
+    assert.equal(source, 'Anna Petrova said: “Five offices.” · Per Pilot report: Two of five offices joined.');
+    await page.context().close();
+  }
+  // O2: the undo window says when the results can be opened, as the final state's button does, and nothing opens itself.
+  for (const [lang, body] of [['ru', /^Через 20 сек можно будет открыть итоги, до тех пор запись можно продолжить\.$/],
+    ['en', /^In 20 sec you can open the call results, until then you can resume recording\.$/]]) {
+    const page = await callPage(browser, 'stopped', { lang, data: lang, at: Date.now() });
+    assert.match(plain(await text(page, '#call-slot p')), body);
+    await page.context().close();
+  }
+  // O3: Board at 400 px keeps Back to the call in view, as Transcript does.
+  for (const item of ['board', 'transcript']) {
+    const page = await callPage(browser, `${item}_open`, { lang: 'ru', data: 'ru', width: 400 });
+    await page.click('#call-more');
+    await page.click(`#call-more-${item}`);
+    const back = await box(page, '#call-back');
+    const main = await box(page, 'main.workspace');
+    assert.ok(back.height > 0 && back.top >= main.top - 1, `${item}: Back to the call in view ${back.top} / ${main.top}`);
     await page.context().close();
   }
   // N5: at 400x900 no pane makes the page scroll, and the dock never moves. N6: with Board or Transcript open the
@@ -1733,8 +1770,8 @@ async function round4(browser) {
     await page.context().close();
   }
   // L3, N2: in the undo window the feed says what comes next, counting down, and the ask field stays usable.
-  for (const [lang, body] of [['ru', /^Запись остановлена на \d\d:\d\d\. Итоги появятся здесь через 20 сек, до тех пор запись можно продолжить\.$/],
-    ['en', /^Recording stopped at \d\d:\d\d\. The results appear here in 20 sec, until then you can resume recording\.$/]]) {
+  for (const [lang, body] of [['ru', /^Через 20 сек можно будет открыть итоги, до тех пор запись можно продолжить\.$/],
+    ['en', /^In 20 sec you can open the call results, until then you can resume recording\.$/]]) {
     const page = await callPage(browser, 'stopped', { lang, data: lang, at: Date.now() });
     assert.match(plain(await text(page, '#call-slot p')), body);
     await page.clock.runFor(2000);
