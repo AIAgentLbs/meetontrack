@@ -43,11 +43,13 @@ function afterBoard(state, after) {
   // A memo question counts as answered only with the memo check's quote; before the check, the plan's own status.
   const questions = (state?.call_plan?.items || []).filter(item => item.kind === "question");
   const checked = memo?.state === "done" ? memo.questions || [] : null;
+  // The check did not run or failed: the line says so, and no status under it pretends otherwise (critique 2, P2-3).
+  const unchecked = Boolean(memo) && !checked && memo.state !== "waiting";
   for (const item of questions) {
     const found = checked?.find(entry => entry.id === item.id);
-    const answered = checked ? found?.status === "answered" : item.status === "resolved";
+    const answered = !unchecked && (checked ? found?.status === "answered" : item.status === "resolved");
     const quote = answered && found ? { quote: String(found.quote || ""), speaker: String(found.speaker || ""), at: found.at } : {};
-    put("ask", row(`memo:${item.id}`, item.text, answered ? "answered" : "no_answer", { memo: true, ...quote }), answered);
+    put("ask", row(`memo:${item.id}`, item.text, unchecked ? "" : answered ? "answered" : "no_answer", { memo: true, ...quote }), answered);
   }
 
   // Removed journal items of a past meeting come only with /api/after.
@@ -79,12 +81,12 @@ function afterBoard(state, after) {
       other: !item.fact ? "" : t(afterSource(item) ? "after.differs_fact" : "after.quoted", { source: afterSource(item), text: afterBare(item.fact) }) },
     true), item.status === "confirmed");
   }
-  // What was said against what the memo says: `other` is the memo's whole line, with where the memo came from.
-  const source = String(state?.call_plan?.source_label || "");
+  // What was said against what the memo says: `other` is the memo's whole line. The memo is the person's own note
+  // for the call, never the client's document (critique 2, P2-4).
   for (const item of checked ? memo.differs || [] : []) {
     const said = String(item.quote || "");
     put("facts", row(String(item.key), said, "differs", { quote: said, speaker: String(item.speaker || ""), at: item.at,
-      other: t(source ? "after.differs_memo" : "after.quoted", { source, text: afterBare(item.memo) }) }, true));
+      other: t("after.differs_memo", { text: afterBare(item.memo) }) }, true));
   }
 
   const memoLine = !memo ? "" : memo.state === "done" ? t("after.memo_checked") : memo.state === "waiting" ? t("after.memo_waiting")
@@ -97,6 +99,7 @@ const AFTER_WAITS = ["draft", "preparing", "showing", "changes"]; // states in w
 const AFTER_ACTIONS = Object.fromEntries(AFTER_WAITS.map(state => [state, ["send_now", "hold"]]));
 Object.assign(AFTER_ACTIONS, { held: ["send_now"], edited: ["send_again"], failed: ["retry"] });
 const AFTER_RESEND = new Set(["email", "telegram", "drive"]); // what Send again and Retry can send; the CRM note stays
+const AFTER_RETRY = new Set(["failed", "unknown"]); // Retry resends these; "unknown" says it may already have arrived
 
 // The send block: the headline from the server's send state (the gate), the rules, who gets it, what can be done.
 function afterSend(after) {
@@ -105,18 +108,24 @@ function afterSend(after) {
   const channels = send.channels || [];
   const resend = channels.filter(row => AFTER_RESEND.has(row.channel));
   // Send again needs a channel it can resend (ruling C11); Retry resends only the failed ones (ruling C9).
-  const stuck = state === "edited" ? !resend.length : state === "failed" && !resend.some(row => row.status === "failed");
+  const stuck = state === "edited" ? !resend.length : state === "failed" && !resend.some(row => AFTER_RETRY.has(row.status));
+  // The pause is over: the report goes within seconds and a Hold can no longer stop it (final review I1).
+  const due = ["showing", "changes"].includes(state) && Date.parse(send.send_at || "") <= Date.now();
+  // Once it went, the sentence names only where it arrived (critique 2, P2-2).
+  const went = afterWent(after);
   // Telegram without a chat is Saved messages; e-mail without an address reads plainly, never "e-mail " and nothing.
-  const parts = channels.map(row => (row.channel === "telegram" && !row.to ? t("after.to.telegram_me")
+  const parts = channels.filter(row => !went || row.status === "sent").map(row => (row.channel === "telegram" && !row.to ? t("after.to.telegram_me")
     : row.channel === "email" && !row.to ? t("after.to.email_plain")
     : t(`after.to.${row.channel}${row.channel === "twenty" && row.to ? "_named" : ""}`, { to: row.to })));
   return {
     state,
     headline: t(state === "draft" && send.send_now ? "after.send.send_now_pending" : `after.send.${state}`),
-    rules: AFTER_WAITS.includes(state) ? [t("after.rule.changes"), t("after.rule.keep")] : [],
-    recipients: state === "no_channels" || !parts.length ? "" : t(afterWent(after) ? "after.to_sent" : "after.to", { list: parts.join(", ") }),
-    actions: stuck ? [] : AFTER_ACTIONS[state] || [],
-    channels: ["sent", "edited", "failed", "held"].includes(state) ? channels.map(row => {
+    // The refined summary has landed from "showing" on: its rule would be stale there (critique 2, P3-7).
+    rules: AFTER_WAITS.includes(state) ? [t("after.rule.changes"), ...(["draft", "preparing"].includes(state) ? [t("after.rule.keep")] : [])] : [],
+    recipients: state === "no_channels" || !parts.length ? "" : t(went ? "after.to_sent" : "after.to", { list: parts.join(", ") }),
+    actions: stuck || due ? [] : AFTER_ACTIONS[state] || [],
+    // Held says it once, in the headline (critique 2, P3-1).
+    channels: ["sent", "edited", "failed"].includes(state) ? channels.map(row => {
       // A line never ends on "at": without a time the time clause goes.
       const time = afterClock(row.status === "failed" ? row.retry_at : row.at);
       const plain = !time && (row.status === "sent" || row.status === "failed");
@@ -130,6 +139,8 @@ function afterSend(after) {
 // Every POST names that same id: the server's cache that makes Hold instant is keyed by it.
 const AFTER_POLL_MS = 3000;
 const AFTER_SAVE_MS = 1000;
+const AFTER_TOUCH_MS = 10000; // while typing, the report is told to wait this often: well inside its 30 s pause
+const AFTER_JOB_MS = 1500;
 const AFTER_FIELDS = { summary: "after-summary", next_steps: "after-next" };
 const AFTER_TAGS = { answered: "ok", confirmed: "ok", no_answer: "open", differs: "diff", risk: "kind", objection: "kind" };
 const AFTER_LANES = { ask: "call.board_mine", asked: "call.board_incoming", risks: "after.col_risks", facts: "after.col_facts" };
@@ -141,6 +152,7 @@ let afterSendSignature = "";
 let afterError = "";
 let afterSaveError = false; // the error line is a save's: the next good save clears it, and only then
 let afterHolds = 0; // Do not send presses: one during a send's flush wins over it
+let afterTouched = 0; // when the server was last told the person is typing
 const afterBusy = new Set(); // focus keys of the controls whose POST is in flight: a second press posts nothing
 const afterOpen = new Set(); // lanes whose answered or confirmed rows are shown
 const afterDirty = new Set(); // fields typed in and not saved yet
@@ -172,8 +184,21 @@ async function afterRefresh() {
 }
 setInterval(() => document.body.dataset.view === "after" && void afterFetch(), AFTER_POLL_MS);
 
-// The server's codes are not for people: busy has its own line, any other refusal is the generic one.
-const afterFailed = error => (error.message === "busy" ? t("after.busy") : error.status ? t("error.generic") : plainError(error));
+// The server's codes are not for people: busy and a Hold that came too late have their own lines, any other refusal
+// is the generic one.
+const afterFailed = error => (error.message === "busy" ? t("after.busy") : error.message === "sending" ? t("after.sending")
+  : error.status ? t("error.generic") : plainError(error));
+
+// Send again and Retry run as one delivery job: wait for it, as the archive's resend does, and say why it did not go.
+async function afterJob(job) {
+  const id = job?.request_id;
+  for (const end = Date.now() + 300000; job?.state === "sending" && job.request_id === id && Date.now() < end;) {
+    await new Promise(resolve => setTimeout(resolve, AFTER_JOB_MS));
+    job = (await getJSON("/api/delivery/job")).job;
+  }
+  if (job?.request_id !== id || !job.error) return "";
+  return t(job.error === "report_not_ready" ? "after.not_ready" : "error.generic");
+}
 
 // A send sends what is on screen: typed text not saved yet goes first, and a save that fails sends nothing.
 async function afterFlush() {
@@ -186,13 +211,18 @@ async function afterFlush() {
 
 async function afterPost(key, path, body = {}, flush = false) {
   if (afterBusy.has(key) || !window.afterData?.data) return;
+  // The meeting clicked on, before anything is awaited: a call that loads meanwhile never gets this press.
+  const id = window.afterData.id;
   afterBusy.add(key);
   if (key === "hold") afterHolds++;
   const holds = afterHolds;
   afterError = "";
   afterSaveError = false;
   try {
-    if (!flush || ((await afterFlush()) && holds === afterHolds)) await post(path, { meeting_id: window.afterData.id, ...body });
+    if (!flush || ((await afterFlush()) && holds === afterHolds)) {
+      const answer = await post(path, { meeting_id: id, ...body });
+      if (answer.job) afterError = await afterJob(answer.job);
+    }
   } catch (error) {
     afterError = afterFailed(error);
   }
@@ -204,6 +234,12 @@ async function afterPost(key, path, body = {}, flush = false) {
 // A field is saved 1 s after the last key. Until then, and while it has focus, no answer writes into it.
 function afterInput(field) {
   afterDirty.add(field);
+  // Typing pauses an automatic send at once, not only once the text is saved (Codex P2).
+  const after = window.afterData?.data;
+  if (after && [...AFTER_WAITS, "sending"].includes(after.send?.state) && Date.now() - afterTouched >= AFTER_TOUCH_MS) {
+    afterTouched = Date.now();
+    void post("/api/after/editing", { meeting_id: window.afterData.id }).catch(() => {});
+  }
   clearTimeout(afterTimers[field]);
   afterTimers[field] = setTimeout(() => void afterSave(field), AFTER_SAVE_MS);
 }
@@ -261,7 +297,7 @@ function afterRow(row) {
       afterButton(t("after.bring_back"), "ql", `row:${row.key}`, toggle(false)));
     return item;
   }
-  item.append(textNode("p", `tag ${AFTER_TAGS[row.tag] || "kind"}`, t(`after.tag.${row.tag}`)));
+  if (row.tag) item.append(textNode("p", `tag ${AFTER_TAGS[row.tag] || "kind"}`, t(`after.tag.${row.tag}`)));
   const quote = afterQuote(row);
   // A differing row is two quotes, what was said and what it differs from; any other row is its text.
   if (row.tag !== "differs" || !quote) item.append(textNode("p", "btext", row.text));
@@ -322,7 +358,7 @@ function afterSendBlock(after, send) {
   const to = textNode("p", "to", send.recipients ? `${send.recipients} ` : "");
   to.id = "after-to";
   to.hidden = !after;
-  const change = afterButton(t("after.change"), "ql", "change", openDeliverySettings);
+  const change = afterButton(t(send.state === "no_channels" ? "after.change_setup" : "after.change"), "ql", "change", openDeliverySettings);
   change.id = "after-change";
   change.disabled = false;
   to.append(change);
@@ -339,7 +375,7 @@ function afterSendBlock(after, send) {
     }
     if (action === "retry") {
       // Retry resends only what failed (ruling C9).
-      const channels = after.send.channels.filter(item => item.status === "failed" && AFTER_RESEND.has(item.channel)).map(item => item.channel);
+      const channels = after.send.channels.filter(item => AFTER_RETRY.has(item.status) && AFTER_RESEND.has(item.channel)).map(item => item.channel);
       row.append(afterButton(t("after.retry"), "", "retry", () => void afterPost("retry", "/api/after/send-again", { channels }, true)),
         afterButton(t("after.channel_settings"), "ql", "settings", openDeliverySettings));
     }
@@ -369,14 +405,15 @@ function afterFields(after) {
     const tag = document.querySelector(`label[for="${id}"]`);
     if (tag.textContent !== label) tag.textContent = label;
     node.disabled = !window.afterData?.data;
-    const placeholder = window.afterData?.data ? "" : t("after.placeholder");
+    const placeholder = window.afterData?.data ? "" : t(field === "summary" ? "after.placeholder" : "after.placeholder_next");
     if (node.placeholder !== placeholder) node.placeholder = placeholder;
     const value = (after?.[field]?.lines || []).join("\n");
     const fresh = (window.afterData?.seq || 0) >= (afterKeep[field] || 0);
     if (fresh && !afterDirty.has(field) && document.activeElement !== node && node.value !== value) node.value = value;
   }
   const note = document.querySelector("#after .after-note");
-  const line = t(afterWent(after) ? "after.fields_note_sent" : final ? "after.fields_note" : "after.refining");
+  const line = t(after?.send?.state === "edited" ? "after.fields_note_edited" : afterWent(after) ? "after.fields_note_sent"
+    : final ? "after.fields_note" : "after.refining");
   if (note.textContent !== line) note.textContent = line;
 }
 
@@ -420,12 +457,14 @@ function renderAfter(state) {
     afterReplace($("after-send"), afterSendBlock(after, send));
   }
   if ($("after-said").textContent !== send.headline) $("after-said").textContent = send.headline;
-  const signature = JSON.stringify([uiLanguage, window.afterData?.id, board, [...afterOpen]]);
+  const note = afterWent(after) ? "after.board_note_sent" : { no_channels: "after.board_note_none", sending: "after.board_note_sending" }[send.state]
+    || "after.board_note";
+  const signature = JSON.stringify([uiLanguage, window.afterData?.id, board, [...afterOpen], note]);
   if (signature === afterSignature) return;
   afterSignature = signature;
   const head = textNode("h3", "", t("after.board"));
   head.id = "after-board-title";
-  afterReplace($("after-board"), [head, textNode("p", "board-head", [t(afterWent(after) ? "after.board_note_sent" : "after.board_note"), board.memoLine].filter(Boolean).join(" ")),
+  afterReplace($("after-board"), [head, textNode("p", "board-head", [t(note), board.memoLine].filter(Boolean).join(" ")),
     ...board.lanes.map(afterLane)]);
 }
 

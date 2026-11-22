@@ -167,6 +167,8 @@ async function open(browser, { fixture, width = 1440, height = 900, scheme = 'li
     const answer = list[Math.min(api.afterPolls++, list.length - 1)];
     return answer ? request.fulfill({ json: answer }) : request.fulfill({ status: 404, json: { ok: false, error: 'not_found' } });
   });
+  // The delivery job that Send again and Retry start: `api.job` is its state (idle until a check sets it).
+  await context.route(`${origin}/api/delivery/job`, request => request.fulfill({ json: { ok: true, job: api.job || { state: 'idle' } } }));
   await context.addInitScript(({ lang, manual }) => {
     localStorage.setItem('meetontrack-started', '1');
     localStorage.setItem('meeting-copilot-language', lang);
