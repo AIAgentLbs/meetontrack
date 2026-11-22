@@ -201,6 +201,9 @@ class MeetingArchive:
         # A meeting whose lost live analysis is being rebuilt (MEETONTRACK-107) is
         # not sent until the rebuild ends; the server wires its rebuild state in.
         self.analysis_pending: Callable[[str], bool] = lambda meeting_id: False
+        # The memo check (MEETONTRACK-163): the server wires the meeting's plan and the check on ai.choice.
+        self.memo_plan: Callable[[dict], dict | None] = lambda detail: None
+        self.memo_checker: Callable[[dict], dict | None] | None = None
         # meeting_id -> (meeting.json, report.json) versions already found up to date.
         self._history_checked: dict[str, tuple] = {}
         # Recorded at start, before any meeting is checked (MEETONTRACK-118): a lazy first use could
@@ -1180,12 +1183,45 @@ class MeetingArchive:
         except Exception as error:  # The original failure is what the caller reports.
             print(f"report failure marker not saved: {type(error).__name__}", flush=True)
 
+    def _memo_check(self, meeting_id: str, on_request: bool) -> dict | None:
+        """Run the memo check once per meeting, when its final transcript is ready (MEETONTRACK-163).
+
+        Only inside the delivery window: rebuilding an old report never runs AI or binds a plan.
+        Any stored outcome, failed included, is final. A report.json on disk gets the result at
+        once; with none yet, the caller hands it to the first full meta (never a half report).
+        """
+        if self.memo_checker is None or on_request:
+            return None
+        with self.lock:
+            detail = self.report_detail(meeting_id)
+            report = (detail or {}).get("report") or {}
+            if (not detail or "memo_check" in report or report.get("delivery_on_request")
+                    or not self._ready_for_delivery(detail)):
+                return None
+        try:
+            result = self.memo_checker(detail)  # the AI call runs outside the archive lock
+        except Exception as exc:  # noqa: BLE001 - the check never holds the report back
+            print(f"memo check {detail['meeting_id']}: {type(exc).__name__}", flush=True)
+            return None
+        if result is None:
+            return None
+        with self.lock:
+            path = self.reports_root / detail["meeting_id"] / "report.json"
+            stored = _json(path, None)
+            if isinstance(stored, dict):
+                result = stored.setdefault("memo_check", result)
+                _atomic_json(path, stored)
+        return result
+
     def _generate_report(self, meeting_id: str, *, deliver: bool, on_request: bool) -> dict:
+        memo_check = self._memo_check(meeting_id, on_request)
         for attempt in range(3):
             with self.lock:
                 detail = self.report_detail(meeting_id)
                 if detail is None:
                     raise ValueError("Встреча не найдена")
+                if memo_check is not None and isinstance(detail.get("report"), dict):
+                    detail["report"].setdefault("memo_check", memo_check)  # _report_meta keeps it
                 if not detail["transcript"] and not detail["journal"] and not detail["frames"]:
                     raise ValueError("Для этой записи пока нет стенограммы, заметок или кадров")
                 source_signature = self.source_signature(detail)
@@ -2430,6 +2466,37 @@ class MeetingArchive:
         return "".join(rows)
 
     @staticmethod
+    def _memo_check_html(memo_check: dict | None, removed, esc) -> str:
+        """The memo check in the report: answered and open memo questions, statements that differ."""
+        if not isinstance(memo_check, dict) or not memo_check.get("state"):
+            return ""
+        if memo_check["state"] != "done":
+            reasons = {"ai_needs_choice": "ИИ не выбран или не может выполнить сверку",
+                       "timeout": "ИИ не ответил вовремя", "ai_no_answer": "ИИ не дал ответа",
+                       "too_long": "расшифровка слишком длинная для сверки"}
+            return (f'<section id="memo-check"><h2>Сверка с мемо</h2><p class="empty">Сверки с мемо нет: '
+                    f'{esc(reasons.get(memo_check.get("reason"), "ошибка при сверке"))}.</p></section>')
+        removed = set(removed or ())
+
+        def said(item: dict) -> str:
+            moment = _date(str(item.get("at") or ""))
+            where = " · ".join(part for part in (
+                str(item.get("speaker") or ""), moment.astimezone().strftime("%H:%M:%S") if moment else "") if part)
+            return f'<p>«{esc(item.get("quote"))}»</p><small class="provenance">{esc(where)}</small>'
+
+        questions = [item for item in memo_check.get("questions") or [] if f"memo:{item.get('id')}" not in removed]
+        answered = "".join(f'<article class="note"><p><strong>{esc(item.get("text") or item.get("id"))}</strong></p>'
+                           f'{said(item)}</article>' for item in questions if item.get("status") == "answered")
+        open_items = "".join(f'<li>{esc(item.get("text") or item.get("id"))}</li>'
+                             for item in questions if item.get("status") != "answered")
+        differs = "".join(f'<article class="note"><p>В мемо: {esc(item.get("memo"))}</p>{said(item)}</article>'
+                          for item in memo_check.get("differs") or [] if item.get("key") not in removed)
+        body = (f'{"<h3>Отвечено на звонке</h3>" + answered if answered else ""}'
+                f'{"<h3>Осталось без ответа</h3><ul>" + open_items + "</ul>" if open_items else ""}'
+                f'{"<h3>Расходится с мемо</h3>" + differs if differs else ""}')
+        return f'<section id="memo-check"><h2>Сверка с мемо</h2>{body}</section>' if body else ""
+
+    @staticmethod
     def _edited_lines(detail: dict, field: str) -> list[str] | None:
         text = (detail.get("after_edits") or {}).get(field)
         return [line.strip() for line in str(text).splitlines() if line.strip()][:10] if text else None
@@ -2550,6 +2617,10 @@ class MeetingArchive:
             '<li><a href="#followups">Следующие шаги</a></li>',
             '<li><a href="#summary">Краткое резюме</a></li>',
         ]
+        memo_html = self._memo_check_html((detail.get("report") or {}).get("memo_check"),
+                                          (detail.get("after_edits") or {}).get("removed"), esc)
+        if memo_html:
+            toc.append('<li><a href="#memo-check">Сверка с мемо</a></li>')
         if detail.get("participants"):
             toc.append('<li><a href="#participants">Справка о собеседниках</a></li>')
         toc.append('<li><a href="#notes">Заметки и сигналы</a></li>')
@@ -2678,6 +2749,7 @@ h1{{font-size:26pt;line-height:1.1;margin:0 0 8mm;color:#174c3e}} h2{{font-size:
 {'' if not followup_items else '<p class="uncertain">Если срок или ответственный не указаны в пункте, они не были подтверждены автоматически.</p>'}</section>
 <section id="summary" class="opening"><h2>Суть звонка</h2><div class="summary"><ul>{summary_items or '<li>Проверенное краткое резюме пока не сформировано; см. заметки и стенограмму ниже.</li>'}</ul></div>
 <h2>Повестка и темы</h2><ul>{topic_items or '<li>Повестка не зафиксирована; ключевые темы смотрите в резюме.</li>'}</ul></section>
+{memo_html}
 <nav class="toc"><h2>Оглавление</h2><ol>{''.join(toc)}</ol></nav>
 {f'<section id="participants"><h2>Справка о собеседниках</h2>{participants_html}</section>' if participants_html else ''}
 <section id="notes"><h2>Заметки и сигналы</h2>{''.join(notes_sections) or '<p class="empty">Заметок пока нет.</p>'}</section>

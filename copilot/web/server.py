@@ -53,6 +53,7 @@ from meet_participants import meet_active_speaker, meet_participant_labels
 from teams_participants import teams_one_to_one_name, teams_participant_labels
 from first_run import AIReadiness
 from ai_providers import AIChoiceError, AIService, SignIns
+import memo_check
 from fact_check import FactChecks, extraction_rules, fetch_text, parse_claims, strip_claims, verify as verify_fact, with_speakers
 from stt import STTService
 from local_context import LocalContext
@@ -2537,6 +2538,22 @@ ARCHIVE = MeetingArchive(
     event_router=routed_event,
     transcript_annotator=FRAMES.annotate,
 )
+def _archive_plan(detail: dict) -> dict | None:
+    """The meeting's call plan, as the /api/archive route reads it."""
+    return PLANS.snapshot({
+        "meeting_id": detail.get("meeting_id"),
+        "meeting": detail.get("title"),
+        "started_at": detail.get("started_at"),
+        "remote_attendees": detail.get("remote_attendees", []),
+        "meeting_link": detail.get("meeting_link", ""),
+    })
+
+
+# The memo check (MEETONTRACK-163): offline only, on the one AI choice.
+ARCHIVE.memo_plan = _archive_plan
+ARCHIVE.memo_checker = lambda detail: memo_check.check(
+    detail, ARCHIVE.memo_plan(detail),
+    lambda prompt: AI.run("memo_check", prompt, web=False, timeout=memo_check.TIMEOUT).text)
 DELIVERY_RETRY = DeliveryRetry(ARCHIVE)
 GOOGLE_CONTEXT.delivery_settings = ARCHIVE.delivery_settings
 
@@ -3302,13 +3319,7 @@ class Handler(BaseHTTPRequestHandler):
             if detail is None:
                 self.send_error(HTTPStatus.NOT_FOUND)
             else:
-                detail["call_plan"] = PLANS.snapshot({
-                    "meeting_id": detail.get("meeting_id"),
-                    "meeting": detail.get("title"),
-                    "started_at": detail.get("started_at"),
-                    "remote_attendees": detail.get("remote_attendees", []),
-                    "meeting_link": detail.get("meeting_link", ""),
-                })
+                detail["call_plan"] = _archive_plan(detail)
                 detail["analysis_rebuild"] = rebuild_state(str(detail.get("meeting_id") or ""), detail)
                 for frame in detail["frames"]:
                     frame["url"] = f"/api/archive/frame/{frame.get('id', '')}"
