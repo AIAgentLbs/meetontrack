@@ -177,6 +177,9 @@ async function statusAction(button, id) {
 const SHORT_BAR = matchMedia("(max-width: 480px)");
 SHORT_BAR.addEventListener("change", () => renderShell());
 
+// Resume stays disabled for 1.5 s after Stop (P1, Q1).
+const STOP_GUARD_MS = 1500;
+let stopPressedAt = 0;
 function renderStatus(view) {
   if (statusError && statusError.state !== window.appState && !(statusError.until > Date.now())) statusError = null;
   const status = currentStatus();
@@ -186,8 +189,10 @@ function renderStatus(view) {
     status.action = { id: "back", label: t("action.back_to_call"), primary: true };
   }
   if (statusError?.action) status.action = { id: statusError.action, label: t(`action.${statusError.action}`), primary: true };
-  // The feed's countdown is hidden by a question or its answer: the bar keeps the time left beside Resume (P4).
-  if (status.resume && !callCountdownShown && view === "call") {
+  // The feed's countdown is not on screen (a question or its answer replaced it, a panel covers the feed, another
+  // view is open): the bar keeps the time left beside Resume (P4, Q2).
+  const countdownSeen = callCountdownShown && view === "call" && $("call-slot").checkVisibility();
+  if (status.resume && !countdownSeen) {
     status.text += ` · ${t("status.left", { n: Math.max(0, Math.ceil((Date.parse(status.until) - Date.now()) / 1000)) })}`;
   }
   const text = $("call-status-text");
@@ -219,7 +224,13 @@ function renderStatus(view) {
   stop.dataset.mode = status.resume ? "resume" : "stop";
   stop.setAttribute("aria-label", t(status.resume ? "action.resume" : "action.stop"));
   stop.hidden = !status.resume && (!isLive(window.appState) || status.kind === "stopped");
-  stop.disabled = homeBusy.has("status|stop") || homeBusy.has("status|resume"); // across the mode change too (P1)
+  // Disabled across the mode change too (P1), and visibly so as Resume for 1.5 s after Stop: a double-click across
+  // the state refresh never resumes (Q1).
+  const guard = status.resume ? stopPressedAt + STOP_GUARD_MS - Date.now() : 0;
+  stop.disabled = homeBusy.has("status|stop") || homeBusy.has("status|resume") || guard > 0;
+  if (stop.disabled) stop.setAttribute("aria-disabled", "true");
+  else stop.removeAttribute("aria-disabled");
+  if (guard > 0) setTimeout(renderShell, guard);
   // R34: the bar owns a call that is not being recorded, and How to fix sits beside its button.
   $("call-status-help").hidden = status.kind !== "not_recording";
   $("menu-notes").hidden = view === "home";
@@ -436,12 +447,8 @@ $("call-status-action").addEventListener("click", event => {
   } catch {}
   renderShell();
 });
-// For 1.5 s after Stop the button ignores clicks: a double-click across the state refresh never resumes (P1).
-const STOP_GUARD_MS = 1500;
-let stopPressedAt = 0;
 $("call-stop").addEventListener("click", event => {
   const resume = event.currentTarget.dataset.mode === "resume";
-  if (resume && Date.now() - stopPressedAt < STOP_GUARD_MS) return;
   if (!resume) stopPressedAt = Date.now();
   statusAction(event.currentTarget, resume ? "resume" : "stop");
 });

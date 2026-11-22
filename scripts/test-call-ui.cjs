@@ -1572,6 +1572,30 @@ async function round4(browser) {
     assert.ok(at.q <= at.line * 2.2, `${item}: the question clamped ${at.q} / ${at.line}`);
     await page.context().close();
   }
+  // Q1: during the 1.5 s guard after Stop, Resume is visibly disabled, never an enabled button that ignores clicks.
+  {
+    const page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru' });
+    await page.click('#call-stop');
+    page.api.fixture.state.recording_control.stopping = { meeting_id: 'm1', stopped_at: new Date().toISOString(),
+      until: new Date(Date.now() + 20000).toISOString() };
+    await refresh(page);
+    const state = () => page.$eval('#call-stop', node => [node.dataset.mode, node.disabled, node.getAttribute('aria-disabled')]);
+    assert.deepEqual(await state(), ['resume', true, 'true'], 'disabled while guarded');
+    await page.waitForFunction(() => !document.getElementById('call-stop').disabled, null, { timeout: 3000 });
+    assert.deepEqual(await state(), ['resume', false, null], 'enabled after the guard');
+    await page.context().close();
+  }
+  // Q2: the bar keeps the time left whenever Resume is offered and the feed's countdown is not on screen: Chat and Notes
+  // over Call, and Home.
+  for (const away of ['chat', 'notes', 'home']) {
+    const page = await callPage(browser, 'stopped', { lang: 'ru', data: 'ru' });
+    assert.match(await text(page, '#call-status-text'), /^Остановлено \d\d:\d\d$/);
+    if (away === 'home') await page.click('#nav-home');
+    else await page.evaluate(panel => openCallPanel(panel), away);
+    await page.waitForFunction(() => / · еще \d+\u00a0сек$/.test(document.getElementById('call-status-text').textContent), null, { timeout: 2000 })
+      .catch(async () => assert.fail(`${away}: ${await text(page, '#call-status-text')}`));
+    await page.context().close();
+  }
   // P2: an older recorder that does not know sessions is never sent a bare verb; the bar asks to update it, on the
   // press and while the pending stop keeps failing.
   for (const lang of ['ru', 'en']) {
