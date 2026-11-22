@@ -44,6 +44,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     // The first-run guide has been seen: it opens over the call and would cover it.
     await page.addInitScript(() => localStorage.setItem('meetontrack-started', '1'));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.evaluate(() => openCallPanel('board'));
     const strip = page.locator('#call-board .board-column.facts');
     await strip.locator('.fact-row').first().waitFor();
     assert.equal(await page.locator('#fact-strip').count(), 0, 'no separate strip above the tabs');

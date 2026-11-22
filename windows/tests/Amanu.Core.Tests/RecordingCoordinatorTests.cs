@@ -68,6 +68,69 @@ public sealed class RecordingCoordinatorTests
     }
 
     [Fact]
+    public async Task A_session_command_checks_the_session_under_the_gate()
+    {
+        // M1: the session check and the action are one step; nothing can start or stop between them.
+        using var root = new TemporaryDirectory();
+        var capture = new InspectableCapture();
+        var coordinator = Coordinator(root.Path, capture);
+        await coordinator.StartManualAsync(Started);
+        Task? racing = null;
+
+        var answer = await coordinator.CommandAsync("pause", Started, () =>
+        {
+            racing = coordinator.StopAsync(Started.AddMinutes(1), "manual");
+            Assert.False(racing.IsCompleted);
+            return true;
+        });
+
+        Assert.Equal(new SessionCommand(Accepted: true, Relisten: false), answer);
+        await racing!;
+        // P7: the order the capture saw, not state read after the gate is released (the queued stop may run first).
+        Assert.Equal(new[] { "pause", "stop" }, capture.Events);
+        Assert.False(coordinator.State.IsRecording);
+    }
+
+    [Fact]
+    public async Task A_command_for_another_session_does_nothing()
+    {
+        using var root = new TemporaryDirectory();
+        var capture = new InspectableCapture();
+        var coordinator = Coordinator(root.Path, capture);
+        await coordinator.StartManualAsync(Started);
+
+        foreach (var verb in new[] { "stop", "pause", "resume", "relisten" })
+            Assert.False((await coordinator.CommandAsync(verb, Started, () => false)).Accepted);
+
+        Assert.True(coordinator.State.IsRecording);
+        Assert.False(coordinator.State.IsPaused);
+        Assert.False(capture.Stopped);
+    }
+
+    [Fact]
+    public async Task A_command_reads_the_pause_state_under_the_gate()
+    {
+        using var root = new TemporaryDirectory();
+        var capture = new InspectableCapture();
+        var coordinator = Coordinator(root.Path, capture);
+        await coordinator.StartManualAsync(Started);
+
+        Assert.Equal(new SessionCommand(true, false), await coordinator.CommandAsync("pause", Started, () => true));
+        Assert.Equal(new SessionCommand(true, false), await coordinator.CommandAsync("pause", Started, () => true));
+        Assert.True(coordinator.State.IsPaused);
+        Assert.Equal(new SessionCommand(true, false), await coordinator.CommandAsync("relisten", Started, () => true));
+        Assert.True(coordinator.State.IsPaused);
+        Assert.Equal(new SessionCommand(true, true), await coordinator.CommandAsync("resume", Started, () => true));
+        Assert.False(coordinator.State.IsPaused);
+        Assert.False(capture.Paused);
+
+        Assert.Equal(new SessionCommand(true, false), await coordinator.CommandAsync("stop", Started.AddMinutes(2), () => true));
+        Assert.False(coordinator.State.IsRecording);
+        Assert.True(capture.Stopped);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.CommandAsync("stop", Started, () => true));
+    }
+
+    [Fact]
     public async Task Automatic_observations_start_the_matching_process_family()
     {
         using var root = new TemporaryDirectory();
@@ -354,6 +417,7 @@ public sealed class RecordingCoordinatorTests
         public bool Stopped { get; private set; }
         public Exception? StartException { get; init; }
         public bool Paused { get; private set; }
+        public List<string> Events { get; } = new();
 
         public Task StartAsync(
             SessionHandle session,
@@ -374,6 +438,7 @@ public sealed class RecordingCoordinatorTests
         public async Task<CaptureStopResult> StopAsync(CancellationToken cancellationToken)
         {
             if (StopGate is not null) await StopGate.Task;
+            lock (Events) Events.Add("stop");
             Stopped = true;
             return new CaptureStopResult(0, 0);
         }
@@ -381,6 +446,7 @@ public sealed class RecordingCoordinatorTests
         public Task SetPausedAsync(bool paused, CancellationToken cancellationToken)
         {
             Paused = paused;
+            lock (Events) Events.Add(paused ? "pause" : "resume");
             return Task.CompletedTask;
         }
 

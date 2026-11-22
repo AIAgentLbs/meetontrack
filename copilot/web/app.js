@@ -138,6 +138,72 @@ const translations = {
     "home.empty_text_narrow": "Прошедшие звонки - в меню.",
     "home.load_failed_title": "Не удалось загрузить звонки",
     "home.load_failed_text": "Попробуем снова через минуту или нажмите Повторить.",
+    "call.ask": "Спросите",
+    "call.say": "Скажите",
+    "call.clarify": "Уточните",
+    "call.asks": "{name} спрашивает",
+    "call.asks_plain": "Собеседник спрашивает",
+    "call.answer": "Ответьте",
+    "call.own": "Ответ на ваш вопрос",
+    "call.just_now": "только что",
+    "call.min_ago": "{n}\u00a0мин назад",
+    "call.for_sec": "{n}\u00a0сек",
+    "call.for_min": "{n}\u00a0мин",
+    "call.from_memo": "Из подготовки, вопрос {n}",
+    "call.source": "Источник: {text}",
+    "call.said": "{name}: {quote}",
+    "call.per": "По {source}",
+    "call.board_details": "Источник",
+    "call.where": "Откуда это",
+    "call.where_hide": "Свернуть",
+    "call.heard_wait": "Готовлю ответ, обычно это несколько секунд.",
+    "call.heard_later": "Ответ появится позже: первые минуты автоматической записи ИИ не разбирает.",
+    "call.waiting_heard": "Слушаю разговор. Подсказка появится здесь, когда будет что сказать или спросить.",
+    "call.waiting": "Запись идет. Подсказка появится здесь, когда будет что сказать или спросить.",
+    "call.stopped": "Запись остановлена.",
+    "call.saved": "Запись сохранена.",
+    "call.stopped_until": "Через {time} можно будет открыть итоги, до тех пор запись можно продолжить.",
+    "call.open_results": "Открыть итоги звонка",
+    "call.board_mine": "Спросить у клиента",
+    "call.board_incoming": "Вопросы к вам",
+    "call.board_empty_incoming": "Здесь появятся вопросы собеседника из расшифровки.",
+    "call.transcript_empty": "Жду расшифровку",
+    "call.transcript_failed": "Не удалось обновить расшифровку",
+    "call.ask_waiting": "Один вопрос уже ждет ответа.",
+    "call.ask_changed": "Вопрос не отправлен: звонок сменился.",
+    "call.return_question": "Вернуть вопрос",
+    "call.no_source": "Без источника - проверьте, прежде чем обещать",
+    "call.stop_pending": "Запись на паузе. Подсказок по этому звонку больше не будет.",
+    "call.waiting_help": "Свой вопрос можно задать внизу. Весь разговор текстом в «Расшифровке», вопросы и риски на «Доске».",
+    "call.paused": "Подсказки на паузе: ИИ не ответил.",
+    "call.paused_retry": "Запись идет, следующая попытка через {n}\u00a0мин.",
+    "call.paused_next": "Запись идет, следующая попытка будет со следующим анализом.",
+    "call.other_lost": "Собеседника не слышно {time}",
+    "call.other_lost_now": "Собеседника не слышно",
+    "call.other_lost_text": "Вас слышно. Когда звук вернется, подсказки пойдут снова.",
+    "call.you_lost": "Вас не слышно {time}",
+    "call.you_lost_now": "Вас не слышно",
+    "call.you_lost_text": "Собеседника слышно. Ваши слова не попадут в расшифровку, пока микрофон не заработает.",
+    "action.sound_output": "Выбрать, откуда слушать звонок",
+    "call.earlier": "Прошлые подсказки ({n})",
+    "call.earlier_hide": "Скрыть прошлые подсказки",
+    "call.transcript": "Расшифровка",
+    "call.board": "Доска",
+    "call.board_note": "вопросы, риски и проверка фактов",
+    "call.transcript_note": "весь разговор текстом",
+    "call.more": "Еще",
+    "call.ask_placeholder": "Спросить про звонок",
+    "call.ask_label": "Вопрос про этот звонок",
+    "call.send": "Отправить",
+    "call.open_chat": "Все вопросы и ответы",
+    "call.back": "Вернуться к звонку",
+    "call.check_ai": "Проверить ИИ в настройках",
+    "call.you": "Вы",
+    "call.other": "Собеседник",
+    "call.heard": "слышно",
+    "call.not_heard": "не слышно",
+    "call.checking": "проверяю",
+    "call.last_phrase": "{who}: {text}",
     "meeting.connecting": "Подключение к записи...",
     "status.checking": "Проверка",
     "shell.home": "Главная",
@@ -179,6 +245,18 @@ const translations = {
     "action.open_call_audio": "Открыть настройки записи звука",
     "action.open_recorder": "Открыть программу записи",
     "action.how_to_fix": "Как исправить",
+    "action.stop": "Остановить запись",
+    "action.stop_short": "Остановить",
+    "action.resume": "Продолжить запись",
+    "action.resume_short": "Продолжить",
+    "status.stopped": "Остановлено {time}",
+    "status.stopped_final": "Запись остановлена.",
+    "status.left": "еще {n}\u00a0сек",
+    "status.error.meeting_changed": "Звонок уже сменился, обновите страницу",
+    "status.error.too_late": "Запись уже остановлена",
+    "status.error.stop_failed": "Запись не остановилась, откройте программу записи",
+    "status.error.recorder_outdated": "Запись не остановилась. Обновите программу записи",
+    "status.error.resume_failed": "Запись не продолжилась, откройте программу записи",
     "language.label": "Язык интерфейса",
     "aria.transcript_view": "Вид левой панели",
     "aria.copilot_view": "Режим правой панели",
@@ -187,9 +265,9 @@ const translations = {
     "nav.swap_panels": "Поменять панели",
     "common.close": "Закрыть",
     "common.cancel": "Отмена",
-    "transcript.heading": "Ход созвона",
+    "transcript.heading": "Расшифровка",
     "transcript.loading": "Получаю последние реплики",
-    "transcript.tab": "Стенограмма",
+    "transcript.tab": "Расшифровка",
     "transcript.copy": "Копировать диалог",
     "transcript.hide": "Скрыть",
     "transcript.hide_label": "Скрыть расшифровку",
@@ -201,7 +279,7 @@ const translations = {
     "transcript.translation_hint": "Последний перевод: {time}. Новые реплики на английском не переводятся.",
     "transcript.translation_needs_ai": "EN: выберите ИИ для перевода в разделе «Начать работу»",
     "frames.tab": "Кадры",
-    "speakers.open": "Имена",
+    "speakers.open": "Изменить имена",
     "speakers.title": "Участники и реплики",
     "speakers.help": "Имя меняется во всей встрече. Если два голоса слиплись, выберите реплики и назначьте участника.",
     "speakers.rename_title": "Переименовать во всей встрече",
@@ -449,6 +527,72 @@ const translations = {
     "home.empty_text_narrow": "Past calls are in the menu.",
     "home.load_failed_title": "Could not load your calls",
     "home.load_failed_text": "We will try again in a minute, or press Retry.",
+    "call.ask": "Ask",
+    "call.say": "Say",
+    "call.clarify": "Clarify",
+    "call.asks": "{name} asks",
+    "call.asks_plain": "The other side asks",
+    "call.answer": "Answer",
+    "call.own": "Answer to your question",
+    "call.just_now": "just now",
+    "call.min_ago": "{n} min ago",
+    "call.for_sec": "{n}\u00a0sec", // the bar says "sec" too (H1, L3)
+    "call.for_min": "{n} min",
+    "call.from_memo": "From the preparation, question {n}",
+    "call.source": "Source: {text}",
+    "call.said": "{name} said: {quote}",
+    "call.per": "Per {source}",
+    "call.board_details": "Source",
+    "call.where": "Where this comes from",
+    "call.where_hide": "Hide",
+    "call.heard_wait": "The answer is being prepared, usually a few seconds. It will appear here.",
+    "call.heard_later": "The answer comes later: the AI skips the first minutes of an automatic recording.",
+    "call.waiting_heard": "Listening. A hint appears here when there is something to say or ask.",
+    "call.waiting": "Recording. A hint appears here when there is something to say or ask.",
+    "call.stopped": "Recording stopped.",
+    "call.saved": "The recording is saved.",
+    "call.stopped_until": "In {time} you can open the call results, until then you can resume recording.",
+    "call.open_results": "Open the call results",
+    "call.board_mine": "To ask the client",
+    "call.board_incoming": "Asked of you",
+    "call.board_empty_incoming": "Questions the other side asks appear here.",
+    "call.transcript_empty": "Waiting for the transcript",
+    "call.transcript_failed": "Could not refresh the transcript",
+    "call.ask_waiting": "One question is already waiting for its answer.",
+    "call.ask_changed": "The question was not sent: the call changed.",
+    "call.return_question": "Bring the question back",
+    "call.no_source": "No source - check before you promise",
+    "call.stop_pending": "The recording is paused. No more hints for this call.",
+    "call.waiting_help": "You can ask your own question below. The whole conversation is in Transcript, questions and risks are on the Board.",
+    "call.paused": "Hints paused: the AI did not answer.",
+    "call.paused_retry": "Recording continues, next try in {n}\u00a0min.",
+    "call.paused_next": "Recording continues, the next try comes with the next analysis.",
+    "call.other_lost": "The other side has not been heard for {time}",
+    "call.other_lost_now": "The other side is not heard",
+    "call.other_lost_text": "You are heard. Hints on what the other side says come back once their sound does.",
+    "call.you_lost": "You have not been heard for {time}",
+    "call.you_lost_now": "You are not heard",
+    "call.you_lost_text": "The other side is heard. Your words are not transcribed until the microphone is back.",
+    "action.sound_output": "Choose where to listen to the call from",
+    "call.earlier": "Earlier hints ({n})",
+    "call.earlier_hide": "Hide earlier hints",
+    "call.transcript": "Transcript",
+    "call.board": "Board",
+    "call.board_note": "questions, risks and fact checks",
+    "call.transcript_note": "the whole conversation as text",
+    "call.more": "More",
+    "call.ask_placeholder": "Ask about this call",
+    "call.ask_label": "A question about this call",
+    "call.send": "Send",
+    "call.open_chat": "All questions and answers",
+    "call.back": "Back to the call",
+    "call.check_ai": "Check the AI in settings",
+    "call.you": "You",
+    "call.other": "Other side",
+    "call.heard": "heard",
+    "call.not_heard": "not heard",
+    "call.checking": "checking",
+    "call.last_phrase": "{who}: {text}",
     "meeting.connecting": "Connecting to the recording...",
     "status.checking": "Checking",
     "shell.home": "Home",
@@ -490,6 +634,18 @@ const translations = {
     "action.open_call_audio": "Open audio recording settings",
     "action.open_recorder": "Open the recorder",
     "action.how_to_fix": "How to fix",
+    "action.stop": "Stop recording",
+    "action.stop_short": "Stop",
+    "action.resume": "Resume recording",
+    "action.resume_short": "Resume",
+    "status.stopped": "Stopped {time}",
+    "status.stopped_final": "Recording stopped.",
+    "status.left": "{n}\u00a0sec left",
+    "status.error.meeting_changed": "The call has changed, reload the page",
+    "status.error.too_late": "The recording has already stopped",
+    "status.error.stop_failed": "The recording did not stop, open the recorder",
+    "status.error.recorder_outdated": "The recording did not stop. Update the recorder",
+    "status.error.resume_failed": "The recording did not resume, open the recorder",
     "language.label": "Interface language",
     "aria.transcript_view": "Left pane view",
     "aria.copilot_view": "Right pane view",
@@ -498,7 +654,7 @@ const translations = {
     "nav.swap_panels": "Swap panels",
     "common.close": "Close",
     "common.cancel": "Cancel",
-    "transcript.heading": "Live meeting",
+    "transcript.heading": "Transcript",
     "transcript.loading": "Loading the latest utterances",
     "transcript.tab": "Transcript",
     "transcript.copy": "Copy dialogue",
@@ -512,7 +668,7 @@ const translations = {
     "transcript.translation_hint": "Latest translation: {time}. New English utterances are not translated.",
     "transcript.translation_needs_ai": "EN: choose AI for translation in Getting started",
     "frames.tab": "Frames",
-    "speakers.open": "Names",
+    "speakers.open": "Edit names",
     "speakers.title": "Participants and utterances",
     "speakers.help": "A name changes throughout this meeting. If voices were merged, select utterances and assign a participant.",
     "speakers.rename_title": "Rename throughout the meeting",
@@ -759,6 +915,8 @@ function plainError(error) {
   if (code) {
     const known = translations[uiLanguage][`error.${code}`];
     if (known && (uiLanguage === "ru" || technical(detail))) return known;
+    // A code with no Russian line: the detail is the server's English, so Russian gets the plain AI failure.
+    if (uiLanguage === "ru") return t("error.AI_FAILED");
     return technical(detail) ? t("error.generic") : detail;
   }
   if (!error?.status && ["TypeError", "TimeoutError", "AbortError"].includes(error?.name)) return t("error.unreachable");
@@ -810,6 +968,12 @@ let transcriptSignature = "";
 let renderedMessages = "";
 let requestBusy = false;
 let autoAnalysisPrimed = false;
+let analysisSkipped = null; // the meeting whose last automatic analysis the server skipped as a short automatic recording
+let heardPrimed = ""; // the heard question the last automatic analysis was started for
+// After an urgent request the server skipped (inside its 15 s gap), the time from which the next
+// poll asks again while a heard question still waits, even if the transcript has not changed.
+let urgentRetryAt = 0;
+const URGENT_GAP_MS = 15000;
 let journalSignature = "";
 let journalFilter = "notes";
 let repositoryCatalog = [];
@@ -1571,7 +1735,8 @@ function readableAnswer(text) {
 function speakerLabel(segment) {
   if (segment.speaker_id === "unassigned") return t("speakers.pending");
   if (segment.speaker_identity === "manual") return segment.speaker_label || segment.speaker;
-  if (segment.source === "microphone") return t("speaker.me");
+  // Call says "Вы" for the person everywhere, the heartbeat included (G4).
+  if (segment.source === "microphone") return t(document.body.dataset.view === "call" ? "call.you" : "speaker.me");
   const label = segment.speaker_label || segment.speaker;
   if (label && !/^(Собеседник|Спикер)\s*\d*$/.test(label)) return label;
   // Call audio with no separated voice is everyone else (owner decision 2026-10-21).
@@ -1723,7 +1888,9 @@ function renderTranscript(transcript) {
     elements.liveStatus.lastChild.textContent = t("status.no_fresh");
   }
 
-  const signature = `${transcript.meeting_id}:${transcript.updated_at}:${transcript.segments.length}:${transcript.translation_revision || 0}:${transcript.speaker_revision || 0}`;
+  // In Call the transcript is stamped in elapsed call time, the bar's clock (G1); elsewhere in clock time.
+  const start = document.body.dataset.view === "call" ? callStartIso({ ...window.appState, transcript }) : "";
+  const signature = `${transcript.meeting_id}:${transcript.updated_at}:${transcript.segments.length}:${transcript.translation_revision || 0}:${transcript.speaker_revision || 0}:${start}`;
   if (signature === transcriptSignature) return;
   transcriptSignature = signature;
 
@@ -1746,7 +1913,7 @@ function renderTranscript(transcript) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.append(
-      textNode("strong", "", transcript.error ? t("transcript.failed") : t("transcript.empty_title")),
+      textNode("strong", "", transcript.error ? t(start ? "call.transcript_failed" : "transcript.failed") : t(start ? "call.transcript_empty" : "transcript.empty_title")),
       textNode(
         "span",
         "",
@@ -1787,7 +1954,7 @@ function renderTranscript(transcript) {
       }
       if (segment.spans_boundary) body.append(textNode("small", "boundary-provenance", t("meeting.crossing")));
       if (segment.boundary_unassigned) body.append(textNode("small", "boundary-provenance", t("meeting.unassigned")));
-      speaker.append(textNode("time", "", localTime(segment.timestamp)));
+      speaker.append(textNode("time", "", (start && callClock(start, Date.parse(segment.timestamp))) || localTime(segment.timestamp)));
       row.append(speaker, body);
       fragment.append(row);
     }
@@ -2276,9 +2443,13 @@ function renderCallPlan(plan) {
   }
 }
 
+// "0 открыто · 2 закрыто" -> "2 закрыто": every counter template puts the number first.
+const nonZero = (text) => text.split(" · ").filter((part) => !/^0\s/u.test(part)).join(" · ");
+
 function renderCallBoard(plan, journal) {
   currentJournal = journal;
-  const signature = `${uiLanguage}:${[...boardStatuses]}:${activeTranscript?.meeting_id}:${JSON.stringify(plan)}:${JSON.stringify(journal)}`;
+  const call = document.body.dataset.view === "call";
+  const signature = `${call}:${uiLanguage}:${[...boardStatuses]}:${activeTranscript?.meeting_id}:${JSON.stringify(plan)}:${JSON.stringify(journal)}`;
   if (signature === callBoardSignature) return;
   callBoardSignature = signature;
   const scrolls = Object.fromEntries([...elements.callBoard.querySelectorAll("[data-board-list]")]
@@ -2286,10 +2457,22 @@ function renderCallBoard(plan, journal) {
   const entries = (plan?.items || []).map((item) => ({ ...item, origin: "plan",
     lane: item.kind === "question" ? "mine" : "risks", category: item.kind === "objection" ? "OBJECTION" : "RISK" }));
   for (const item of journal) {
-    const lane = item.category === "ASK" ? "mine"
+    // A contradiction is a clarification to ask the client, never a risk (L5).
+    const lane = ["ASK", "CONTRADICTION"].includes(item.category) ? "mine"
       : ["INCOMING_QUESTION", "OPEN_QUESTION"].includes(item.category) ? "incoming"
-      : ["RISK", "OBJECTION", "CONTRADICTION"].includes(item.category) ? "risks" : "";
+      : ["RISK", "OBJECTION"].includes(item.category) ? "risks" : "";
     if (lane) entries.push({ ...item, origin: "journal", lane, status: item.status || "open" });
+  }
+  // In Call the board has no status filter, and a live hint that repeats a prepared item of its own lane shows once
+  // (C1); a question put to the user is never dropped for one prepared for the client (J6).
+  const statuses = call ? new Set(BOARD_STATUSES) : boardStatuses;
+  if (call) {
+    const prepared = entries.filter((item) => item.origin === "plan");
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const item = entries[index];
+      if (item.origin === "journal" && prepared.some((plan) => plan.lane === item.lane
+        && callSame(callLine(plan.text).rest, callLine(item.text).rest))) entries.splice(index, 1);
+    }
   }
   const fragment = document.createDocumentFragment();
   const summary = document.createElement("div");
@@ -2340,16 +2523,24 @@ function renderCallBoard(plan, journal) {
     section.className = `board-column ${lane}`;
     const header = document.createElement("header");
     header.className = "board-column-header";
-    header.append(textNode("h3", "", t(`board.${lane}`)), textNode("p", "", t("board.count", {
+    // In Call the headings are plain words and a zero counter is not shown (G4).
+    const count = t("board.count", {
       open: group.filter((item) => item.status !== "resolved").length,
       closed: group.filter((item) => item.status === "resolved").length,
-    })));
+    });
+    header.append(textNode("h3", "", t(call && lane !== "risks" ? `call.board_${lane}` : `board.${lane}`)));
+    header.append(textNode("p", "", call ? nonZero(count) : count));
     const list = document.createElement("div");
     list.className = "board-list";
     list.dataset.boardList = lane;
-    const shown = group.filter((item) => boardStatuses.has(item.status));
-    if (!group.length) list.append(textNode("p", "board-empty", t(`board.empty.${lane}`)));
-    else if (!boardStatuses.size) list.append(textNode("p", "board-empty", t("board.filter_none")));
+    const shown = group.filter((item) => statuses.has(item.status));
+    const subtypeOf = (item) => (lane === "incoming" ? (item.category === "INCOMING_QUESTION" ? "to_me" : "general")
+      : lane === "risks" ? (item.category === "OBJECTION" ? "objection" : "risk")
+      : item.origin === "plan" ? "prepared" : "live");
+    // In Call a tag every card of the column shares says nothing, so it is left out (G4).
+    const sameTag = call && new Set(group.map(subtypeOf)).size === 1;
+    if (!group.length) list.append(textNode("p", "board-empty", t(call && lane === "incoming" ? "call.board_empty_incoming" : `board.empty.${lane}`)));
+    else if (!statuses.size) list.append(textNode("p", "board-empty", t("board.filter_none")));
     else if (!shown.length) list.append(textNode("p", "board-empty", t("board.filter_empty")));
     for (const item of shown) {
       const card = document.createElement("article");
@@ -2364,10 +2555,7 @@ function renderCallBoard(plan, journal) {
       heading.append(textNode("p", "", mainText));
       const controls = document.createElement("div");
       controls.className = "board-item-controls";
-      const subtype = lane === "incoming" ? (item.category === "INCOMING_QUESTION" ? "to_me" : "general")
-        : lane === "risks" ? (item.category === "OBJECTION" ? "objection" : "risk")
-        : item.origin === "plan" ? "prepared" : "live";
-      controls.append(textNode("span", "board-item-type", t(`board.${subtype}`)));
+      if (!sameTag) controls.append(textNode("span", "board-item-type", t(`board.${subtypeOf(item)}`)));
       if (item.source === "meeting_chat") controls.append(textNode("span", "board-item-type", uiLanguage === "ru" ? "Из чата аудитории" : "Audience chat"));
       const select = document.createElement("select");
       select.setAttribute("aria-label", `${mainText}: ${t("board.tab")}`);
@@ -2397,7 +2585,10 @@ function renderCallBoard(plan, journal) {
       const detail = document.createElement("details");
       const key = `${activeTranscript?.meeting_id}:${item.origin}:${item.id}`;
       detail.open = boardExpanded.has(key);
-      detail.append(textNode("summary", "", t("board.details")), textNode("p", "", readableAnswer(item.text)));
+      // In Call the detail says "Источник", the feed's one word for it, never "Основание" (G5).
+      const body = readableAnswer(item.text);
+      detail.append(textNode("summary", "", t(call ? "call.where" : "board.details")), // one name across Call (H2)
+        textNode("p", "", call ? body.replace(/(?:Основание|Evidence):/gu, `${t("call.board_details")}:`) : body));
       if (item.evidence) detail.append(textNode("p", "board-evidence", t("plan.evidence", { quote: item.evidence })));
       if (item.origin === "plan" && plan.source_label) detail.append(textNode("small", "", plan.source_label));
       if (item.speaker) detail.append(textNode("small", "", item.speaker));
@@ -3227,15 +3418,16 @@ factColumn.className = "board-column facts";
 
 function renderFactChecks(state) {
   const items = state?.items || [];
-  const signature = `${uiLanguage}:${factsExpanded}:${activeTranscript?.meeting_id || ""}:${JSON.stringify(state || {})}`;
+  const call = document.body.dataset.view === "call";
+  const signature = `${call}:${uiLanguage}:${factsExpanded}:${activeTranscript?.meeting_id || ""}:${JSON.stringify(state || {})}`;
   if (signature === factSignature) return;
   factSignature = signature;
   const header = document.createElement("header");
   header.className = "board-column-header";
   const count = (status) => items.filter((item) => item.status === status).length;
-  header.append(textNode("h3", "", t("fact.title")), textNode("p", "", t("fact.count", {
-    confirmed: count("confirmed"), unclear: count("unclear"), refuted: count("refuted"),
-  })));
+  const counts = t("fact.count", { confirmed: count("confirmed"), unclear: count("unclear"), refuted: count("refuted") });
+  header.append(textNode("h3", "", t("fact.title")));
+  header.append(textNode("p", "", call ? nonZero(counts) : counts));
   const list = document.createElement("div");
   list.className = "board-list";
   list.dataset.boardList = "facts";
@@ -3283,7 +3475,6 @@ async function state() {
     window.appState = data;
     const project = data.project || {};
     window.renderReleaseUpdates(data.updates || {});
-    window.renderGettingStartedStatus?.(data);
     renderDeliveryHealth(data.delivery || {});
     const scopedRepositories = project.repositories || [];
     const count = repositoryCountLabel(scopedRepositories.length || data.repositories || 0);
@@ -3298,6 +3489,7 @@ async function state() {
     renderTranscript(data.transcript);
     renderRecordingHealth(data.recording_health || {});
     window.renderShell?.();
+    window.renderGettingStartedStatus?.(data); // after the shell: the banner depends on the view (getting-started.js)
     updateLibraryMode(data);
     renderFrames(data.frames || []);
     renderFrameStatus(data.frame_capture || {});
@@ -3318,15 +3510,21 @@ async function state() {
       && data.copilot.messages.length === 0
       && data.copilot.analysis?.state === "idle";
     const analysisKey = `${data.transcript.meeting_id}:${data.transcript.status}:${data.transcript.latest_at}:${(data.meeting_chat || []).length}:${(data.meeting_chat || []).at(-1)?.id || ""}`;
+    const urgentRetryDue = Boolean(data.heard_question) && urgentRetryAt > 0 && Date.now() >= urgentRetryAt;
+    // A question offered as heard for the first time asks at once, also when the transcript key did not change
+    // (a provisional line turned final with the same start time, B4).
+    const heard = data.heard_question;
+    const heardKey = heard ? `${heard.at}|${heard.text}` : "";
     if (
       (data.transcript.live || finishedWithoutAnalysis) &&
       (data.transcript.latest_at || data.meeting_chat?.length) &&
-      analysisKey !== autoAnalysisPrimed &&
+      (analysisKey !== autoAnalysisPrimed || urgentRetryDue || (heardKey && heardKey !== heardPrimed)) &&
       !requestBusy &&
       !data.copilot.busy
     ) {
       autoAnalysisPrimed = analysisKey;
-      void analyze(finishedWithoutAnalysis);
+      heardPrimed = heardKey;
+      void analyze(finishedWithoutAnalysis, Boolean(data.heard_question));
     }
   } catch (error) {
     // The poll runs every 2.5 s, so one missed answer fixes itself. Say something only when it keeps failing.
@@ -3361,11 +3559,15 @@ async function post(path, payload) {
   return data;
 }
 
-async function ask(question) {
+// True when the question went out; false when it did not (empty, or another request holds the line):
+// the Call view's ask field keeps its text then (F4).
+// meeting: the call a queued Call question was asked in; the server refuses it for another one (M4).
+function ask(question, meeting) {
   const clean = question.trim();
-  if (!clean || requestBusy) return;
+  if (!clean || requestBusy) return false;
   requestBusy = true;
-  elements.question.value = "";
+  // Asked from the Call view's own field: a note being written in the composer stays.
+  if (elements.question.value.trim() === clean) elements.question.value = "";
   elements.help.textContent = t("help.ai");
   elements.help.classList.remove("error");
   const pending = document.createElement("article");
@@ -3378,11 +3580,19 @@ async function ask(question) {
   elements.chat.scrollTop = elements.chat.scrollHeight;
   chatPinnedToLatest = true;
   updateChatLatestButton();
+  void sendQuestion(clean, meeting);
+  return true;
+}
+window.callAsk = ask;
+
+async function sendQuestion(clean, meeting) {
   try {
-    await post("/api/chat", { question: clean });
+    await post("/api/chat", { question: clean, ...(meeting ? { meeting_id: meeting } : {}) });
   } catch (error) {
-    elements.help.textContent = plainError(error);
+    const changed = error?.message === "meeting_changed";
+    elements.help.textContent = changed ? t("call.ask_changed") : plainError(error);
     elements.help.classList.add("error");
+    window.callAskFailed?.(clean, plainError(error), changed);
   } finally {
     requestBusy = false;
     await state();
@@ -3412,13 +3622,18 @@ async function saveNote() {
   }
 }
 
-async function analyze(force) {
+async function analyze(force, urgent = false) {
   if (requestBusy) return;
   requestBusy = true;
+  urgentRetryAt = 0;
   elements.help.textContent = force ? t("analysis.searching") : t("analysis.checking");
   elements.help.classList.remove("error");
   try {
-    await post("/api/analyze", { force });
+    const result = await post("/api/analyze", { force, urgent });
+    // The start of an automatic recording is not analysed: the Call view says so instead of promising an answer,
+    // and a waiting question is asked again after the gap like any skip (B5).
+    analysisSkipped = result.reason === "short_automatic_recording" ? window.appState?.transcript?.meeting_id || "" : null;
+    if (urgent && result.skipped && (!result.reason || analysisSkipped !== null)) urgentRetryAt = Date.now() + URGENT_GAP_MS;
   } catch (error) {
     elements.help.textContent = plainError(error);
     elements.help.classList.add("error");

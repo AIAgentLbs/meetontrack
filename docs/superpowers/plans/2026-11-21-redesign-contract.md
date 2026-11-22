@@ -11,7 +11,7 @@ or drop one listed here without changing this file in the same commit.
 |---|---|---|
 | `2026-11-21-redesign-1-chrome-home.md` | MEETONTRACK-165, 161 | page shell, view switching, Home, permissions, "do not record" |
 | `2026-11-21-redesign-2-memo-writer.md` | MEETONTRACK-164 | event ids, external-meeting detection, the memo loop, the memo block of the agenda |
-| `2026-11-21-redesign-3-call.md` (written after plan 1 lands) | MEETONTRACK-162 | Call view, stop and resume, heartbeat, hint selection |
+| `2026-11-21-redesign-3-call.md` | MEETONTRACK-162 | Call view, stop and resume (the `record pause` verb in both recorders), heartbeat, hint selection, the heard question |
 | `2026-11-21-redesign-4-after.md` (written after plan 3 lands) | MEETONTRACK-163 | After view, hold and send, edits, board removal, memo check, participants |
 
 Branch: `redesign-call-flow`, one git worktree per plan in progress, merged
@@ -37,12 +37,9 @@ its critique. A release is a separate owner decision.
 - Tests: `python3 -m unittest discover -s copilot/web -p 'test_*.py'` stays
   green. Browser checks are Playwright `.cjs` scripts in `scripts/`, run with
   `node`, against a fake local API, like the existing `scripts/test-*-ui.cjs`.
-- Commit messages are in English, reference the issue, and end with:
-
-  ```
-  Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
-  Claude-Session: https://claude.ai/code/session_01JUJz1s89rdKHsbrEhg4qCF
-  ```
+- Commit messages are in English, reference the issue, and end with the
+  trailer lines of the session that does the work (`Co-Authored-By` with that
+  session's model, `Claude-Session` with that session's link).
 
 ## Views
 
@@ -118,12 +115,68 @@ existing `plans[]` (`has_memo`), so Home works with either.
 ```
 
 `unknown` means the platform cannot tell; the UI then shows nothing.
-`POST /api/permissions/open` with `{"which": "microphone" | "call_audio"}`
+`POST /api/permissions/open` with `{"which": "microphone" | "call_audio" | "sound_output"}`
 opens the system settings page for that permission.
 
 ## Recording control (plan 3)
 
-`POST /api/recording/stop` and `POST /api/recording/resume`, both returning
-`{"ok": true}` or `{"ok": false, "error": "..."}`. They wrap the recorder's
-existing `record stop` and `record resume` commands the way
-`/api/getting-started/start-recording` wraps `record start`.
+After `record stop` there is nothing to resume, so Stop pauses first and stops
+for good after the undo window. `record resume` unpauses and restarts
+recognition; `record relisten` only restarts recognition of a running,
+unpaused recording. The server's recognition watchdog sends `relisten`, and
+nothing at all while a stop is pending, so only an explicit Resume unpauses
+(fix wave A1). A paused capture publishes `status: "paused"` in the live file
+on both platforms.
+
+- Every command is bound to the recorder's own live session: the live file it
+  writes (`meeting_id` and `started_at`, not finished), read when the command
+  runs. Stop stores that session with the pending stop; Resume and the
+  deferred stop act only while it is still the live one, else they clear the
+  pending stop and act on nothing (Resume answers `meeting_changed`), so a
+  new call that began meanwhile is never muted (fix wave A2).
+- The server passes that session to the recorder: `record pause|resume|stop
+  --session <meeting_id>`. The recorder compares it with its own live session
+  (macOS on the main actor, Windows against the exporter's id) and refuses a
+  mismatch with exit code 3, which the server reads as "that recording is
+  over". Without `--session` the commands act as before (fix wave J1).
+- `POST /api/recording/stop` with `{"meeting_id": "..."}` pauses the recorder
+  at once (`record pause`) and answers
+  `{"ok": true, "stopped_at": ISO, "until": ISO | null}`; the server sends
+  `record stop` at `until` (`stopped_at` + 30 s). A recorder that cannot pause
+  is stopped at once and `until` is null. A `meeting_id` other than the live
+  one answers 409 `{"ok": false, "error": "meeting_changed"}`.
+- `POST /api/recording/resume` with `{"meeting_id": "..."}` before `until`
+  sends `record resume` and cancels the pending stop, `{"ok": true}`;
+  otherwise 409 `{"ok": false, "error": "too_late"}`. A `meeting_id` other
+  than the live one answers 409 `meeting_changed`, and no recorder command
+  runs.
+- A deferred `record stop` the recorder does not acknowledge stays pending
+  with `failed: n` and is sent again every 5 s; `last_stop` is set only once a
+  stop succeeds. While `failed` is set the bar says the recording did not stop
+  and offers Open the recorder and Stop, which tries the stop at once; Resume
+  answers `too_late` (fix wave A3).
+- A failed recorder command answers 500 `{"ok": false, "error":
+  "stop_failed" | "resume_failed"}`; a failed resume keeps the pending stop.
+  The cleared pending stop is written before `record resume` runs, so a
+  restart never stops a resumed call. A state file that cannot be written
+  never shows OS text: a resume answers `resume_failed` and sends nothing; a
+  stop ends the recording at once (`until` null), since a pending stop a
+  restart would forget leaves the recorder paused.
+- `/api/state` gains `recording_control`:
+  `{"stopping": {"meeting_id", "stopped_at", "until"} | null,
+  "last_stop": {"meeting_id", "stopped_at"} | null}`. Plan 4 reads
+  `last_stop` for "the recording stopped at".
+- A stop with no undo window (a recorder that cannot pause) leaves `stopping`
+  null and sets `last_stop`; the page shows "Recording stopped" from
+  `last_stop` while the recorder still reports the call live.
+- `/api/state` gains `heard_question`: `{"text", "speaker", "at"} | null`, a
+  question from the other side not yet taken up by the analysis.
+- Journal items of category `INCOMING_QUESTION` may carry `reply` (string): a
+  line the person can say back.
+- `POST /api/permissions/open` also accepts `"which": "sound_output"` (the
+  system's sound output settings).
+
+The undo window is 30 s, a builder timing the spec leaves open (spec "Left to
+the builder"); the spec's "10 s" wording is kept with `{n}`. The `record pause`
+verb (plan 3 Task 3) is the minimum native change the spec's own Resume needs,
+despite the spec's non-goal "No native recorder changes".

@@ -429,6 +429,15 @@ public sealed class AmanuRuntime : IAsyncDisposable
 
     public Task TogglePauseAsync() => coordinator.TogglePauseAsync();
 
+    /// <summary>A pipe verb for one session, checked and done under the coordinator's gate (M1).</summary>
+    public async Task<bool> SessionCommandAsync(string verb, string? session)
+    {
+        var done = await coordinator.CommandAsync(verb, DateTimeOffset.Now,
+            () => RecordVerbs.Accepts(session, State.IsRecording ? LiveSessionId : ""));
+        if (done.Relisten) await ResumeRecognitionAsync();
+        return done.Accepted;
+    }
+
     public async Task StopForExitAsync()
     {
         if (State.IsRecording) await coordinator.StopAsync(DateTimeOffset.Now, "quit");
@@ -531,6 +540,9 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public bool IsLocalModelReady(string model) => models.IsReady(model);
     public bool IsLocalModelDownloading(string model) => models.IsDownloading(model);
     public bool LocalRuntimePresent => models.CliPath is not null;
+
+    /// <summary>The meeting_id the live file carries for this recording: what `record --session` names.</summary>
+    public string LiveSessionId => copilotExporter.MeetingId;
     public long? LocalModelBytes(string model) => models.DownloadedBytes(model);
 
     public Task CompleteSetupAsync(CancellationToken cancellationToken = default) =>

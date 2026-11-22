@@ -181,6 +181,8 @@ async function route(context, fixture, origin) {
       return request.fulfill({ json: { ok: true, connected, client_configured: true, account: connected ? 'me@example.com' : '',
         sources: { calendar: connected, gmail: false, drive: false } } });
     }
+    // The guide's speech step reads the engines on open: the server always lists them (none here).
+    if (url.pathname === '/api/stt/options') return request.fulfill({ json: { ok: true, engines: [] } });
     if (url.pathname.startsWith('/api/')) return request.fulfill({ json: { ok: true } });
     const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
     if (file.includes('/') || !/\.(html|js|css)$/.test(file)) return request.abort();

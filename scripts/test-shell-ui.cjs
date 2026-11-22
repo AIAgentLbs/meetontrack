@@ -232,6 +232,50 @@ const errors = [];
       disconnected: ['not_recording', 'Запись не идет: нет свежих данных от программы записи', null],
       disconnectedLive: ['not_recording', 'Запись не идет: нет свежих данных от программы записи', null],
     });
+    // Stop recording (plan 3): the undo window, then the final stop; another call's stop never shows. One stalled
+    // side keeps Recording (its beat and the feed say which side); every track stalled is not recording (F19).
+    const stops = await page.evaluate(() => {
+      const now = Date.parse('2026-11-21T12:00:00Z');
+      const at = seconds => new Date(now + seconds * 1000).toISOString();
+      const call = (control, extra = {}) => ({ transcript: { meeting_id: 'm1', status: 'recording', live: true, started_at: at(-900) },
+        recording_control: { stopping: null, last_stop: null, ...control }, ...extra });
+      const tracks = (...states) => ({ recording_health: { checked_at: now / 1000 - 2, capture: { state: 'stalled', audio_recording: false,
+        tracks: states.map((state, index) => ({ source: index ? 'system' : 'mic', state, last_growth_age_seconds: 40 })) } } });
+      const short = status => [status.kind, status.text, status.action && `${status.action.id}${status.action.primary ? '!' : ''}`];
+      const cases = {
+        stopping: call({ stopping: { meeting_id: 'm1', stopped_at: at(-10), until: at(20) } }),
+        final: call({ last_stop: { meeting_id: 'm1', stopped_at: at(-4) } }),
+        otherLastStop: call({ last_stop: { meeting_id: 'm0', stopped_at: at(-4) } }),
+        otherStopping: call({ stopping: { meeting_id: 'm0', stopped_at: at(-10), until: at(20) } }),
+        // The same id recording again after its final stop (not seen from today's recorders, guarded anyway).
+        startedAfterStop: call({ last_stop: { meeting_id: 'm1', stopped_at: at(-60) } }),
+        startedBeforeStop: call({ last_stop: { meeting_id: 'm1', stopped_at: at(-60) } }),
+        oneStalled: call({}, tracks('recording', 'stalled')),
+        bothStalled: call({}, tracks('stalled', 'stalled')),
+      };
+      cases.startedAfterStop.transcript.started_at = at(-10);
+      cases.startedBeforeStop.transcript.started_at = at(-600);
+      return {
+        ...Object.fromEntries(Object.entries(cases).map(([name, state]) => [name, short(callStatus(state, { meetings: [] }, {}, now))])) };
+    });
+    assert.deepEqual(stops, {
+      startedAfterStop: ['recording', 'Запись', null],
+      // No time of day (G1): the bar's one clock is the call's, frozen at the stop; Resume is the Stop button (N2, N3).
+      startedBeforeStop: ['stopped', 'Запись остановлена.', null],
+      stopping: ['stopped', 'Остановлено 14:50', null],
+      final: ['stopped', 'Запись остановлена.', null],
+      otherLastStop: ['recording', 'Запись', null],
+      otherStopping: ['recording', 'Запись', null],
+      oneStalled: ['recording', 'Запись', null],
+      bothStalled: ['not_recording', 'Запись не идет: звук перестал записываться', null],
+    });
+    assert.deepEqual(await page.evaluate(() => ['status.stopped', 'status.stopped_final', 'action.resume', 'action.stop', 'action.stop_short']
+      .map(key => translations.en[key])), ['Stopped {time}', 'Recording stopped.',
+      'Resume recording', 'Stop recording', 'Stop']);
+    assert.deepEqual(await page.evaluate(() => ['meeting_changed', 'too_late', 'stop_failed', 'resume_failed']
+      .map(code => translations.ru[`status.error.${code}`])), ['Звонок уже сменился, обновите страницу', 'Запись уже остановлена',
+      'Запись не остановилась, откройте программу записи', 'Запись не продолжилась, откройте программу записи']);
+
     assert.deepEqual(await page.evaluate(() => ['status.waiting_manual', 'status.waiting_at_manual'].map(key => translations.en[key])),
       ['Waiting for a call', 'Waiting for the {time} call']);
     // The same reasons exist in English.
@@ -243,9 +287,10 @@ const errors = [];
       workspace: getComputedStyle(document.querySelector('.workspace')).display !== 'none',
       boundaryBar: getComputedStyle(document.querySelector('.meeting-boundary-bar')).display !== 'none',
       home: !document.getElementById('home').hidden,
+      call: !document.getElementById('call').hidden,
     }));
     await page.waitForFunction(() => window.appState && document.body.dataset.view === 'call');
-    assert.deepEqual(await shown(), { view: 'call', workspace: true, boundaryBar: true, home: false });
+    assert.deepEqual(await shown(), { view: 'call', workspace: false, boundaryBar: true, home: false, call: true });
     // In a call the bar says Recording with the accent dot, and has no action in this plan.
     assert.deepEqual(await page.evaluate(() => [document.querySelector('#call-status-text').textContent,
       document.querySelector('#call-status-text').classList.contains('rec'), document.querySelector('#call-status-action').hidden]),
@@ -268,14 +313,15 @@ const errors = [];
     await page.locator('#call-status-action').click();
     await page.waitForFunction(() => document.body.dataset.view === 'call');
 
-    // Top bar: Home, Past calls, one call status and Menu. The delivery pill joins them only with a problem.
+    // Top bar: Home, Past calls, one call status, Stop recording during a call, and Menu. The delivery pill joins
+    // them only with a problem.
     const barControls = () => page.evaluate(() => [...document.querySelectorAll('.topbar button, .topbar .status')]
       .filter(node => !node.closest('#app-menu') && !node.parentElement.closest('.status') && node.checkVisibility())
       .map(node => node.id));
-    assert.deepEqual(await barControls(), ['nav-home', 'archive-button', 'call-status', 'menu-button']);
+    assert.deepEqual(await barControls(), ['nav-home', 'archive-button', 'call-status', 'call-stop', 'menu-button']);
     delivery = problem;
     await page.waitForFunction(() => document.querySelector('#delivery-alert').checkVisibility());
-    assert.deepEqual(await barControls(), ['nav-home', 'archive-button', 'call-status', 'delivery-alert', 'menu-button']);
+    assert.deepEqual(await barControls(), ['nav-home', 'archive-button', 'call-status', 'delivery-alert', 'call-stop', 'menu-button']);
     delivery = healthy;
     await page.waitForFunction(() => !document.querySelector('#delivery-alert').checkVisibility());
     assert.equal(await page.locator('#refresh-button').count(), 0);
@@ -311,17 +357,17 @@ const errors = [];
     await page.mouse.click(700, 600);
     assert.equal(await page.locator('#app-menu').isVisible(), false, 'a click outside closes the menu');
 
-    // Settings open over the call: the workspace does not move.
+    // Settings open over the call: the call view does not move.
     const box = selector => page.locator(selector).boundingBox();
-    const before = await box('.workspace');
+    const before = await box('#call');
     await page.locator('#menu-button').click();
     await page.locator('#settings-open').click();
     await page.locator('#settings-panel').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#app-menu').isVisible(), false, 'choosing an item closes the menu');
-    const [panel, after] = [await box('#settings-panel'), await box('.workspace')];
-    assert.equal(after.y, before.y, 'the workspace top does not move');
+    const [panel, after] = [await box('#settings-panel'), await box('#call')];
+    assert.equal(after.y, before.y, 'the call view top does not move');
     assert.ok(panel.x < after.x + after.width && panel.x + panel.width > after.x
-      && panel.y < after.y + after.height && panel.y + panel.height > after.y, 'settings overlap the workspace');
+      && panel.y < after.y + after.height && panel.y + panel.height > after.y, 'settings overlap the call view');
     await page.locator('#settings-close').click();
     assert.equal(await focused(), 'menu-button');
 
@@ -345,8 +391,10 @@ const errors = [];
     await page.waitForFunction(() => document.querySelector('#updates-notice').hidden);
     await page.locator('#menu-button').click();
     assert.deepEqual(await updateItems(), [false, true]);
-    // In a call the call's own controls are in the menu.
-    assert.equal(await page.locator('#swap-panels').isVisible(), true);
+    // In a call the call's own controls are in the menu. Swap panels and Show transcript are not: the Call view
+    // shows one pane at a time, so they would do nothing there (Task 8).
+    assert.equal(await page.evaluate(() => document.body.dataset.view), 'call');
+    assert.equal(await page.locator('#swap-panels').isVisible(), false);
     assert.equal(await page.locator('#new-meeting-button').isVisible(), true);
     // Notes for the call name it and switch the workspace to the notes tab.
     const notes = page.locator('#menu-notes');
@@ -402,7 +450,7 @@ const errors = [];
 
     live = false;
     await page.waitForFunction(() => document.body.dataset.view === 'home');
-    assert.deepEqual(await shown(), { view: 'home', workspace: false, boundaryBar: false, home: true });
+    assert.deepEqual(await shown(), { view: 'home', workspace: false, boundaryBar: false, home: true, call: false });
     assert.equal(await page.locator('#home-heading').count(), 1);
     // On Home the bar shows the call status, never the transcript's old idle line.
     await page.waitForFunction(() => document.querySelector('#call-status-text').textContent === 'Запись включится сама, когда начнется звонок');

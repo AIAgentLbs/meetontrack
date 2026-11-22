@@ -53,6 +53,9 @@ actor LiveTranscriptionCoordinator {
     private var transcript = LiveTranscriptState()
     private var status: Status = .idle
     private var isRecording = false
+    /// The capture itself is paused (Stop's undo window, or Pause): published as
+    /// `paused` whatever recognition reports, so the server's watchdog sees it.
+    private var capturePaused = false
     private var startedAt = Date()
     private var update: (@Sendable (Snapshot) -> Void)?
     /// Handing the recorders their sinks is deferred until the model is
@@ -100,7 +103,7 @@ actor LiveTranscriptionCoordinator {
             isRecording: isRecording,
             isEnabled: transcript.isEnabled,
             entries: transcript.entries,
-            status: status,
+            status: capturePaused ? .paused : status,
             captureWarnings: captureWarnings,
             recognitionProgressAt: lastConsumedAt.values.max(),
             recoveryAttempts: recoveryPolicy.attempts.count
@@ -119,6 +122,7 @@ actor LiveTranscriptionCoordinator {
         lastSystemSignal = nil
         captureWarnings = []
         isRecording = true
+        capturePaused = false
         recoveryPolicy = RecognitionRecoveryPolicy()
         recoveryExhausted = false
         lastConsumedAt.removeAll()
@@ -149,9 +153,16 @@ actor LiveTranscriptionCoordinator {
         startPipeline(epoch: epoch)
     }
 
+    func setCapturePaused(_ paused: Bool) {
+        guard capturePaused != paused else { return }
+        capturePaused = paused
+        publish()
+    }
+
     func finishRecording() async {
         transcript.finishRecording()
         isRecording = false
+        capturePaused = false
         healthTask?.cancel()
         healthTask = nil
         status = .idle

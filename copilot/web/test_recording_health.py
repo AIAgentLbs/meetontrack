@@ -118,8 +118,27 @@ class RecordingHealthTests(unittest.TestCase):
         self.grow()
         result = self.guard.tick(now=self.now + 5)
         self.assertEqual(result["state"], "recovering")
-        self.runner.assert_called_once_with(["/test/Capture", "record", "resume"],
+        self.runner.assert_called_once_with(["/test/Capture", "record", "relisten"],
             capture_output=True, text=True, timeout=8, check=True)
+
+    def test_guard_never_unpauses_while_a_stop_is_pending(self):
+        # Stop pauses the recorder for the undo window: recovery must not undo it (relisten never unpauses,
+        # and while the stop is pending the guard sends nothing at all).
+        pending = [True]
+        guard = RecognitionGuard(self.health, self.live, self.home / "guard.json", Path("/test/Capture"),
+                                 self.runner, hold=lambda: pending[0])
+        guard.tick(now=self.now)
+        self.grow()
+        guard.tick(now=self.now + 5)
+        self.runner.assert_not_called()
+        with self.assertRaises(ValueError):
+            guard.tick(now=self.now + 6, manual_meeting_id="same-call")
+        self.runner.assert_not_called()
+        pending[0] = False
+        self.grow()
+        guard.tick(now=self.now + 10)
+        self.assertNotIn("resume", [call.args[0][-1] for call in self.runner.call_args_list])
+        self.assertEqual(self.runner.call_args.args[0][-1], "relisten")
 
     def test_quiet_legacy_recording_does_not_restart(self):
         self.payload["status"] = "recording"

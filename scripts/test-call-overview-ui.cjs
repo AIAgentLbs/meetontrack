@@ -22,7 +22,9 @@ const errors = [];
     { id: 'r1', category: 'RISK', source: 'copilot', text: 'Нет бюджета', meeting_id: 't', status: 'open' },
   ];
   const state = () => ({ preferences, journal, frames: [], project: {},
-    transcript: { meeting_id: 't', meeting: 'Test call', status: 'recording', live: true, started_at: '2026-10-22T10:00:00Z', segments: [], speakers: [] },
+    // The After view: tabs and status filters live there; the Call view shows the board's columns only (fix wave C1).
+    transcript: { meeting_id: 't', meeting: 'Test call', status: 'finished', live: false, started_at: '2026-10-22T10:00:00Z',
+      ended_at: new Date().toISOString(), segments: [], speakers: [] },
     recording_health: { capture: { audio_recording: true } },
     meeting_chat: [{ id: 'c1', sender: 'Anna', text: 'Когда релиз?' }],
     copilot: { busy: true, analysis: { state: 'idle' }, messages: [  // busy = an auto-analysis is running
@@ -56,6 +58,7 @@ const errors = [];
       // Other panels get a bare {ok: true} stub here; only errors raised by app.js are this test's business.
       page.on('pageerror', error => /app\.js/.test(error.stack || '') && errors.push(String(error.stack)));
       await page.goto('http://overview-ui.test/');
+      await page.evaluate(() => openCallPanel('board'));
       await page.locator('#call-board .board-item').first().waitFor();
       return page;
     };
@@ -142,6 +145,7 @@ const errors = [];
     preferences = { ...preferences, interface_language: 'en' };
     await page.reload();
     await page.waitForFunction(() => document.documentElement.lang === 'en');
+    await page.evaluate(() => openCallPanel('board'));
     await page.locator('#call-board [data-status-filter="open"]').waitFor();
     assert.equal(await page.locator('#call-board .board-filters').getAttribute('aria-label'), 'Show items with status');
     assert.match(await page.locator('#call-board .board-empty').first().textContent(), /All statuses are hidden/);

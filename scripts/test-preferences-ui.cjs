@@ -24,11 +24,14 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         return route.fulfill({json: {ok: true, preferences: change}});
       }
       if (url.pathname === '/api/state') return route.fulfill({json: {preferences,
-        transcript: {meeting_id: 'test', meeting: 'Test call', status: 'recording', live: true, segments: [], speakers: []},
+        // A call that just ended (After): the two panes side by side. During a live call the transcript is a panel
+        // of its own, which the transcript_hidden preference never empties (test-call-ui.cjs, F12).
+        transcript: {meeting_id: 'test', meeting: 'Test call', status: 'finished', live: false, ended_at: new Date().toISOString(),
+          segments: [], speakers: []},
         copilot: {messages: [], busy: false, analysis: {state: 'idle'}}, journal: [], frames: [], meeting_chat: [], project: {}}});
       if (url.pathname.startsWith('/api/')) return route.fulfill({json: {ok: true}});
       const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-      if (!['index.html', 'app.js', 'styles.css', 'screens.css', 'home.js', 'shell.js'].includes(file)) return route.abort();
+      if (!['index.html', 'app.js', 'styles.css', 'screens.css', 'home.js', 'call.js', 'shell.js'].includes(file)) return route.abort();
       const type = file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html';
       return route.fulfill({contentType: type, body: await fs.readFile(path.join(root, file))});
     });
@@ -53,6 +56,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.waitForFunction(() => document.documentElement.lang === 'en');
     assert.deepEqual(saved, [{interface_language: 'en'}]);
     await page.locator('#settings-close').click();
+
+    // Outside the Call view the panels keep their tab bars (C1 changes the Call view only).
+    assert.equal(await page.locator('#workspace-filters').isVisible(), true, 'the After view keeps the board tab bar');
+    assert.equal(await page.locator('.transcript-tabs').isVisible(), true, 'the After view keeps the transcript tabs');
 
     // Transcript: one click hides it, the other panel takes the width, the menu brings it back.
     assert.equal(await hide.textContent(), 'Hide');

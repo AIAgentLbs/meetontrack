@@ -1,5 +1,6 @@
 :root {
   --bar-h: 60px;
+  --dock-h: 80px;
   --on-accent: #ffffff;
   --danger-soft: #f6e3df;
 }
@@ -23,6 +24,13 @@ body:has(#archive-dialog[data-mode="library"]:not([hidden])) #home { display: no
   background: var(--surface); border-bottom: 1px solid var(--line); font-size: 15px; line-height: 1.5;
 }
 .topbar .spacer { flex: 1; }
+/* Stop (or Resume) and Menu never shrink under their labels: the live status gives way first (N3). */
+.topbar .tools { flex-shrink: 0; }
+/* From 901 px navigation, Stop and Menu sit on the bar's first row, where a one-row bar centers them anyway: a live bar
+   that wraps to three rows keeps Stop where the one-row stopped bar shows Resume (N3). */
+@media (min-width: 901px) {
+  .topbar :is(.navs, .tools) { align-self: flex-start; margin-top: 12px; }
+}
 .navs { display: flex; gap: 16px; }
 .topbar .nav {
   display: inline-flex; align-items: center; min-height: 36px; padding: 0 4px; border: 0; border-radius: 0;
@@ -39,6 +47,41 @@ body:has(#archive-dialog[data-mode="library"]:not([hidden])) #home { display: no
 .topbar .rec { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; }
 .topbar .rec::before { content: ""; flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
 .topbar .status-text.fail { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* A live call: the clock, whether each side is heard and, under them, the last line heard. The bars move only while
+   that side speaks; a side not heard has flat bars and its word in the error colour. */
+.topbar .status:has(> #call-live:not([hidden])) { flex: 1 1 auto; flex-wrap: wrap; row-gap: 0; padding-block: 6px; min-width: 0; }
+#call-live:not([hidden]) { display: contents; }
+.timer { font-variant-numeric: tabular-nums; font-weight: 600; }
+.beats { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 14px; }
+.beat { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.beat b { font-weight: 600; }
+.bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.bars i { width: 3px; height: 9px; background: var(--accent); transform-origin: bottom; }
+.bars i:nth-child(2) { height: 14px; }
+.bars i:nth-child(3) { height: 6px; }
+.bars:not(.quiet) i { animation: call-beat 0.8s ease-in-out infinite alternate; }
+.bars:not(.quiet) i:nth-child(2) { animation-delay: -0.3s; }
+.bars:not(.quiet) i:nth-child(3) { animation-delay: -0.55s; }
+/* At rest every bar has one height, a level meter at rest, never dots. A side not heard says so in words, no bars. */
+.bars.quiet i { height: 8px; opacity: 0.55; }
+.beat.lost .bars { display: none; }
+.beat.lost b { color: var(--danger); }
+@keyframes call-beat { from { transform: scaleY(0.35); } to { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) { .bars i { animation: none !important; } }
+.heard-line { contain: inline-size; flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; line-height: 1.5; color: var(--muted); }
+/* The words cut from the start (right-to-left box, the text isolated left-to-right), the label kept whole (E3). */
+.heard-line:not([hidden]) { display: flex; }
+.heard-line > span:first-child { flex-shrink: 0; white-space: pre; }
+.heard-words { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.heard-words bdi { direction: ltr; }
+#call-stop { flex-shrink: 0; }
+/* Stop and, in the undo window, Resume: one button whose labels (Stop's with its key) share one cell, so it keeps its
+   place and size, and Resume sits in its middle (N3). */
+#call-stop:not([hidden]) { display: inline-grid; align-items: center; justify-items: center; }
+#call-stop > span { grid-row: 1; grid-column: 1; }
+#call-stop[data-mode="resume"] > .stop, #call-stop:not([data-mode="resume"]) > .resume { visibility: hidden; }
+.lbl-s { display: none; }
 /* A narrow window shrinks the status, never Menu or the delivery pill: the pill is a few words and is never cut. */
 .tools { position: relative; display: flex; align-items: center; gap: 16px; min-width: 0; }
 #menu-button { flex-shrink: 0; }
@@ -71,12 +114,12 @@ body:has(#archive-dialog[data-mode="library"]:not([hidden])) #home { display: no
   .topbar:has(#call-status-text.fail):has(#delivery-alert:not([hidden])) .menu { right: 24px; }
 }
 
-.topbar button, .home button {
+.topbar button, .home button, .call button {
   font: inherit; font-size: 14px; font-weight: 600; min-height: 36px; padding: 0 14px;
   border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface-strong); color: var(--text);
   cursor: pointer; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
 }
-.topbar button.primary, .home button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
+.topbar button.primary, .home button.primary, .call button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
 .ql {
   display: inline-flex; align-items: center; min-height: 32px; color: var(--text); font-weight: 500; white-space: nowrap;
   text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong);
@@ -92,14 +135,14 @@ button.primary kbd { color: var(--on-accent); border-color: var(--on-accent); op
   background: var(--surface-strong); border: 1px solid var(--line-strong); border-radius: 8px; padding: 6px;
   font-size: 15px;
 }
-.topbar .menu [role="menuitem"] {
+.menu [role="menuitem"] {
   display: flex; align-items: center; gap: 12px; width: 100%; min-height: 0; padding: 9px 12px;
   border: 0; border-radius: 4px; background: none; color: var(--text); font-size: inherit; font-weight: 400;
   text-align: left; white-space: normal;
 }
-.topbar .menu [role="menuitem"] + [role="menuitem"] { border-top: 1px solid var(--line); border-radius: 0; }
-.topbar .menu [role="menuitem"]:hover:not(:disabled) { background: var(--surface-muted); }
-.topbar .menu [role="menuitem"]:disabled { color: var(--muted); cursor: default; }
+.menu [role="menuitem"] + [role="menuitem"] { border-top: 1px solid var(--line); border-radius: 0; }
+.menu [role="menuitem"]:hover:not(:disabled) { background: var(--surface-muted); }
+.menu [role="menuitem"]:disabled { color: var(--muted); cursor: default; }
 .menu .mi { flex: 1; }
 .menu small { display: block; color: var(--muted); font-size: 13px; }
 .menu hr { border: 0; border-top: 1px solid var(--line-strong); margin: 4px 0; }
@@ -114,6 +157,8 @@ body[data-view="home"] .topbar .menu #settings-open { border-top: 0; }
 #updates-notice:not([hidden]) ~ #menu-updates { display: none; }
 /* Transcript, panel and new-meeting controls belong to a call: Home has none. */
 body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) { display: none; }
+/* The Call view shows one pane at a time (the feed, or one panel): Show transcript and Swap panels have nothing to do. */
+body[data-view="call"] :is(#transcript-show, #swap-panels) { display: none; }
 
 /* Settings and getting started open over the call, under the bar: the workspace never moves. */
 .settings-panel, .getting-started {
@@ -199,10 +244,126 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
 .memo-links { display: flex; flex-wrap: wrap; gap: 4px 20px; }
 .home .memo-links a.ql { font-size: 15px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
 
+/* Call: the call's name, one hint in the feed, the dock with the ask field under it. The transcript and the board
+   open on demand as one pane over the feed, full width under the bar, with Back to the call above it. */
+.call[hidden], .call [hidden], #call-back[hidden] { display: none; }
+/* --say-size: every line to say (a hint, an answer) has one size, 22 px at 400 px wide up to 36 px at 1440 (H4). */
+.call { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--page); line-height: 1.5;
+  --say-size: clamp(22px, 16.62px + 1.3462vw, 36px); }
+.call :where(h2, h3, p, ul) { margin: 0; }
+.call :focus-visible, #call-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.call .col { max-width: 944px; margin: 0 auto; padding: 0 32px; }
+.feed { flex: 1; min-height: 0; overflow-y: auto; padding: 64px 0 40px; }
+/* On a wide screen the hint sits lower in its column, where the eye lands, not against the bar (H4). */
+@media (min-width: 1024px) { .feed { padding-top: max(64px, 16vh); } }
+.call-name { font-size: 14px; font-weight: 500; color: var(--muted); margin-bottom: 24px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.say { font-size: 13px; font-weight: 700; color: var(--accent-strong); margin-bottom: 4px; }
+.hint { font-size: var(--say-size); line-height: 1.35; font-weight: 700; max-width: 26em; text-wrap: balance; overflow-wrap: anywhere; }
+.hint.long { font-size: calc(var(--say-size) * 0.86); }
+/* The question above a line to say: always one clear step smaller than it, 20 px at most (L5). */
+.heard-q { font-size: min(20px, calc(var(--say-size) * 0.8)); line-height: 1.4; font-weight: 400; max-width: 34em; overflow-wrap: anywhere; }
+.heard-q + .hint { margin-top: 12px; }
+/* Answer under a question put to the person: 24 px from the question, close over the reply (N6, critique P2-4). */
+.answer-say { margin-top: 24px; }
+.heard-wait { margin-top: 10px; color: var(--muted); font-size: 14px; }
+/* The answer to your own question: reading size, six lines at most; the whole answer is in the chat. */
+.own-answer { margin-top: 12px; font-size: 18px; line-height: 1.45; max-width: 38em; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; line-clamp: 6; overflow: hidden; }
+/* The source: one line; Where this comes from shows it whole with the rest. */
+.why { margin-top: 12px; color: var(--muted); font-size: 14px; line-height: 1.45; max-width: 76ch;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.why-more { display: grid; gap: 4px; margin-top: 12px; color: var(--muted); font-size: 14px; line-height: 1.45; max-width: 76ch; overflow-wrap: anywhere; }
+.why-more .why-full { color: var(--text); font-size: 16px; }
+/* The panel moves focus to its heading: the ring shows for keyboard focus only. */
+#transcript-heading:focus:not(:focus-visible) { outline: none; }
+.why-acts { display: flex; gap: 24px; margin-top: 2px; font-size: 14px; }
+.call button.ql { min-height: 32px; padding: 0; border: 0; border-radius: 0; background: none; font-size: inherit; font-weight: 500;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
+.waiting { font-size: 18px; line-height: 1.45; max-width: 34em; }
+.problem { margin-bottom: 32px; border: 1px solid var(--line-strong); background: var(--surface-strong); border-radius: 8px; padding: 16px 18px; }
+.problem h3 { font-size: 17px; font-weight: 650; }
+.problem p { margin-top: 4px; color: var(--muted); }
+.problem .actions { margin-top: 10px; }
+.feed-note { margin-top: 24px; color: var(--muted); font-size: 14px; }
+.feed-note button.ql { font-size: 14px; }
+.earlier { margin-top: 40px; border-top: 1px solid var(--line); }
+.earlier ul { padding: 0; list-style: none; }
+.earlier li { padding: 16px 0; border-bottom: 1px solid var(--line); }
+/* An earlier source line wraps: at 400 px a cut would end it on half a word (G5). */
+.earlier .why { margin-top: 4px; white-space: normal; overflow-wrap: anywhere; }
+.earlier-hint { overflow-wrap: anywhere; }
+.earlier-empty { padding: 16px 0; color: var(--muted); }
+.dock { flex-shrink: 0; border-top: 1px solid var(--line); background: var(--surface); padding: 16px 0 20px; position: relative; }
+.dock .col { display: grid; gap: 12px; }
+.dock-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.dock-row .spacer { flex: 1; }
+.ask { display: flex; gap: 8px; }
+.ask-field { flex: 1; min-width: 0; position: relative; display: flex; }
+.ask-field input { flex: 1; min-width: 0; font: inherit; font-size: 15px; min-height: 40px; padding: 0 40px 0 12px;
+  border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-strong); color: var(--text); }
+.ask-field input::placeholder { color: var(--muted); opacity: 1; }
+.ask-field kbd { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); }
+/* More: the dock's row in a narrow window, as a menu opening upwards over the feed. */
+#call-more { display: none; }
+#call-more-menu { top: auto; bottom: calc(100% + 6px); right: 16px; max-height: calc(100dvh - var(--bar-h) - var(--dock-h) - 12px); }
+/* Earlier, scrolled to from More, stops clear of the sticky bar and dock. */
+#call-earlier { scroll-margin: var(--bar-h) 0 var(--dock-h); }
+body[data-view="call"]:not([data-call-panel]) .workspace { display: none; }
+body[data-view="call"][data-call-panel] main.workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+body[data-view="call"][data-call-panel] :is(.transcript-pane, .copilot-pane) { grid-row: 2; grid-column: 1; border: 0; }
+body[data-view="call"][data-call-panel="transcript"] .copilot-pane,
+body[data-view="call"][data-call-panel]:not([data-call-panel="transcript"]) .transcript-pane { display: none; }
+/* The transcript_hidden preference hides the side pane, never the panel asked for (F12); Hide has nothing to hide here. */
+body[data-view="call"][data-call-panel="transcript"] .workspace.transcript-hidden .transcript-pane { display: grid; }
+body[data-view="call"][data-call-panel="transcript"] #transcript-hide { display: none; }
+/* A Call panel shows only what it was opened for (C1): no tab bars, no board chips or per-card status controls, no
+   second status line under the transcript heading. The board's status is the column count; a closed card is muted. */
+body[data-view="call"] :is(#workspace-filters, .call-board .board-summary, .board-item-controls select,
+  .board-item-heading .traffic-light, .transcript-tabs, .pane-header .status-strip, #transcript-meta) { display: none; }
+body[data-view="call"] .board-item.resolved .board-item-heading p { color: var(--muted); }
+/* The correct fact is what to say, not an error: plain text on the Call board (C1, H5). */
+body[data-view="call"] .call-board .fact-body .fact-actual { color: var(--text); }
+/* A panel sits in the feed's column on the feed's one background (G4); the board's four columns may go wider. */
+body[data-view="call"][data-call-panel] main.workspace { background: var(--page); padding-inline: max(0px, calc((100% - 880px) / 2)); }
+body[data-view="call"][data-call-panel="board"] main.workspace { padding-inline: max(0px, calc((100% - 1160px) / 2)); }
+body[data-view="call"][data-call-panel] :is(.transcript-pane, .copilot-pane) { background: none; }
+body[data-view="call"] #speaker-edit { color: var(--text); }
+/* Up to 820 px a Call panel fills the window under the bar and scrolls inside itself: the board stacks its four
+   columns in one scroll, never capped lists with dead space under them, and the page never grows past the window (L1, L4). */
+@media (max-width: 820px) {
+  body[data-view="call"][data-call-panel] main.workspace { flex: 1; min-height: 0; overflow: hidden; }
+  body[data-view="call"][data-call-panel] .workspace-view:has(.call-board:not([hidden])) { max-height: none; min-height: 0; }
+  body[data-view="call"] .call-board .board-list { max-height: none; overflow: visible; }
+  body[data-view="call"] .call-board .board-columns { grid-auto-rows: auto; }
+}
+/* A column with no counter keeps its rule in line with the others. */
+body[data-view="call"] .call-board .board-column-header p { min-height: 1lh; }
+/* The dock is the one ask field over the feed; the Notes and Chat panels keep their composer, for a note or a follow-up (F5). */
+body[data-view="call"]:not([data-call-panel="notes"]):not([data-call-panel="chat"]) .composer-wrap { display: none; }
+#call-back { grid-row: 1; grid-column: 1; justify-self: start; margin: 8px 16px; min-height: 32px; padding: 0; border: 0; border-radius: 0;
+  background: none; color: var(--text); font-size: 15px; font-weight: 500; cursor: pointer; }
+
 /* Window narrower than 1100 px: no key labels in the bar; the memo button keeps ↵, filled or outlined. */
 @media (max-width: 1100px) {
-  .topbar .status kbd { display: none; }
+  .topbar .status kbd, #call-stop kbd, .ask-field kbd, .dock kbd { display: none; }
+  .ask-field input { padding-right: 12px; }
 }
+/* Up to 820 px other views scroll the page as a whole (styles.css); Call keeps the window: the feed or the panel scrolls
+   inside it, and the dock never moves (N5). */
+@media (max-width: 820px) {
+  body[data-view="call"] { display: flex; height: 100dvh; overflow: hidden; }
+}
+/* Board or Transcript open (N6): the current hint stays above the panel, compact, and the dock stays under it. */
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) .call { display: contents; }
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) .feed { order: 1; flex: none; overflow: visible;
+  padding: 16px 0 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) :is(#call-name, #call-problem, #call-note, #call-earlier,
+  #call-slot .why, #call-slot .why-acts, #call-slot .why-more, #call-slot .actions, #call-slot .heard-wait) { display: none; }
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) #call-slot :is(.hint, .own-answer, .waiting, .heard-q) {
+  font-size: 17px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; max-width: none; }
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) main.workspace { order: 2; }
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) .dock { order: 3; }
 /* Window narrower than 700 px: navigation goes into the menu. */
 @media (max-width: 700px) {
   .navs { display: none; }
@@ -223,12 +384,25 @@ body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) 
   .status-actions { grid-area: action; flex-wrap: wrap; max-width: 100%; margin-top: 6px; }
   #call-status-action { max-width: 100%; white-space: normal; text-align: left; }
   .topbar .delivery-alert { grid-area: alert; max-width: 100%; white-space: normal; }
+  /* A live call: Recording, Stop and Menu on one row, the clock and both sides under them, then the last line heard. */
+  .topbar:has(#call-stop:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "text stop menu" "live live live" "action action action" "alert alert alert"; padding-block: 6px; }
+  #call-stop { grid-area: stop; }
+  /* Stop, Resume and Menu at the top of the first row, whatever the status beside them (N3). */
+  .topbar:has(#call-stop:not([hidden])) :is(#call-stop, #menu-button) { align-self: start; }
+  #call-live:not([hidden]) { grid-area: live; display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; width: 100%; min-width: 0;
+    font-size: 14px; }
+  .lbl-l { display: none; }
+  .lbl-s { display: inline; }
   .home .by-wide { display: none; }
   .home .by-narrow { display: inline; }
   .topbar .menu { right: 16px; }
   /* One column: time and time left on one line, then title, who, the digest. */
   .home { padding: 24px 0 32px; }
-  .home .col { padding: 0 16px; }
+  .home .col, .call .col { padding: 0 16px; }
+  .dock-row { display: none; }
+  #call-more { display: inline-flex; }
+  .feed { padding: 24px 0 28px; }
   .row { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 4px; }
   .row > :is(.when, .mtitle, .main, .who) { grid-area: auto; }
   .row > .when { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }

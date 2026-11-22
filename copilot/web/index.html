@@ -17,7 +17,13 @@
         <button class="nav" id="archive-button" type="button" data-i18n="shell.past_calls" aria-expanded="false" aria-controls="archive-dialog">Прошедшие звонки</button>
       </nav>
       <div class="status" id="call-status">
-        <span class="status-text" id="call-status-text" aria-live="polite"></span>
+        <span class="status-text" id="call-status-text"></span>
+        <span class="visually-hidden" id="call-status-live" aria-live="polite"></span>
+        <span class="call-live" id="call-live" hidden>
+          <span class="timer" id="call-timer"></span>
+          <span class="beats" id="call-beats"></span>
+          <span class="heard-line" id="call-heard" hidden></span>
+        </span>
         <span class="status-actions">
           <button id="call-status-action" type="button" hidden></button>
           <button class="ql" id="call-status-help" type="button" data-i18n="action.how_to_fix" hidden>Как исправить</button>
@@ -26,6 +32,7 @@
       <span class="spacer"></span>
       <div class="tools">
         <button class="delivery-alert" id="delivery-alert" type="button" aria-haspopup="dialog" hidden></button>
+        <button id="call-stop" type="button" aria-label="Остановить запись" hidden><span class="lbl-l stop"><span data-i18n="action.stop">Остановить запись</span> <kbd aria-hidden="true"></kbd></span><span class="lbl-s stop" data-i18n="action.stop_short">Остановить</span><span class="lbl-l resume" data-i18n="action.resume">Продолжить запись</span><span class="lbl-s resume" data-i18n="action.resume_short">Продолжить</span></button>
         <button id="menu-button" type="button" data-i18n="shell.menu" aria-haspopup="menu" aria-expanded="false" aria-controls="app-menu">Меню</button>
         <div class="menu" id="app-menu" role="menu" aria-labelledby="menu-button" hidden>
           <button class="narrow" id="menu-nav-home" type="button" role="menuitem" data-i18n="shell.home">Главная</button>
@@ -33,6 +40,7 @@
           <hr class="narrow">
           <button id="new-meeting-button" type="button" role="menuitem" data-i18n="meeting.new" aria-haspopup="dialog" disabled>Начать новую встречу</button>
           <button id="settings-open" type="button" role="menuitem" aria-expanded="false" aria-controls="settings-panel"><span class="mi"><span data-i18n="shell.settings">Настройки</span><small data-i18n="shell.settings_note">ИИ, распознавание речи, источники, куда отправлять отчет</small></span></button>
+          <button id="menu-chat" type="button" role="menuitem" data-i18n="call.open_chat" hidden>Все вопросы и ответы</button>
           <button id="menu-notes" type="button" role="menuitem" hidden><span class="mi"><span id="menu-notes-title"></span><small data-i18n="shell.notes_note">ваш текст, который учтут подсказки</small></span></button>
           <button id="repo-button" type="button" role="menuitem" aria-haspopup="dialog"><span class="mi"><span data-i18n="shell.sources">Папки с файлами</span><small data-i18n="shell.sources_note">на компьютере и в Google Диске</small></span></button>
           <button id="getting-started-open" type="button" role="menuitem" data-i18n="shell.getting_started" aria-expanded="false" aria-controls="getting-started">Начало работы</button>
@@ -209,11 +217,46 @@
       <p id="startup-message" role="status"></p>
     </section>
     <section id="home" class="home" aria-labelledby="home-heading" hidden></section>
+    <section id="call" class="call" aria-labelledby="call-name" hidden>
+      <div class="feed">
+        <div class="col">
+          <h2 id="call-name" class="call-name"></h2>
+          <div id="call-problem"></div>
+          <div id="call-slot" aria-live="polite"></div>
+          <p id="call-note" class="feed-note" hidden></p>
+          <section id="call-earlier" class="earlier" aria-labelledby="call-earlier-open" hidden></section>
+        </div>
+      </div>
+      <div class="dock">
+        <div class="col">
+          <div class="dock-row">
+            <button id="call-earlier-open" type="button" aria-expanded="false" aria-controls="call-earlier"></button>
+            <span class="spacer"></span>
+            <button id="call-transcript-open" type="button" data-i18n="call.transcript">Расшифровка</button>
+            <button id="call-board-open" type="button" data-i18n="call.board">Доска</button>
+          </div>
+          <form id="call-ask" class="ask">
+            <span class="ask-field">
+              <input id="call-question" type="text" maxlength="8000" autocomplete="off" aria-label="Вопрос про этот звонок" data-i18n-aria-label="call.ask_label" placeholder="Спросить про звонок" data-i18n-placeholder="call.ask_placeholder" />
+              <kbd aria-hidden="true">/</kbd>
+            </span>
+            <button id="call-send" type="submit"><span data-i18n="call.send">Отправить</span> <kbd aria-hidden="true">↵</kbd></button>
+            <button id="call-more" type="button" data-i18n="call.more" aria-haspopup="menu" aria-expanded="false" aria-controls="call-more-menu">Еще</button>
+            <div id="call-more-menu" class="menu" role="menu" aria-labelledby="call-more" hidden>
+              <button id="call-more-earlier" type="button" role="menuitem" hidden></button>
+              <button id="call-more-transcript" type="button" role="menuitem"><span class="mi"><span data-i18n="call.transcript">Расшифровка</span><small data-i18n="call.transcript_note">весь разговор текстом</small></span></button>
+              <button id="call-more-board" type="button" role="menuitem"><span class="mi"><span data-i18n="call.board">Доска</span><small data-i18n="call.board_note">вопросы, риски и проверка фактов</small></span></button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
     <main class="workspace">
+      <button id="call-back" class="ql" type="button" data-i18n="call.back" hidden>Вернуться к звонку</button>
       <section class="transcript-pane" aria-labelledby="transcript-heading">
         <div class="pane-header">
           <div>
-            <h1 id="transcript-heading" data-i18n="transcript.heading">Ход созвона</h1>
+            <h1 id="transcript-heading" tabindex="-1" data-i18n="transcript.heading">Расшифровка</h1>
             <div class="meeting-title" id="meeting-title" data-i18n="meeting.connecting">Подключение к записи...</div>
             <p class="status-strip" aria-live="polite">
               <span class="status" id="capture-status" hidden><i></i><span></span></span>
@@ -225,7 +268,7 @@
             <button class="quiet-button translation-jump" id="translation-jump" type="button" hidden></button>
             <button class="quiet-button" id="transcript-hide" type="button" data-i18n="transcript.hide" aria-label="Скрыть расшифровку" data-i18n-aria-label="transcript.hide_label">Скрыть</button>
             <div class="view-tabs transcript-tabs" role="group" aria-label="Вид левой панели" data-i18n-aria-label="aria.transcript_view">
-              <button class="active" data-transcript-view="transcript" type="button"><span data-i18n="transcript.tab">Стенограмма</span></button>
+              <button class="active" data-transcript-view="transcript" type="button"><span data-i18n="transcript.tab">Расшифровка</span></button>
               <button data-transcript-view="frames" type="button"><span data-i18n="frames.tab">Кадры</span> <span id="frame-count">0</span></button>
             </div>
           </div>
@@ -249,7 +292,7 @@
         </div>
         <div class="transcript-footer">
           <button class="quiet-button copy-dialog-button" id="copy-dialog" type="button" data-i18n="transcript.copy">Копировать диалог</button>
-          <button class="quiet-button" id="speaker-edit" type="button" data-i18n="speakers.open">Имена</button>
+          <button class="quiet-button" id="speaker-edit" type="button" data-i18n="speakers.open">Изменить имена</button>
         </div>
       </section>
 
@@ -452,6 +495,7 @@
     <script src="/delivery.js" defer></script>
     <script src="/app.js" defer></script>
     <script src="/home.js" defer></script>
+    <script src="/call.js" defer></script>
     <script src="/shell.js" defer></script>
     <script src="/getting-started.js" defer></script>
     <script src="/speech.js" defer></script>

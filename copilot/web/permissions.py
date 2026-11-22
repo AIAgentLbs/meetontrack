@@ -13,7 +13,9 @@ MIC_STORE = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\
 SETTINGS = {
     ("posix", "microphone"): "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
     ("posix", "call_audio"): "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    ("posix", "sound_output"): "x-apple.systempreferences:com.apple.Sound-Settings.extension",
     ("nt", "microphone"): "ms-settings:privacy-microphone",
+    ("nt", "sound_output"): "ms-settings:sound",
 }
 
 

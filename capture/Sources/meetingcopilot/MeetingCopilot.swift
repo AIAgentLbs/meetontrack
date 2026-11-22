@@ -470,6 +470,8 @@ final class AppController {
     private let calendar: CalendarWatcher?
     private let autoRecord: AutoRecordController
     private var session: RecordingSession?
+    /// The meeting_id this recording publishes in the live file: the session `record --session` names.
+    private var liveSessionID: String?
     /// Whether a meeting is being recorded. The session itself stays private —
     /// four things need this one fact about it (the settings form, the setup
     /// form, the update gate, and the quit alert) and none of them need the
@@ -606,7 +608,7 @@ final class AppController {
             forName: AssistantLink.request, object: nil, queue: .main
         ) { _ in MainActor.assumeIsolated { AssistantLink.open() } }
         activateObserver = SingleInstance.observe { [weak self] in self?.showWindow() }
-        recordRequestObserver = RecordRequest.observe { [weak self] action in
+        recordRequestObserver = RecordRequest.observe(live: { [weak self] in self?.liveSessionID }) { [weak self] action in
             self?.perform(action)
         }
         if SetupState.isPending {
@@ -715,15 +717,26 @@ final class AppController {
         case .start where session == nil: toggle()
         case .stop where session != nil: toggle()
         case .toggle: toggle()
-        case .resume:
+        case .pause, .resume, .relisten:
             guard let session else { return }
-            if session.isPaused { session.resume() }
-            // Recognition is independent of durable capture: rebuilding its
-            // epoch must not stop/recreate the audio files or meeting ID.
-            toggleLive(true)
+            for effect in RecordRequest.effects(of: action, paused: session.isPaused) {
+                switch effect {
+                case .pause: setPaused(session, true)
+                case .unpause: setPaused(session, false)
+                // Recognition is independent of durable capture: rebuilding its
+                // epoch must not stop/recreate the audio files or meeting ID.
+                case .relisten: toggleLive(true)
+                }
+            }
             tick()
         case .start, .stop: break
         }
+    }
+
+    /// Pause or unpause the capture, and say so in the live file the server reads.
+    private func setPaused(_ session: RecordingSession, _ paused: Bool) {
+        if paused { session.pause() } else { session.resume() }
+        Task { [liveTranscription] in await liveTranscription.setCapturePaused(paused) }
     }
 
     private func toggle() {
@@ -738,11 +751,7 @@ final class AppController {
 
     private func togglePause() {
         guard let session else { return }
-        if session.isPaused {
-            session.resume()
-        } else {
-            session.pause()
-        }
+        setPaused(session, !session.isPaused)
         tick()
     }
 
@@ -826,6 +835,7 @@ final class AppController {
             oneToOneRemoteSpeaker: context.oneToOneRemoteSpeaker,
             recordingDirectory: newSession.dir.path
         )
+        liveSessionID = liveExportContext.meetingID
         Task { [weak self, liveTranscription, liveTranscriptExporter] in
             await liveTranscription.beginRecording(
                 enabled: liveEnabled,
@@ -865,6 +875,7 @@ final class AppController {
             "○ stopped (\(reason)) · \(Self.format(duration)) · \(session.dir.path)\n".utf8
         ))
         self.session = nil
+        liveSessionID = nil
         present(.idle, elapsed: nil)
         // If Sparkle was told to wait for this recording, it has waited.
         updates.recordingDidFinish()
