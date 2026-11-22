@@ -7,7 +7,9 @@ restarted server still ends the recording. Contract: "Recording control (plan 3)
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -20,6 +22,9 @@ from private_dirs import private_dir
 
 RETRY_SECONDS = 5  # a deferred stop the recorder did not acknowledge is sent again this often
 REFUSED = 3  # `record --session` exit code: the recorder is live with another session (fix wave J1)
+# A recorder from before J1 rejects the option itself (ArgumentParser: exit 64, "Unknown option '--session'").
+UNKNOWN_SESSION = re.compile(r"unknown option|unexpected argument|unknown verb", re.IGNORECASE)
+log = logging.getLogger("recording_control")
 
 
 def _iso(seconds: float) -> str:
@@ -60,6 +65,11 @@ class RecordingControl:
             done = self.run(argv, capture_output=True, text=True, timeout=10, check=False)
         except (OSError, subprocess.SubprocessError):
             return False
+        if session and done.returncode not in (0, REFUSED) and UNKNOWN_SESSION.search(
+                f"{getattr(done, 'stdout', '') or ''}{getattr(done, 'stderr', '') or ''}"):
+            # M2: mid-upgrade, an older recorder has no sessions; the bare verb is exactly what it did before J1.
+            log.warning("the recorder does not know --session (an older version): sending the bare `record %s`", verb)
+            return self._command(verb, None)
         return True if done.returncode == 0 else None if done.returncode == REFUSED else False
 
     def _save(self) -> None:

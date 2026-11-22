@@ -465,6 +465,28 @@ class RecordingControlTests(unittest.TestCase):
         ticker.join(5)
         self.assertIsNone(control.snapshot()["stopping"])
 
+    def test_an_older_recorder_without_sessions_gets_the_bare_verb_once(self):
+        # M2: mid-upgrade the recorder may not know --session; it has no sessions, so the bare verb is the old behaviour.
+        def old(argv, **kwargs):
+            seen.append(list(argv[1:]))
+            if "--session" in argv:
+                return SimpleNamespace(returncode=64, stdout="", stderr="Error: Unknown option '--session'\n")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        seen = []
+        control = self.control(old)
+        with self.assertLogs("recording_control", "WARNING") as logs:
+            self.assertIsNotNone(control.stop("m1")["until"])
+        self.assertEqual(seen, [["record", "pause", "--session", "m1"], ["record", "pause"]])
+        self.assertIn("--session", logs.output[0])
+        # Any other failure is not retried bare: that would drop the session check on a recorder that has it.
+        seen.clear()
+        self.path.unlink()  # a fresh server: the first control's pending stop is not this one's
+        failing = self.control(lambda argv, **kwargs: seen.append(list(argv[1:])) or SimpleNamespace(
+            returncode=1, stdout="", stderr="Capture command failed"))
+        with self.assertRaisesRegex(RuntimeError, "stop_failed"):
+            failing.stop("m1")
+        self.assertEqual(seen, [["record", "pause", "--session", "m1"], ["record", "stop", "--session", "m1"]])
+
     def test_stop_again_with_an_unreadable_live_file_lets_the_recorder_judge(self):
         # K1: unknown is not "ended": the stop goes out with the session, and the recorder decides.
         run = Recorder({STOP: 1})
