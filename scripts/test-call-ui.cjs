@@ -1540,6 +1540,18 @@ async function round4(browser) {
     await expectPost(page, '/api/recording/resume', { meeting_id: 'm1' });
     await page.context().close();
   }
+  // P4: the time left to resume stays on screen while the feed shows something else: the bar adds it beside Resume.
+  for (const [lang, alone, left] of [['ru', /^Остановлено \d\d:\d\d$/, /^Остановлено \d\d:\d\d · еще \d+\u00a0сек$/],
+    ['en', /^Stopped \d\d:\d\d$/, /^Stopped \d\d:\d\d · \d+\u00a0sec left$/]]) {
+    const page = await callPage(browser, 'stopped', { lang, data: lang, width: 400 });
+    assert.match(await text(page, '#call-status-text'), alone, `${lang}: the feed counts down, the bar does not repeat it`);
+    page.api.responses['/api/chat'] = new Promise(() => {});
+    await page.fill('#call-question', lang === 'ru' ? 'Кто решает?' : 'Who decides?');
+    await page.press('#call-question', 'Enter');
+    await page.waitForSelector('#call-slot .heard-q');
+    assert.match(await text(page, '#call-status-text'), left, `${lang}: ${await text(page, '#call-status-text')} ${await page.locator('#call-slot').innerText()}`);
+    await page.context().close();
+  }
   // P3: with Board or Transcript open, a long question is clamped like the answer: the panel and the dock stay on screen.
   for (const item of ['transcript', 'board']) {
     const page = await callPage(browser, `${item}_open`, { lang: 'ru', data: 'ru', width: 400, height: 620 });

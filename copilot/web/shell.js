@@ -74,7 +74,7 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
   // takes Stop's own place (N2, N3).
   if (stopping && stopping.meeting_id === meeting) {
     const clock = callClock(state?.recording_health?.capture?.started_at || state?.transcript?.started_at, Date.parse(stopping.stopped_at));
-    return { kind: "stopped", text: t("status.stopped", { time: clock }), clock, action: null, resume: true };
+    return { kind: "stopped", text: t("status.stopped", { time: clock }), clock, action: null, resume: true, until: stopping.until };
   }
   // A live recording that began after the final stop is a new one, even under the same id.
   const started = Date.parse(state?.recording_health?.capture?.started_at || state?.transcript?.started_at || "");
@@ -186,6 +186,10 @@ function renderStatus(view) {
     status.action = { id: "back", label: t("action.back_to_call"), primary: true };
   }
   if (statusError?.action) status.action = { id: statusError.action, label: t(`action.${statusError.action}`), primary: true };
+  // The feed's countdown is hidden by a question or its answer: the bar keeps the time left beside Resume (P4).
+  if (status.resume && !callCountdownShown && view === "call") {
+    status.text += ` · ${t("status.left", { n: Math.max(0, Math.ceil((Date.parse(status.until) - Date.now()) / 1000)) })}`;
+  }
   const text = $("call-status-text");
   const shown = statusError?.text || (SHORT_BAR.matches && status.short) || status.text;
   if (text.textContent !== shown) text.textContent = shown;

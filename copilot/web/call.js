@@ -204,6 +204,7 @@ function lastSpeaker(state) {
 // hints. Each part is rebuilt only when what it shows changes, so focus and an open source line survive the poll.
 let callPending = null; // {question, at, queued, meeting}: the person's own question, its answer not back yet; queued: not sent yet
 let callAskNote = null; // a line under the feed about the Ask field: one question already waits, or the call changed (J3)
+let callCountdownShown = false; // the feed shows the undo countdown; when it does not, the bar does (P4)
 let callKept = null; // a question that came back while the field held another draft: one click returns it (M5)
 // An unsent question goes back into an empty field; over another draft it is kept, never lost (M5).
 function callGiveBack(question) {
@@ -421,6 +422,9 @@ function renderCall(state) {
   const paused = retry === null || stopped ? null : retry > now ? t("call.paused_retry", { n: Math.ceil((retry - now) / 60000) }) : t("call.paused_next");
   const pick = pickHint(state, now);
   const slot = callSlot(state, pick.current, now, stopped);
+  const countdown = slot.type === "stopped" && slot.until !== null && slot.until !== undefined;
+  if (countdown !== callCountdownShown && stopped === "stopped") queueMicrotask(renderShell); // the bar takes it over at once
+  callCountdownShown = countdown;
   // Nothing else to show: the pause is the main line, one message (D2). Under a hint it stays a note.
   const pausedSlot = paused && slot.type === "waiting";
   callPart("call-slot", pausedSlot ? { type: "paused", text: t("call.paused"), retry: paused } : slot, callSlotNodes);
