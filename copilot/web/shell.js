@@ -191,6 +191,8 @@ function renderStatus(view) {
   if (isLive(window.appState) && status.kind !== "stopped" && view !== viewFor(window.appState, null)) {
     status.action = { id: "back", label: t("action.back_to_call"), primary: true };
   }
+  // After, with nothing to warn about: the bar says the recording stopped, as the mockup does, and keeps Start recording.
+  if (view === "after" && status.kind === "waiting") Object.assign(status, { text: t("status.stopped_final"), short: null });
   if (statusError?.action) status.action = { id: statusError.action, label: t(`action.${statusError.action}`), primary: true };
   // The feed's countdown is not on screen (a question or its answer replaced it, a panel covers the feed, another
   // view is open): the bar keeps the time left beside Resume (P4, Q2).

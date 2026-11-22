@@ -456,6 +456,20 @@ async function needsChoice(browser) {
   await page.context().close();
 }
 
+// The top bar in After says the recording stopped, as the mockup does, and keeps Start recording; Home keeps its waiting line.
+async function topBar(browser) {
+  for (const [lang, stopped, waiting] of [['en', 'Recording stopped.', 'Waiting for a call'], ['ru', 'Запись остановлена.', 'Ждет звонка']]) {
+    const page = await afterPage(browser, 'draft', { lang });
+    assert.equal(await text(page, '#call-status-text'), stopped, `${lang}: After`);
+    assert.equal(await page.locator('#call-status-action').isVisible(), true, `${lang}: Start recording stays`);
+    assert.equal(await page.getAttribute('#call-status-action', 'data-action'), 'start');
+    await page.click('#nav-home');
+    await page.locator('#home').waitFor({ state: 'visible' });
+    assert.equal(await text(page, '#call-status-text'), waiting, `${lang}: Home`);
+    await page.context().close();
+  }
+}
+
 async function narrow(browser) {
   for (const fixture of ['draft', 'sent', 'answered_open']) {
     const page = await afterPage(browser, fixture, { width: 400 });
@@ -489,6 +503,7 @@ async function words(browser) {
     await words(browser);
     await interactions(browser);
     await needsChoice(browser);
+    await topBar(browser);
     await narrow(browser);
     console.log('After UI: the view: OK');
     await everyScreen(browser);
