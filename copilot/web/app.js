@@ -145,7 +145,7 @@ const translations = {
     "call.asks_plain": "Собеседник спрашивает",
     "call.asked": "{name} спрашивает: «{question}»",
     "call.asked_plain": "Собеседник спрашивает: «{question}»",
-    "call.answer": "Ответ",
+    "call.answer": "Ответьте",
     "call.own": "Ответ на ваш вопрос",
     "call.just_now": "только что",
     "call.min_ago": "{n}\u00a0мин назад",
@@ -154,13 +154,13 @@ const translations = {
     "call.from_memo": "Из мемо, вопрос {n}",
     "call.source": "Источник: {text}",
     "call.board_details": "Источник",
-    "call.where": "Откуда подсказка",
+    "call.where": "Откуда это",
     "call.where_hide": "Свернуть",
     "call.heard_wait": "Ответ готовится, обычно несколько секунд. Появится здесь же.",
     "call.heard_later": "Ответ появится позже: первые минуты автоматической записи ИИ не разбирает.",
     "call.waiting_heard": "Слушаю разговор. Подсказка появится здесь, когда будет что сказать или спросить.",
     "call.waiting": "Запись идет. Подсказка появится здесь, когда будет что сказать или спросить.",
-    "call.stopped": "Подсказки на паузе.",
+    "call.stopped": "Запись остановлена.",
     "call.saved": "Запись сохранена.",
     "call.open_results": "Открыть итоги звонка",
     "call.board_mine": "Спросить у клиента",
@@ -183,6 +183,7 @@ const translations = {
     "call.you_lost_text": "Собеседника слышно. Ваши слова не попадут в расшифровку, пока микрофон не вернется.",
     "action.sound_output": "Выбрать, откуда слушать звонок",
     "call.earlier": "Прошлые подсказки ({n})",
+    "call.earlier_hide": "Скрыть прошлые подсказки",
     "call.transcript": "Расшифровка",
     "call.board": "Доска",
     "call.board_note": "вопросы, риски и проверка фактов",
@@ -244,7 +245,7 @@ const translations = {
     "action.stop": "Остановить запись",
     "action.stop_short": "Остановить",
     "action.resume": "Продолжить запись",
-    "status.stopped": "Запись остановится через {n}\u00a0сек.",
+    "status.stopped": "Запись остановлена. Продолжить можно еще {n}\u00a0сек.",
     "status.stopped_final": "Запись остановлена.",
     "status.error.meeting_changed": "Звонок уже сменился, обновите страницу",
     "status.error.too_late": "Запись уже остановлена",
@@ -542,7 +543,7 @@ const translations = {
     "call.heard_later": "The answer comes later: the AI skips the first minutes of an automatic recording.",
     "call.waiting_heard": "Listening. A hint appears here when there is something to say or ask.",
     "call.waiting": "Recording. A hint appears here when there is something to say or ask.",
-    "call.stopped": "Hints are paused.",
+    "call.stopped": "Recording stopped.",
     "call.saved": "The recording is saved.",
     "call.open_results": "Open the call results",
     "call.board_mine": "To ask the client",
@@ -565,6 +566,7 @@ const translations = {
     "call.you_lost_text": "The other side is heard. Your words are not transcribed until the microphone is back.",
     "action.sound_output": "Choose where to listen to the call from",
     "call.earlier": "Earlier hints ({n})",
+    "call.earlier_hide": "Hide earlier hints",
     "call.transcript": "Transcript",
     "call.board": "Board",
     "call.board_note": "questions, risks and fact checks",
@@ -626,7 +628,7 @@ const translations = {
     "action.stop": "Stop recording",
     "action.stop_short": "Stop",
     "action.resume": "Resume recording",
-    "status.stopped": "Recording stops in {n}\u00a0s.",
+    "status.stopped": "Recording stopped. You can resume for {n} more\u00a0sec.",
     "status.stopped_final": "Recording stopped.",
     "status.error.meeting_changed": "The call has changed, reload the page",
     "status.error.too_late": "The recording has already stopped",
@@ -2572,7 +2574,7 @@ function renderCallBoard(plan, journal) {
       detail.open = boardExpanded.has(key);
       // In Call the detail says "Источник", the feed's one word for it, never "Основание" (G5).
       const body = readableAnswer(item.text);
-      detail.append(textNode("summary", "", t(call ? "call.board_details" : "board.details")),
+      detail.append(textNode("summary", "", t(call ? "call.where" : "board.details")), // one name across Call (H2)
         textNode("p", "", call ? body.replace(/(?:Основание|Evidence):/gu, `${t("call.board_details")}:`) : body));
       if (item.evidence) detail.append(textNode("p", "board-evidence", t("plan.evidence", { quote: item.evidence })));
       if (item.origin === "plan" && plan.source_label) detail.append(textNode("small", "", plan.source_label));

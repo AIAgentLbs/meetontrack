@@ -12,12 +12,14 @@ const TEXT = {
     review: 'Pilot review', anna: 'Anna Petrova', company: 'Example LLC', me: 'Me',
     questions: ['What budget is set for the pilot this year?', 'Who signs off the purchase?', 'Which part of the proposal matters most now?'],
     ask: 'Ask who signs off the purchase?\nEvidence: Anna mentioned a committee but no name.',
-    risk: 'We can sign before the committee meets, so the start holds.\nEvidence: Anna said the committee meets on Thursdays.',
+    risk: 'We can sign before the committee meets, so the start holds.\nEvidence: Anna said the committee decides the purchase.',
     objection: 'Setup is already in the price, there is nothing extra to pay.\nEvidence: Anna compared the price with her own estimate.',
     contradiction: 'Clarify: does the start fall in March or in April?\nEvidence: Anna said March, the memo says April.',
     claim: 'Our pilot last year covered every regional office.', fact: 'Last year the pilot covered two offices out of five.',
     incoming: 'When can you start the pilot?', reply: 'We can start on the first Monday after the contract is signed.',
     heard: 'How long does the setup take on our side?',
+    // The lines the earlier hints come from, so the feed, the board and the transcript tell one story (H5).
+    price: 'The price is above what we budgeted.', decides: 'The purchase is decided by the committee.', march: 'We plan to start in March.',
     own: 'What did Anna say about the budget?', ownAnswer: 'Anna said the budget is approved for one quarter and needs the committee to extend it.',
     said: ['Thanks for joining, shall we start with the pilot scope?', 'Yes, we have two offices ready to begin.',
       'Who else needs to see the proposal before it is signed?', 'The committee meets on Thursdays, so that is the earliest.'],
@@ -27,12 +29,13 @@ const TEXT = {
     review: 'Обзор пилота', anna: 'Анна Петрова', company: 'ООО Пример', me: 'Вы',
     questions: ['Какой бюджет заложен на пилот в этом году?', 'Кто подписывает закупку?', 'Какая часть предложения сейчас важнее всего?'],
     ask: 'Спросите, кто подписывает закупку?\nОснование: Анна упомянула комитет, но без имени.',
-    risk: 'Можем подписать до заседания комитета, тогда старт не сдвинется.\nОснование: Анна сказала, что комитет собирается по четвергам.',
+    risk: 'Можем подписать до заседания комитета, тогда старт не сдвинется.\nОснование: Анна сказала, что закупку решает комитет.',
     objection: 'Настройка уже входит в цену, доплачивать не нужно.\nОснование: Анна сравнила цену со своей оценкой.',
     contradiction: 'Уточните: старт в марте или в апреле?\nОснование: Анна назвала март, в мемо апрель.',
     claim: 'Наш пилот в прошлом году охватил все региональные офисы.', fact: 'В прошлом году пилот охватил два офиса из пяти.',
     incoming: 'Когда вы сможете начать пилот?', reply: 'Можем начать в первый понедельник после подписания договора.',
     heard: 'Сколько времени занимает настройка с нашей стороны?',
+    price: 'Цена выше, чем мы закладывали.', decides: 'Закупку решает комитет.', march: 'Старт у нас в марте.',
     own: 'Что Анна сказала про бюджет?', ownAnswer: 'Анна сказала, что бюджет утвержден на квартал и для продления нужен комитет.',
     said: ['Спасибо, что подключились, начнем с объема пилота?', 'Да, у нас готовы два офиса.',
       'Кто еще должен увидеть предложение до подписания?', 'Комитет собирается по четвергам, раньше не получится.'],
@@ -57,7 +60,7 @@ function build(name, lang = 'en', now = Date.now()) {
   const event = (category, text, age, extra = {}) => ({ id: `j-${category}-${age}`, category, text, meeting_id: 'm1',
     meeting: L.review, source: 'copilot', created_at: ago(age), logical_event: true, ...extra });
   const planItem = (index, status = 'open') => ({ id: `q${index + 1}`, kind: 'question', text: L.questions[index], status,
-    evidence: '', updated_at: '', source: '' });
+    evidence: '', updated_at: status === 'resolved' ? ago(3 * MIN) : '', source: '' });
   // call_plan.py snapshot: the score is always there (app.js renderCallPlan reads it).
   const plan = statuses => {
     const items = statuses.map((status, index) => planItem(index, status));
@@ -76,6 +79,11 @@ function build(name, lang = 'en', now = Date.now()) {
 
   const segments = [segment('microphone', L.said[0], 50 * SEC), segment('system', L.said[1], 40 * SEC),
     segment('microphone', L.said[2], 20 * SEC), segment('system', L.said[3], 6 * SEC)];
+  // An older line, in time order, ahead of the four above: what an earlier hint was built on.
+  const earlier = (text, age) => segments.splice(segments.findIndex(item => Date.parse(item.timestamp) > now - age), 0,
+    segment('system', text, age));
+  earlier(L.price, 4 * MIN + 10 * SEC);
+  earlier(L.decides, 3 * MIN + 10 * SEC);
   const state = {
     preferences: {}, updates: {}, frames: [], frame_capture: {}, meeting_chat: [], repositories: 0, all_repositories: 0,
     project: {}, delivery: { channels: {}, undelivered: [], notifications: [] },
@@ -89,8 +97,8 @@ function build(name, lang = 'en', now = Date.now()) {
     journal: [], heard_question: null, fact_checks: { items: [], web: true, provider: '', web_providers: [] },
     recording_control: { stopping: null, last_stop: null },
   };
-  const older = () => [event('RISK', L.risk, 3 * MIN), event('INCOMING_QUESTION', L.incoming, 2 * MIN, { reply: L.reply, speaker: L.anna,
-    evidence: L.incoming, direction: 'incoming' }), event('ASK', L.ask, 90 * SEC)];
+  const older = () => (earlier(L.incoming, 2 * MIN + 10 * SEC), [event('RISK', L.risk, 3 * MIN), event('INCOMING_QUESTION', L.incoming, 2 * MIN, { reply: L.reply, speaker: L.anna,
+    evidence: L.incoming, direction: 'incoming' }), event('ASK', L.ask, 90 * SEC)]);
   const hint = () => { state.journal = [event('ASK', L.ask, 5 * SEC), event('OBJECTION', L.objection, 4 * MIN)]; };
   const setups = {
     hint,
@@ -122,7 +130,7 @@ function build(name, lang = 'en', now = Date.now()) {
       { role: 'assistant', text: L.ownAnswer, kind: 'chat', meeting_id: 'm1', at: ago(5 * SEC) }]; },
     // Earlier hints to open: older events and a refuted fact, the memo question current.
     earlier_open: () => { state.journal = [...older(), event('CONTRADICTION', L.contradiction, 70 * SEC)];
-      state.fact_checks.items = [refuted(60 * SEC)]; },
+      state.fact_checks.items = [refuted(60 * SEC)]; earlier(L.claim, 85 * SEC); earlier(L.march, 75 * SEC); },
     // Stop pressed 10 s ago: the recorder is paused, the stop lands in 20 s.
     // The hints in the stop fixtures come before the stop (D1).
     stopped: () => { hint(); state.journal[0] = event('ASK', L.ask, 15 * SEC); state.recording_control.stopping = { meeting_id: 'm1', stopped_at: ago(10 * SEC), until: iso(now + 20 * SEC) }; },
@@ -133,7 +141,8 @@ function build(name, lang = 'en', now = Date.now()) {
     stopped_final: () => { hint(); state.recording_control.last_stop = { meeting_id: 'm1', stopped_at: ago(4 * SEC) }; },
     more_open: hint,
     transcript_open: hint,
-    board_open: hint,
+    // The board of the same call Earlier shows: the question put to the user and the fact check are on it (H5).
+    board_open: () => setups.earlier_open(),
     long_hint: () => { state.journal = [event('ASK', L.long, 5 * SEC)]; },
     // A recorder that writes no capture marker (Windows today): no tracks, the system segment 30 s old.
     windows_no_tracks: () => { hint(); state.recording_health.capture = capture(now, []);

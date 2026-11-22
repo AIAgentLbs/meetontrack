@@ -49,8 +49,9 @@ function callLine(raw) {
     const match = line.match(new RegExp(`^(?:${words})(?=[\\s,:]|$)[\\s,:]*`, "iu"));
     if (match && match[0].length < line.length) {
       let rest = line.slice(match[0].length);
-      // "Ask whether…" without its verb is a question: it ends like one, never as a bare fragment (B1).
-      if (verb === "ask" && !/[?？]$/u.test(rest)) rest = `${rest.replace(/[.\s]+$/u, "")}?`;
+      // "Ask whether…" or "Clarify the dates" without its verb is a question: it ends like one, never as a bare
+      // fragment (B1), so Clarify always stands over a question (H3).
+      if ((verb === "ask" || verb === "clarify") && !/[?？]$/u.test(rest)) rest = `${rest.replace(/[.\s]+$/u, "")}?`;
       return { line, verb, rest: rest[0].toLocaleUpperCase() + rest.slice(1) };
     }
   }
@@ -61,7 +62,9 @@ function callCut(line) {
   const text = speakable(line);
   return { text, full: text === line ? "" : line };
 }
+// Labels are verbs for what to say (H3). Clarify stands only over a question: a statement under it is said.
 const callVerbLabel = ({ verb, rest }) => t(`call.${verb || (rest.endsWith("?") ? "ask" : "say")}`);
+const callCheckLabel = text => t(text.endsWith("?") ? "call.clarify" : "call.say");
 const callSame = (a, b) => [a, b].map(text => text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "")).reduce((x, y) => x === y);
 
 // Source and detail of a journal hint: the lines after the hint line, then the evidence and the speaker.
@@ -97,8 +100,8 @@ function hintCandidates(state) {
         ...callCut(callLine(item.reply).line), ...parts });
     } else if (item.category === "CONTRADICTION" && open) {
       const line = callLine(item.text);
-      hints.push({ kind: "check", tier: 2, at, label: t("call.clarify"), question: "",
-        ...callCut(line.verb === "clarify" ? line.rest : line.line), ...callParts(item.text, item) });
+      const cut = callCut(line.verb === "clarify" ? line.rest : line.line);
+      hints.push({ kind: "check", tier: 2, at, label: callCheckLabel(cut.text), question: "", ...cut, ...callParts(item.text, item) });
     } else if (["ASK", "RISK", "OBJECTION"].includes(item.category) && open) {
       const line = callLine(item.text);
       hints.push({ kind: "signal", tier: 3, at, label: callVerbLabel(line), question: "", ...callCut(line.rest),
@@ -112,16 +115,20 @@ function hintCandidates(state) {
     const said = item.quote || item.claim || "";
     const quote = uiLanguage === "ru" ? `«${said}»` : `“${said}”`;
     const line = callLine(item.fact);
-    hints.push({ kind: "check", tier: 2, at, label: t("call.clarify"), question: "",
-      ...callCut(line.verb === "clarify" ? line.rest : line.line), source: t("call.source", { text: speaker ? `${speaker}: ${quote}` : quote }), detail: [] });
+    const cut = callCut(line.verb === "clarify" ? line.rest : line.line);
+    hints.push({ kind: "check", tier: 2, at, label: callCheckLabel(cut.text), question: "", ...cut, source: t("call.source", { text: speaker ? `${speaker}: ${quote}` : quote }), detail: [] });
   }
   const questions = (state?.call_plan?.items || []).filter(item => item.kind === "question");
   const next = questions.findIndex(item => item.status !== "resolved");
   if (next >= 0) {
     const line = callLine(questions[next].text);
     const label = state.call_plan.source_label;
-    hints.push({ kind: "memo", tier: 4, at: null, label: callVerbLabel(line), question: "", ...callCut(line.rest),
-      source: t("call.from_memo", { n: next + 1 }), detail: label ? [label] : [] });
+    // Its age, like every hint (H3): since the question before it was closed, or since the call began.
+    const closed = questions.slice(0, next).map(item => callAt(item.updated_at)).filter(at => at !== null);
+    const since = closed.length ? Math.max(...closed) : callAt(state?.transcript?.started_at);
+    // The memo and its company on the one source line: no Where this comes from that only repeats it (H2).
+    hints.push({ kind: "memo", tier: 4, at: null, since, label: callVerbLabel(line), question: "", ...callCut(line.rest),
+      source: [t("call.from_memo", { n: next + 1 }), label].filter(Boolean).join(" · "), detail: [] });
   }
   return hints;
 }
@@ -241,7 +248,7 @@ function callSlot(state, current, now, stopped = null) {
   }
   if (current) {
     const key = callHintKey(current);
-    return { type: "hint", key, label: current.label, at: current.at, text: current.text, full: current.full, source: current.source, detail: current.detail };
+    return { type: "hint", key, label: current.label, at: current.at ?? current.since, text: current.text, full: current.full, source: current.source, detail: current.detail };
   }
   const beat = heartbeat(state, now);
   return { type: "waiting", text: t(beat.you.state === "heard" || beat.other.state === "heard" ? "call.waiting_heard" : "call.waiting") };
@@ -270,7 +277,7 @@ function callSlotNodes(slot) {
     nodes.push(textNode("p", "own-answer", readableAnswer(slot.text)));
     const actions = document.createElement("p");
     actions.className = "why-acts";
-    actions.append(callButton("ql", t("call.open_chat"), () => openCallPanel("chat")));
+    actions.append(callButton("ql", t("call.where"), () => openCallPanel("chat"))); // one name across Call (H2)
     nodes.push(actions);
   }
   if (slot.type === "answer" || slot.type === "hint") {
@@ -375,7 +382,8 @@ function renderCall(state) {
       label: t("call.answer"), at: hint.at, text: hint.text, source: hint.source }
     : { label: hint.label, at: hint.at, text: hint.text, source: hint.source }));
   const open = $("call-earlier-open");
-  const count = t("call.earlier", { n: earlier.length });
+  // Open, it says how to close it (H5); More's item presses the same button and says the same.
+  const count = callEarlierOpen ? t("call.earlier_hide") : t("call.earlier", { n: earlier.length });
   if (open.textContent !== count) open.textContent = count;
   open.setAttribute("aria-expanded", String(callEarlierOpen));
   // Nothing earlier: no Earlier button at all (ruling 4), in the dock or in More.
