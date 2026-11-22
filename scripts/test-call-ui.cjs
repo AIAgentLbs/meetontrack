@@ -738,7 +738,7 @@ async function narrow(browser) {
     assert.equal(await visible(page, '#call-more'), true, `${label}: More`);
     assert.equal(await text(page, '#call-more'), 'More');
     assert.equal(await page.evaluate(() => scrollY), 0);
-    const slot = await box(page, '#call-slot :is(.hint, .heard-q)');
+    const slot = await box(page, '#call-slot :is(.hint, .heard-q, .waiting)');
     const dock = await box(page, '.dock');
     const bar = await box(page, '.topbar');
     assert.ok(slot.top >= bar.bottom && slot.bottom <= dock.top, `${label}: the slot is in view ${JSON.stringify([slot, bar.bottom, dock.top])}`);
@@ -884,6 +884,29 @@ async function narrow(browser) {
   await page.context().close();
 }
 
+// The fix wave after the final review (fix-wave.md), one block per item.
+async function fixWave(browser) {
+  // A4: during the undo window and after the final stop the feed never says the call is heard or recorded, no
+  // problem card shows for the paused tracks, the hint slot gives way to one plain line, and the ask field still works.
+  for (const fixture of ['stopped', 'stopped_final']) {
+    const page = await callPage(browser, fixture);
+    const state = page.api.fixture.state;
+    state.call_plan = null;
+    state.recording_health.capture.tracks[1] = { ...state.recording_health.capture.tracks[1], state: 'stalled', last_growth_age_seconds: 50 };
+    await refresh(page);
+    const feed = await page.locator('#call').innerText();
+    assert.doesNotMatch(feed, /Recording\. A hint|is heard|not heard|Ask who signs/, `${fixture}: ${feed}`);
+    assert.equal(await page.locator('#call-problem > *').count(), 0, `${fixture}: no problem card`);
+    assert.equal(await text(page, '#call-slot'), 'The recording is stopped. No more hints for this call.', fixture);
+    assert.equal(await page.locator('#call-question').isEnabled(), true);
+    await page.fill('#call-question', 'What did Anna say about the budget?');
+    await page.press('#call-question', 'Enter');
+    await expectPost(page, '/api/chat', { question: 'What did Anna say about the budget?' });
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  }
+}
+
 async function expectPost(page, path, body) {
   for (let tries = 0; tries < 50 && !posts(page, path).length; tries++) await page.waitForTimeout(20);
   assert.deepEqual(posts(page, path), [body]);
@@ -898,6 +921,7 @@ async function expectPost(page, path, body) {
     await callBar(browser);
     await narrow(browser);
     await everyFixture(browser);
+    await fixWave(browser);
     console.log('call UI checks passed');
   } finally {
     await browser.close();

@@ -190,11 +190,14 @@ function callProblem(state, now) {
 }
 
 // What the slot shows: the pending own question, then the hint picked, a heard question, or the waiting line.
-function callSlot(state, current, now) {
+// Stopped (the undo window, the final stop, or a stop not yet acknowledged): one plain line, and the person's own
+// question and its answer still show, since the ask field keeps working.
+function callSlot(state, current, now, stopped = null) {
   const own = current?.kind === "own" ? current : null;
   if (callPending && ((own && own.at > callPending.at) || (!requestBusy && !state?.copilot?.busy))) callPending = null;
   if (callPending) return { type: "pending", label: t("call.own"), question: callPending.question };
   if (own) return { type: "own", label: own.label, question: own.question, text: own.text };
+  if (stopped) return { type: "stopped", text: t(stopped === "stop_failed" ? "call.stop_pending" : "call.stopped") };
   if (current?.kind === "answer") {
     return { type: "answer", key: callHintKey(current), label: current.label, question: current.question, text: current.text,
       full: current.full, source: "", detail: [] };
@@ -215,6 +218,7 @@ function callSlot(state, current, now) {
 
 function callSlotNodes(slot) {
   const nodes = [textNode("p", "say", slot.label || "")];
+  if (slot.type === "stopped") return [textNode("p", "waiting", slot.text)];
   if (slot.type === "waiting") return [textNode("p", "waiting", slot.text), textNode("p", "heard-wait", t("call.waiting_help"))];
   if (slot.question) nodes.push(textNode("p", "heard-q", slot.question));
   if (slot.type === "pending" || slot.type === "heard") nodes.push(textNode("p", "heard-wait", t("call.heard_wait")));
@@ -265,7 +269,10 @@ function renderCall(state) {
   const name = transcript.display_meeting || transcript.meeting || "";
   if ($("call-name").textContent !== name) $("call-name").textContent = name;
 
-  callPart("call-problem", callProblem(state, now), problem => {
+  // After Stop the paused tracks stop growing: no problem card, no hint, no paused note (A4).
+  const kind = callStatus(state, window.agendaData, window.permissionsData, now).kind;
+  const stopped = kind === "stopped" || kind === "stop_failed" ? kind : null;
+  callPart("call-problem", stopped ? null : callProblem(state, now), problem => {
     const box = document.createElement("div");
     box.className = "problem";
     const heading = document.createElement("h3");
@@ -283,7 +290,7 @@ function renderCall(state) {
   });
 
   const pick = pickHint(state, now);
-  callPart("call-slot", callSlot(state, pick.current, now), callSlotNodes);
+  callPart("call-slot", callSlot(state, pick.current, now, stopped), callSlotNodes);
   callFitWhere();
 
   // The analysis failed: hints pause until the next try, five minutes after it (F3).
@@ -291,7 +298,7 @@ function renderCall(state) {
   const failed = analysis?.state === "error" ? callAt(analysis.at) : null;
   const retry = failed === null ? null : failed + 300000;
   // A retry time that has passed is not shown: the next try comes with the next analysis.
-  const note = retry === null ? null : retry > now ? t("call.paused", { time: homeClock(retry) }) : t("call.paused_next");
+  const note = retry === null || stopped ? null : retry > now ? t("call.paused", { time: homeClock(retry) }) : t("call.paused_next");
   $("call-note").hidden = !note;
   callPart("call-note", note, text => [`${text} `, callButton("ql", t("call.check_ai"), () => $("getting-started-open").click())]);
 
