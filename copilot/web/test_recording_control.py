@@ -356,6 +356,43 @@ class RecordingControlTests(unittest.TestCase):
         self.assertIsNone(control.snapshot()["stopping"])
         self.assertEqual(control.snapshot()["last_stop"]["meeting_id"], "m1")
 
+    def test_unreadable_live_file_keeps_the_deferred_stop(self):
+        # I2: a live file that cannot be read says nothing about the recording: the stop stays pending and is retried.
+        run = Recorder()
+        control = self.control(run)
+        stopped_at = control.stop("m1")["stopped_at"]
+        self.sessions["m1"] = None
+        self.now[0] = T0 + 31
+        control.tick()
+        self.assertEqual(run.calls, [PAUSE])
+        self.assertEqual(control.snapshot()["stopping"]["failed"], 1)
+        self.assertIsNone(control.snapshot()["last_stop"])
+        self.sessions["m1"] = "m1|t1"
+        self.now[0] = T0 + 36
+        control.tick()
+        self.assertEqual(run.calls[-1][:2], STOP)
+        self.assertIsNone(control.snapshot()["stopping"])
+        self.assertEqual(control.snapshot()["last_stop"], {"meeting_id": "m1", "stopped_at": stopped_at})
+
+    def test_unreadable_live_file_does_not_resume_or_forget(self):
+        run = Recorder()
+        control = self.control(run)
+        control.stop("m1")
+        self.sessions["m1"] = None
+        with self.assertRaisesRegex(RuntimeError, "resume_failed"):
+            control.resume("m1")
+        self.assertEqual(run.calls, [PAUSE])
+        self.assertEqual(control.snapshot()["stopping"]["meeting_id"], "m1")
+        self.assertIsNone(control.snapshot()["last_stop"])
+
+    def test_unreadable_live_file_does_not_stop_blind(self):
+        run = Recorder()
+        control = self.control(run)
+        self.sessions["m1"] = None
+        with self.assertRaisesRegex(RuntimeError, "stop_failed"):
+            control.stop("m1")
+        self.assertEqual(run.calls, [])
+
     def test_loop_ticks_until_the_event(self):
         control = self.control(Recorder())
         stop = threading.Event()
@@ -391,7 +428,10 @@ class RecorderSessionTests(unittest.TestCase):
             live = Path(directory) / "live.json"
             boundaries = mock.Mock(physical_id=lambda logical: {"m1-part2": "m1"}.get(logical, logical))
             with mock.patch.object(server, "TRANSCRIPT_FILE", live), mock.patch.object(server, "BOUNDARIES", boundaries):
-                self.assertEqual(server.recorder_session("m1"), "")
+                # Missing or unreadable: unknown (None), never "ended" (I2).
+                self.assertIsNone(server.recorder_session("m1"))
+                live.write_text("{half a write")
+                self.assertIsNone(server.recorder_session("m1"))
                 live.write_text(json.dumps({"meeting_id": "m1", "started_at": "t1", "status": "paused"}))
                 self.assertEqual(server.recorder_session("m1"), "m1|t1")
                 self.assertEqual(server.recorder_session("m1-part2"), "m1|t1")

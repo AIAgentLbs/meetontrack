@@ -28,10 +28,11 @@ def _iso(seconds: float) -> str:
 class RecordingControl:
     """`current_meeting()` is the call the page shows. `session(meeting_id)` is the recorder's own live
     session for that call, read from the file the recorder writes at the moment of asking ("" once it
-    ended or another recording began): pause, resume and the deferred stop act only on that session."""
+    ended or another recording began, None when the file cannot be read): pause, resume and the deferred
+    stop act only on that session, and an unknown session is never taken for an ended one."""
 
     def __init__(self, binary: Path, path: Path, current_meeting: Callable[[], str],
-                 session: Callable[[str], str], run=subprocess.run, clock=time.time, grace: float = 30.0):
+                 session: Callable[[str], str | None], run=subprocess.run, clock=time.time, grace: float = 30.0):
         self.binary, self.path, self.current_meeting, self.session = binary, path, current_meeting, session
         self.run, self.clock, self.grace = run, clock, grace
         # One lock for every check-and-clear of `stopping`, held across the recorder command,
@@ -61,11 +62,13 @@ class RecordingControl:
         temporary.chmod(0o600)
         os.replace(temporary, self.path)
 
-    def _same(self, pending: dict) -> bool:
-        """Is the recording the pending stop was made for still the recorder's live one?"""
+    def _same(self, pending: dict) -> bool | None:
+        """Is the recording the pending stop was made for still the recorder's live one? None: unknown."""
         expected = pending.get("session")  # a state file from before sessions: the page's id only
-        return self.session(pending["meeting_id"]) == expected if expected else \
-            self.current_meeting() == pending["meeting_id"]
+        if not expected:
+            return self.current_meeting() == pending["meeting_id"]
+        live = self.session(pending["meeting_id"])
+        return None if live is None else live == expected
 
     def _ended(self, pending: dict) -> None:
         self.stopping = None
@@ -86,6 +89,8 @@ class RecordingControl:
                 self._save()
                 return {"stopped_at": pending["stopped_at"], "until": None}
             session = self.session(meeting_id)
+            if session is None:  # the live file cannot be read: no command for a session nobody can name
+                raise RuntimeError("stop_failed")
             if not session:  # the poll still shows this call, the recorder has moved on
                 raise ValueError("meeting_changed")
             stopped_at = _iso(self.clock())
@@ -115,7 +120,10 @@ class RecordingControl:
             if (not pending or pending.get("meeting_id") != meeting_id or pending.get("failed")
                     or self.clock() >= datetime.fromisoformat(pending["until"]).timestamp()):
                 raise ValueError("too_late")
-            if not self._same(pending):  # that recording ended and another may run: resume nothing
+            same = self._same(pending)
+            if same is None:  # unknown: keep the pending stop, the person can try again
+                raise RuntimeError("resume_failed")
+            if not same:  # that recording ended and another may run: resume nothing
                 self._ended(pending)
                 try:
                     self._save()
@@ -143,7 +151,9 @@ class RecordingControl:
             if not pending or self.clock() < datetime.fromisoformat(pending["until"]).timestamp():
                 return
             # The recording may have ended by itself and the next call begun: then there is nothing to stop.
-            if self._same(pending) and not self._command("stop"):
+            # An unreadable live file is unknown, not ended: tried again like an unacknowledged stop.
+            same = self._same(pending)
+            if same is None or (same and not self._command("stop")):
                 # Not acknowledged (the app busy, or not running): kept pending and tried again in 5 s, so
                 # last_stop never claims a stop that did not happen; the page shows the failure meanwhile.
                 self.stopping = {**pending, "failed": int(pending.get("failed") or 0) + 1,

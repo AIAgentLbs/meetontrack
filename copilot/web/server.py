@@ -2495,10 +2495,16 @@ SKIPS = SkipRecording(SKIP_RECORDING_FILE)
 # The id the page shows in /api/state (a logical id after a boundary split); annotated_snapshot is defined further down.
 
 
-def recorder_session(meeting_id: str) -> str:
+def recorder_session(meeting_id: str) -> str | None:
     """The recorder's own live session for the call the page shows, read now from the file the recorder
-    writes (not from the transcript poll, which can still show the previous call); "" once it ended."""
-    live = read_json(TRANSCRIPT_FILE)
+    writes (not from the transcript poll, which can still show the previous call); "" once it ended,
+    None when the file is missing or unreadable (unknown, so a pending stop is kept, not dropped)."""
+    try:
+        live = json.loads(TRANSCRIPT_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(live, dict):
+        return None
     physical = str(live.get("meeting_id") or "")
     if not physical or live.get("status") == "finished" or physical != BOUNDARIES.physical_id(meeting_id):
         return ""
