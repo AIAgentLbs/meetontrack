@@ -179,6 +179,13 @@ class AfterAPITests(unittest.TestCase):
         self.write_report(memo_check={"state": "failed", "reason": "timeout"})
         self.assertEqual(self.payload()["memo_check"], {"state": "failed", "reason": "timeout"})
 
+    def test_memo_not_checked_is_final(self):
+        """An old meeting's report says it was not checked; without memo questions there is no line."""
+        self.write_report(memo_check={"state": "unavailable", "reason": "not_checked"})
+        self.assertIsNone(self.payload()["memo_check"])
+        self.archive.memo_plan = lambda detail: {"items": [{"kind": "question", "id": "q1", "text": "Budget?"}]}
+        self.assertEqual(self.payload()["memo_check"], {"state": "unavailable", "reason": "not_checked"})
+
     def test_unknown_meeting(self):
         self.assertIsNone(after_payload(self.archive, "nope", SETTINGS, self.now))
 

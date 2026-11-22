@@ -168,9 +168,13 @@ class MemoCheckReportTests(unittest.TestCase):
 
     def test_report_runs_check_once(self):
         self.ready = False
+        meeting = self.reports.parent / "archive" / "m1" / "meeting.json"
+        live = json.loads(meeting.read_text())
+        meeting.write_text(json.dumps({**live, "updated_at": "", "latest_at": ""}))  # no end time yet
         self.archive.generate_report("m1")
         self.assertEqual(self.calls, 0)
-        self.assertNotIn("memo_check", self.report())
+        self.assertNotIn("memo_check", self.report())  # not marked "not checked": it still can be
+        meeting.write_text(json.dumps(live))
         self.ready = True
         self.archive.generate_report("m1")
         self.archive.generate_report("m1")
@@ -198,10 +202,30 @@ class MemoCheckReportTests(unittest.TestCase):
         self.assertEqual(self.calls, 1)
         self.assertEqual(self.report()["memo_check"], self.result)
 
-    def test_old_meeting_is_not_checked(self):
+    def test_report_on_request_is_not_checked(self):
         self.archive.generate_report("m1", on_request=True)
         self.archive.generate_report("m1", deliver=False)
         self.assertEqual(self.calls, 0)
+        self.assertEqual(self.report()["memo_check"], memo_check.NOT_CHECKED)
+        self.assertNotIn("memo-check", self.page())
+
+    def test_meeting_delivered_before_release_is_not_checked(self):
+        """Delivered inside its window long ago, before the memo check existed: no AI run, ever."""
+        meeting = self.reports.parent / "archive" / "m1" / "meeting.json"
+        stored = json.loads(meeting.read_text())
+        ended = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=10)
+        stored.update(started_at=iso(ended - timedelta(minutes=20)), updated_at=iso(ended), latest_at=iso(ended))
+        meeting.write_text(json.dumps(stored))
+        folder = self.reports / "m1"
+        folder.mkdir(parents=True)
+        (folder / "report.json").write_text(json.dumps({
+            "mail_status": "sent", "delivery_started_at": iso(ended + timedelta(minutes=5))}))
+        self.archive.generate_report("m1")  # the report button and the delivery-health recreate
+        self.archive.generate_report("m1", deliver=False)  # a speaker rename
+        self.assertEqual(self.calls, 0)
+        self.assertEqual(self.report()["memo_check"], memo_check.NOT_CHECKED)
+        self.assertNotIn("delivery_on_request", self.report())
+        self.assertNotIn("memo-check", self.page())
 
     def test_checker_error_does_not_hold_report(self):
         def broken(detail):

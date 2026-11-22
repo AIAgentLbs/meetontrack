@@ -26,6 +26,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 from speaker_edits import SpeakerEdits, carry_corrections, segment_id, _seconds
 from fact_check import with_speakers
+from memo_check import NOT_CHECKED
 from delivery_health import DeliveryHealth, drive_links_ready
 from recording_health import RecordingLocations
 from question_quality import register_question
@@ -492,17 +493,19 @@ class MeetingArchive:
                 return False
             if not failure.exists() or not self._report_retry_ready(meeting_id):
                 return False
-        detail = self.report_detail(meeting_id) or {}
+        self.generate_report(meeting_id, on_request=not self._in_delivery_window(self.report_detail(meeting_id) or {}))
+        return True
+
+    def _in_delivery_window(self, detail: dict) -> bool:
+        """The call is recent enough to be sent on its own (and memo-checked)."""
         ended = _date(str(detail.get("ended_at") or ""))
         report = detail.get("report") or {}
         # A final transcript arriving after the window still sends a report that never went out,
         # as the waiting warning promised (MEETONTRACK-118); older history waits for the button.
-        recent = bool(ended and ((datetime.now().astimezone() - ended).total_seconds()
-                                 <= self.delivery_retry_days * 86400 or (
+        return bool(ended and ((datetime.now().astimezone() - ended).total_seconds()
+                               <= self.delivery_retry_days * 86400 or (
             ended >= self._final_wait_from() and not report.get("delivery_started_at")
             and not report.get("delivery_on_request"))))
-        self.generate_report(meeting_id, on_request=not recent)
-        return True
 
     def report_identity(self, meeting_id: str) -> str:
         """The folder a meeting's report lives in: the last chunk of a continuous call."""
@@ -1186,23 +1189,31 @@ class MeetingArchive:
     def _memo_check(self, meeting_id: str, on_request: bool) -> dict | None:
         """Run the memo check once per meeting, when its final transcript is ready (MEETONTRACK-163).
 
-        Only inside the delivery window: rebuilding an old report never runs AI or binds a plan.
+        Only inside the delivery window: an old meeting or a report made on request is stored as
+        NOT_CHECKED, with no AI run and no plan read (the report button, a recreate or a speaker
+        rename on a meeting delivered before this release included).
         Any stored outcome, failed included, is final. A report.json on disk gets the result at
         once; with none yet, the caller hands it to the first full meta (never a half report).
         """
-        if self.memo_checker is None or on_request:
+        if self.memo_checker is None:
             return None
         with self.lock:
             detail = self.report_detail(meeting_id)
             report = (detail or {}).get("report") or {}
-            if (not detail or "memo_check" in report or report.get("delivery_on_request")
-                    or not self._ready_for_delivery(detail)):
+            if not detail or "memo_check" in report:
                 return None
-        try:
-            result = self.memo_checker(detail)  # the AI call runs outside the archive lock
-        except Exception as exc:  # noqa: BLE001 - the check never holds the report back
-            print(f"memo check {detail['meeting_id']}: {type(exc).__name__}", flush=True)
-            return None
+            on_request = on_request or bool(report.get("delivery_on_request"))
+            if not on_request and not self._ready_for_delivery(detail):
+                return None  # a live or unfinished call is never marked: it may still be checked
+            recent = not on_request and self._in_delivery_window(detail)
+        if not recent:
+            result = dict(NOT_CHECKED)
+        else:
+            try:
+                result = self.memo_checker(detail)  # the AI call runs outside the archive lock
+            except Exception as exc:  # noqa: BLE001 - the check never holds the report back
+                print(f"memo check {detail['meeting_id']}: {type(exc).__name__}", flush=True)
+                return None
         if result is None:
             return None
         with self.lock:
@@ -2471,8 +2482,8 @@ class MeetingArchive:
     @staticmethod
     def _memo_check_html(memo_check: dict | None, removed, esc) -> str:
         """The memo check in the report: answered and open memo questions, statements that differ."""
-        if not isinstance(memo_check, dict) or not memo_check.get("state"):
-            return ""
+        if not isinstance(memo_check, dict) or not memo_check.get("state") or memo_check == NOT_CHECKED:
+            return ""  # never checked (an old call): the report says nothing about it
         if memo_check["state"] != "done":
             reasons = {"ai_needs_choice": "ИИ не выбран или не может выполнить сверку",
                        "timeout": "ИИ не ответил вовремя", "ai_no_answer": "ИИ не дал ответа",

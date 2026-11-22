@@ -17,6 +17,9 @@ TIMEOUT = 90
 MAX_PROMPT = 200_000
 MEMO_CHARS = 6000
 MAX_DIFFERS = 10
+# Final outcome for a meeting the check never runs on (past its delivery window, or a report made
+# on request): no AI run, and the After screen does not wait for one.
+NOT_CHECKED = {"state": "unavailable", "reason": "not_checked"}
 
 
 def _norm(text) -> str:

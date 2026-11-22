@@ -210,8 +210,9 @@ def after_payload(archive, meeting_id: str, settings: dict, now: float) -> dict 
         state = "sending"
 
     memo = report.get("memo_check")
-    if not isinstance(memo, dict):
-        memo = {"state": "waiting"} if memo_check.memo_questions(archive.memo_plan(detail)) else None
+    if not isinstance(memo, dict) or memo == memo_check.NOT_CHECKED:
+        # Waiting until the check has run; "not checked" is final, and shown only with memo questions.
+        memo = (memo or {"state": "waiting"}) if memo_check.memo_questions(archive.memo_plan(detail)) else None
     return {
         "ok": True, "meeting_id": identity, "title": detail.get("title") or "",
         "started_at": detail.get("started_at") or "", "ended_at": detail.get("ended_at") or "",
