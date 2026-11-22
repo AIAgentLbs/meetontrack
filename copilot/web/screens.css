@@ -356,7 +356,7 @@ body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcrip
   padding: 16px 0 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
 body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) :is(#call-name, #call-problem, #call-note, #call-earlier,
   #call-slot .why, #call-slot .why-acts, #call-slot .why-more, #call-slot .actions, #call-slot .heard-wait) { display: none; }
-body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) #call-slot :is(.hint, .own-answer, .waiting) {
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) #call-slot :is(.hint, .own-answer, .waiting, .heard-q) {
   font-size: 17px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; max-width: none; }
 body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) main.workspace { order: 2; }
 body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) .dock { order: 3; }

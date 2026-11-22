@@ -1540,6 +1540,26 @@ async function round4(browser) {
     await expectPost(page, '/api/recording/resume', { meeting_id: 'm1' });
     await page.context().close();
   }
+  // P3: with Board or Transcript open, a long question is clamped like the answer: the panel and the dock stay on screen.
+  for (const item of ['transcript', 'board']) {
+    const page = await callPage(browser, `${item}_open`, { lang: 'ru', data: 'ru', width: 400, height: 620 });
+    page.api.responses['/api/chat'] = new Promise(() => {}); // the answer never comes: the question stays in the slot
+    await page.click('#call-more');
+    await page.click(`#call-more-${item}`);
+    await page.fill('#call-question', `${'Сколько офисов подключится к пилоту и когда именно '.repeat(20)}?`.slice(0, 1000));
+    await page.press('#call-question', 'Enter');
+    await page.waitForSelector('#call-slot .heard-q');
+    const at = await page.evaluate(() => {
+      const box = selector => document.querySelector(selector).getBoundingClientRect();
+      const q = document.querySelector('#call-slot .heard-q');
+      return { dock: box('.dock').bottom, main: box('main.workspace').height, q: q.getBoundingClientRect().height,
+        line: parseFloat(getComputedStyle(q).lineHeight) };
+    });
+    assert.ok(at.dock <= 621, `${item}: the dock on screen ${at.dock}`);
+    assert.ok(at.main >= 150, `${item}: the panel keeps its room ${at.main}`);
+    assert.ok(at.q <= at.line * 2.2, `${item}: the question clamped ${at.q} / ${at.line}`);
+    await page.context().close();
+  }
   // P2: an older recorder that does not know sessions is never sent a bare verb; the bar asks to update it, on the
   // press and while the pending stop keeps failing.
   for (const lang of ['ru', 'en']) {
