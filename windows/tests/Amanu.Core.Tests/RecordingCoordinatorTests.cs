@@ -85,8 +85,9 @@ public sealed class RecordingCoordinatorTests
         });
 
         Assert.Equal(new SessionCommand(Accepted: true, Relisten: false), answer);
-        Assert.True(coordinator.State.IsPaused);
         await racing!;
+        // P7: the order the capture saw, not state read after the gate is released (the queued stop may run first).
+        Assert.Equal(new[] { "pause", "stop" }, capture.Events);
         Assert.False(coordinator.State.IsRecording);
     }
 
@@ -416,6 +417,7 @@ public sealed class RecordingCoordinatorTests
         public bool Stopped { get; private set; }
         public Exception? StartException { get; init; }
         public bool Paused { get; private set; }
+        public List<string> Events { get; } = new();
 
         public Task StartAsync(
             SessionHandle session,
@@ -436,6 +438,7 @@ public sealed class RecordingCoordinatorTests
         public async Task<CaptureStopResult> StopAsync(CancellationToken cancellationToken)
         {
             if (StopGate is not null) await StopGate.Task;
+            lock (Events) Events.Add("stop");
             Stopped = true;
             return new CaptureStopResult(0, 0);
         }
@@ -443,6 +446,7 @@ public sealed class RecordingCoordinatorTests
         public Task SetPausedAsync(bool paused, CancellationToken cancellationToken)
         {
             Paused = paused;
+            lock (Events) Events.Add(paused ? "pause" : "resume");
             return Task.CompletedTask;
         }
 
