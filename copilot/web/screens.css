@@ -76,10 +76,11 @@ body:has(#archive-dialog[data-mode="library"]:not([hidden])) #home { display: no
 .heard-words { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .heard-words bdi { direction: ltr; }
 #call-stop { flex-shrink: 0; }
-/* Stop and, in the undo window, Resume: one button whose labels share one cell, so it keeps its place and size (N3). */
-#call-stop:not([hidden]) { display: inline-grid; grid-auto-flow: column; align-items: center; column-gap: 0.3em; }
+/* Stop and, in the undo window, Resume: one button whose labels (Stop's with its key) share one cell, so it keeps its
+   place and size, and Resume sits in its middle (N3). */
+#call-stop:not([hidden]) { display: inline-grid; align-items: center; justify-items: center; }
 #call-stop > span { grid-row: 1; grid-column: 1; }
-#call-stop[data-mode="resume"] > .stop, #call-stop:not([data-mode="resume"]) > .resume, #call-stop[data-mode="resume"] kbd { visibility: hidden; }
+#call-stop[data-mode="resume"] > .stop, #call-stop:not([data-mode="resume"]) > .resume { visibility: hidden; }
 .lbl-s { display: none; }
 /* A narrow window shrinks the status, never Menu or the delivery pill: the pill is a few words and is never cut. */
 .tools { position: relative; display: flex; align-items: center; gap: 16px; min-width: 0; }

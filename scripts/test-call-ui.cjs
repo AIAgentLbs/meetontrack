@@ -575,7 +575,7 @@ async function callBar(browser) {
       next: stop.nextElementSibling?.id };
   });
   assert.deepEqual(order, { afterStatus: true, next: 'menu-button' });
-  assert.equal(await text(page, '#call-stop .lbl-l'), 'Stop recording');
+  assert.equal(await text(page, '#call-stop .lbl-l [data-i18n]'), 'Stop recording');
   assert.equal(await page.locator('#call-stop kbd').isVisible(), true, 'the key shows at 1440 px');
   // One click stops: no dialog.
   await page.click('#call-stop');
@@ -1528,6 +1528,13 @@ async function round4(browser) {
     assert.match(resume.text, width > 700 ? /^Продолжить запись/ : /^Продолжить$/);
     for (const side of ['left', 'top', 'width', 'height']) assert.ok(Math.abs(resume[side] - stop[side]) <= 1, `${width} ${side}: ${resume[side]} / ${stop[side]}`);
     assert.ok(Math.abs(resume.top - resume.menu) <= 8, `${width}: Resume on Menu's row`);
+    // The label sits in the middle of Stop's box, not where Stop's text was beside its key.
+    const centered = await page.$eval('#call-stop', node => {
+      const label = [...node.querySelectorAll('span')].find(span => getComputedStyle(span).visibility === 'visible' && span.offsetWidth);
+      const [a, b] = [node.getBoundingClientRect(), label.getBoundingClientRect()];
+      return Math.abs((a.left + a.right) / 2 - (b.left + b.right) / 2);
+    });
+    assert.ok(centered <= 2, `${width}: Resume label off centre by ${centered}px`);
     await page.click('#call-stop');
     await expectPost(page, '/api/recording/resume', { meeting_id: 'm1' });
     await page.context().close();
