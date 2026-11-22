@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import server
-from call_feed import SPEAKABLE_RULE, analysed_watermark, heard_question
+from call_feed import SPEAKABLE_RULE, analysed_watermark, heard_question, provisional_marks
 from permissions import open_settings
 from server import CodexSession, MeetingJournal, analysis_question
 
@@ -80,6 +80,22 @@ class ProvisionalQuestionTests(unittest.TestCase):
         with mock.patch.object(server.time, "time", return_value=NOW + 20):
             self.assertTrue(session.should_analyze("same text", False, urgent=True, latest_at=iso(5)))
             self.assertFalse(session.should_analyze("same text", False, urgent=True, latest_at=iso(5)))
+
+
+    def test_a_later_line_turning_final_is_a_new_analysis(self):
+        # J4: an earlier mic line still provisional pins the watermark; the other side's later question
+        # turning final changes nothing else, and must still let the urgent analysis run.
+        segments = [segment("Hmm", ago=20, source="microphone", provisional=True), segment(ago=10, provisional=True)]
+        before = (analysed_watermark(segments, iso(10)), provisional_marks(segments))
+        segments[1].pop("provisional")
+        after = (analysed_watermark(segments, iso(10)), provisional_marks(segments))
+        self.assertEqual(before[0], after[0])
+        session = CodexSession(None)
+        with mock.patch.object(server.time, "time", return_value=NOW):
+            self.assertTrue(session.should_analyze("same text", False, latest_at=before[0], provisional=before[1]))
+        with mock.patch.object(server.time, "time", return_value=NOW + 20):
+            self.assertTrue(session.should_analyze("same text", False, urgent=True, latest_at=after[0], provisional=after[1]))
+            self.assertFalse(session.should_analyze("same text", False, urgent=True, latest_at=after[0], provisional=after[1]))
 
 
 class AnalysisReplyTests(unittest.TestCase):

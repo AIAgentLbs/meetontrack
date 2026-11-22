@@ -59,7 +59,7 @@ from local_context import LocalContext
 from memo_writer import MemoWriter, folder_sources, moment, past_reports, search_words
 from private_dirs import private_dir
 from recording_control import RecordingControl
-from call_feed import SPEAKABLE_RULE, analysed_watermark, heard_question
+from call_feed import SPEAKABLE_RULE, analysed_watermark, heard_question, provisional_marks
 
 
 HOST = "127.0.0.1"
@@ -2457,9 +2457,11 @@ ASK формулируй как одну короткую реплику, кот
                 self.busy = False
                 self._ticket, self._roots, self._rules = None, (), ""
 
-    def should_analyze(self, transcript: str, force: bool, urgent: bool = False, latest_at: str = "") -> bool:
-        # The watermark is part of what was read: a provisional line turning final changes it, not the text.
-        fingerprint = hashlib.sha256(f"{transcript}\n{latest_at}".encode("utf-8")).hexdigest()
+    def should_analyze(self, transcript: str, force: bool, urgent: bool = False, latest_at: str = "",
+                       provisional: str = "") -> bool:
+        # The watermark and which lines are provisional are part of what was read: a line turning final
+        # changes them, not the text (B4, J4).
+        fingerprint = hashlib.sha256(f"{transcript}\n{latest_at}\n{provisional}".encode("utf-8")).hexdigest()
         with self.lock:
             if self.busy or not transcript.strip():
                 return False
@@ -3620,8 +3622,10 @@ class Handler(BaseHTTPRequestHandler):
                 force = bool(payload.get("force", False))
                 urgent = payload.get("urgent") is True
                 COPILOT.bind_meeting(snap["meeting_id"])
+                segments = snap.get("segments", [])
                 if not COPILOT.should_analyze(context, force, urgent,
-                                              analysed_watermark(snap.get("segments", []), str(snap.get("latest_at") or ""))):
+                                              analysed_watermark(segments, str(snap.get("latest_at") or "")),
+                                              provisional_marks(segments)):
                     self._json({"ok": True, "skipped": True})
                     return
                 scope = REPOSITORIES.resolve(

@@ -44,6 +44,12 @@ def analysed_watermark(segments: list[dict], latest_at: str) -> str:
     return datetime.fromtimestamp(min(provisional) - 0.001).astimezone().isoformat()
 
 
+def provisional_marks(segments: list[dict]) -> str:
+    """Which lines are still provisional, by start time. Part of what an analysis read: a later line turning
+    final while an earlier one stays provisional leaves the watermark where it was, not this (J4)."""
+    return ",".join(str(item.get("timestamp") or "") for item in segments if item.get("provisional"))
+
+
 def heard_question(segments: list[dict], journal: list[dict], *, analysed_until: str,
                    busy: bool, now: float) -> dict | None:
     """The newest recent question from the other side that the analysis has not taken up yet.
