@@ -190,6 +190,23 @@ function lastPhrase(state) {
 // hints. Each part is rebuilt only when what it shows changes, so focus and an open source line survive the poll.
 let callPending = null; // {question, at, queued, meeting}: the person's own question, its answer not back yet; queued: not sent yet
 let callAskNote = null; // a line under the feed about the Ask field: one question already waits, or the call changed (J3)
+let callKept = null; // a question that came back while the field held another draft: one click returns it (M5)
+// An unsent question goes back into an empty field; over another draft it is kept, never lost (M5).
+function callGiveBack(question) {
+  const field = $("call-question");
+  const draft = field.value.trim();
+  if (!draft) field.value = question;
+  else if (draft !== question) callKept = question;
+}
+// Returning it keeps the draft it replaces in turn, so the button stays until the field is empty or the same.
+function callReturnKept() {
+  const field = $("call-question");
+  const draft = field.value.trim();
+  field.value = callKept;
+  callKept = draft && draft !== callKept ? draft : null;
+  renderCall(window.appState);
+  field.focus();
+}
 let callAskError = null; // {question, text, at}: the last Ask failed, shown in the feed for a while (B3, I1)
 let callEarlierOpen = false;
 const callWhereOpen = new Set(); // keys of the hints whose source is open
@@ -369,8 +386,7 @@ function renderCall(state) {
   // A question queued behind an analysis goes out once nothing else holds the line, and only for the call it was
   // asked in: after a change of call it comes back to the field, unsent (J3).
   if (callPending?.queued && callPending.meeting !== transcript.meeting_id) {
-    const field = $("call-question");
-    if (!field.value.trim()) field.value = callPending.question;
+    callGiveBack(callPending.question);
     callPending = null;
     callAskNote = t("call.ask_changed");
   } else if (callPending?.queued && !requestBusy && !state?.copilot?.busy && window.callAsk(callPending.question, callPending.meeting)) {
@@ -389,10 +405,12 @@ function renderCall(state) {
   const pausedSlot = paused && slot.type === "waiting";
   callPart("call-slot", pausedSlot ? { type: "paused", text: t("call.paused"), retry: paused } : slot, callSlotNodes);
   callFitWhere();
-  const note = callAskNote ? { text: callAskNote } : paused && !pausedSlot ? { text: `${t("call.paused")} ${paused}`, check: true } : null;
+  const note = callAskNote || callKept ? { text: callAskNote || "", kept: callKept }
+    : paused && !pausedSlot ? { text: `${t("call.paused")} ${paused}`, check: true } : null;
   $("call-note").hidden = !note;
   callPart("call-note", note, note => note.check
-    ? [`${note.text} `, callButton("ql", t("call.check_ai"), () => $("getting-started-open").click())] : [note.text]);
+    ? [`${note.text} `, callButton("ql", t("call.check_ai"), () => $("getting-started-open").click())]
+    : [note.text, ...(note.kept ? [note.text ? " " : "", callButton("ql", t("call.return_question"), callReturnKept)] : [])]);
 
   // A heard question says who asked, in quotes; our answer sits under its own label, so it never reads as hers (B6).
   const earlier = pick.earlier.map(hint => (hint.kind === "answer"
@@ -577,8 +595,7 @@ window.callAskFailed = (question, text, changed = false) => {
   if (callPending?.question === question) callPending = null;
   if (changed) callAskNote = t("call.ask_changed");
   else callAskError = { question, text, at: Date.now() };
-  const field = $("call-question");
-  if (!field.value.trim()) field.value = question;
+  callGiveBack(question);
   if (document.body.dataset.view === "call") renderCall(window.appState);
 };
 // Escape closes the panel, unless a menu, a dialog or an overlay is open: that one closes first.

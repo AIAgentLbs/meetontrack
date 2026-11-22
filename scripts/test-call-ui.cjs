@@ -1504,6 +1504,33 @@ async function round3(browser) {
 // Section L: critique 4 (30/40), and sections K3 and M.
 async function round4(browser) {
   const plain = value => String(value).replace(/\u00a0/g, ' ').trim();
+  // M5: a question that comes back while the field holds another draft is kept, and one click returns it; the
+  // draft it replaces is kept in turn, so neither is lost.
+  for (const server of [false, true]) {
+    const page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru' });
+    let refuse;
+    page.api.responses['/api/chat'] = new Promise(resolve => { refuse = resolve; });
+    await page.evaluate(() => { requestBusy = true; });
+    await page.fill('#call-question', 'Кто подписывает?');
+    await page.press('#call-question', 'Enter');
+    if (server) {  // sent; the next draft is typed while the server has not answered yet
+      await page.evaluate(() => { requestBusy = false; });
+      await refresh(page);
+      await expectPost(page, '/api/chat', { question: 'Кто подписывает?', meeting_id: 'm1' });
+    } else page.api.fixture.state.transcript.meeting_id = 'm2';
+    await page.fill('#call-question', 'Какой бюджет?');
+    refuse({ status: 409, json: { ok: false, error: 'meeting_changed' } });
+    await page.evaluate(() => { requestBusy = false; });
+    await refresh(page);
+    await page.waitForSelector('#call-note button');
+    assert.equal(await page.inputValue('#call-question'), 'Какой бюджет?', `${server}: the draft stays`);
+    assert.equal(await text(page, '#call-note button'), 'Вернуть вопрос');
+    await page.click('#call-note button');
+    assert.equal(await page.inputValue('#call-question'), 'Кто подписывает?');
+    await page.click('#call-note button');
+    assert.equal(await page.inputValue('#call-question'), 'Какой бюджет?');
+    await page.context().close();
+  }
   // M4: the queued question names its call; the server refusing it (the call changed in between) is the J3 note,
   // never an error, and the question goes back into the field.
   {
