@@ -23,7 +23,7 @@ const TEXT = {
     own: 'What did Anna say about the budget?', ownAnswer: 'Anna said the budget is approved for one quarter and needs the committee to extend it.',
     said: ['Thanks for joining, shall we start with the pilot scope?', 'Yes, we have two offices ready to begin.',
       'Who else needs to see the proposal before it is signed?', 'The committee meets on Thursdays, so that is the earliest.'],
-    long: 'Ask: will the regional offices that join the pilot later keep the same price and the same start conditions as the first two?',
+    long: 'Ask: will the regional offices that join the pilot later keep the same price and the same start conditions as the first two?\nEvidence: Anna said two more regions join in the autumn.',
   },
   ru: {
     review: 'Обзор пилота', anna: 'Анна Петрова', company: 'ООО Пример', me: 'Вы',
@@ -39,7 +39,7 @@ const TEXT = {
     own: 'Что Анна сказала про бюджет?', ownAnswer: 'Анна сказала, что бюджет утвержден на квартал и для продления нужен комитет.',
     said: ['Спасибо, что подключились, начнем с объема пилота?', 'Да, у нас готовы два офиса.',
       'Кто еще должен увидеть предложение до подписания?', 'Комитет собирается по четвергам, раньше не получится.'],
-    long: 'Спросите, сохранятся ли для региональных офисов, которые подключатся к пилоту позже, та же цена и те же условия старта, что и для первых двух?',
+    long: 'Спросите, сохранятся ли для региональных офисов, которые подключатся к пилоту позже, та же цена и те же условия старта, что и для первых двух?\nОснование: Анна сказала, что осенью подключатся еще два региона.',
   },
 };
 

@@ -234,6 +234,8 @@ const refresh = page => page.evaluate(async () => {
   await state();
 });
 const visible = (page, selector) => page.locator(selector).first().isVisible();
+// The slot's source, read the way a person does: open Where this comes from (N1).
+const whereText = async page => { await page.click('#call-slot .why-acts button'); return text(page, '#call-slot .why-more'); };
 const text = (page, selector) => page.locator(selector).first().textContent();
 const focused = page => page.evaluate(() => {
   const active = document.activeElement;
@@ -295,18 +297,13 @@ async function everyFixture(browser) {
 
 // One fixture at a time at 1440 px: what the slot says, and what each control does.
 async function interactions(browser) {
-  // A fresh hint: the label with its time, one source line, Where this comes from opens the rest and stays open.
+  // A fresh hint: the label with its time, then one source component, Where this comes from, closed (N1). It opens the
+  // source and stays open across polls.
   let page = await callPage(browser, 'hint');
   assert.equal(await text(page, '#call-name'), 'Pilot review');
   assert.match(await text(page, '#call-slot .say'), /^Ask · (?:just now|только что)$/);
   assert.equal(await text(page, '#call-slot .hint'), 'Who signs off the purchase?');
-  const why = await page.$eval('#call-slot .why', node => ({ height: node.getBoundingClientRect().height,
-    line: parseFloat(getComputedStyle(node).lineHeight), text: node.textContent }));
-  assert.ok(why.height < why.line * 1.5, `the source is one line: ${why.height} / ${why.line}`);
-  assert.match(why.text, /Anna mentioned a committee/);
-  // The whole source fits on its line and there is nothing more: no Where this comes from.
-  assert.equal(await visible(page, '#call-slot .why-acts'), false);
-  // A source too long for its line gets it.
+  assert.equal(await page.locator('#call-slot .why').count(), 0, 'no inline source line');
   page.api.fixture.state.journal[0].text = `Ask who signs off the purchase?\nEvidence: ${'Anna mentioned a committee that meets on Thursdays and has the final word on every purchase of this size. '.repeat(3)}`;
   await refresh(page);
   const where = page.locator('#call-slot .why-acts button.ql');
@@ -346,9 +343,8 @@ async function interactions(browser) {
   // Nothing fresh: the next open memo question, with its place in the memo.
   page = await callPage(browser, 'memo_question');
   assert.equal(await text(page, '#call-slot .hint'), 'Who signs off the purchase?');
-  // The memo and its company on one source line; it fits, so there is nothing to open (H2). Its age shows (H3).
-  assert.equal(await text(page, '#call-slot .why'), 'From the memo, question 2 · Example LLC');
-  assert.equal(await page.locator('#call-slot .why-acts').isVisible(), false);
+  // Its source sits in Where this comes from, like every hint's (N1). Its age shows (H3).
+  assert.equal(await whereText(page), 'From the memo, question 2 · Example LLC');
   // Dated by the latest analysis that found nothing newer, so never older than Earlier (L2).
   assert.match(await text(page, '#call-slot .say'), /^Ask · 1 min ago$/);
   await page.context().close();
@@ -1119,7 +1115,7 @@ async function fixWave(browser) {
   // B1: the long hint shows whole, in one smaller step of type, never clamped and with nothing hidden behind Where.
   for (const [lang, width] of [['ru', 1440], ['en', 1440], ['ru', 400]]) {
     const page = await callPage(browser, 'long_hint', { lang, data: lang, width });
-    const long = build('long_hint', lang).state.journal[0].text;
+    const long = build('long_hint', lang).state.journal[0].text.split('\n')[0]; // the line, not its source
     const shown = await text(page, '#call-slot .hint');
     assert.ok(long.endsWith(shown) || long.toLowerCase().endsWith(shown.toLowerCase()), `${lang}: ${shown}`);
     assert.ok(!shown.endsWith('…'), shown);
@@ -1289,7 +1285,7 @@ async function polish(browser) {
   // detail uses the same word.
   {
     let page = await ru('hint', { at });
-    assert.equal(await text(page, '#call-slot .why'), 'Источник: Анна упомянула комитет, но без имени.');
+    assert.equal(await whereText(page), 'Источник: Анна упомянула комитет, но без имени.');
     await page.click('#call-board-open');
     await page.$$eval('#call-board details', nodes => nodes.forEach(node => { node.open = true; }));
     const board = await page.locator('#call-board').innerText();
@@ -1297,7 +1293,7 @@ async function polish(browser) {
     assert.match(board, /Источник/);
     await page.context().close();
     page = await ru('memo_question', { at });
-    assert.equal(await text(page, '#call-slot .why'), 'Из мемо, вопрос 2 · ООО Пример');
+    assert.equal(await whereText(page), 'Из мемо, вопрос 2 · ООО Пример');
     await page.context().close();
   }
   // The last phrase heard never opens on half a word at 400 px.
@@ -1334,10 +1330,10 @@ async function round3(browser) {
     assert.equal(await text(page, '#call-slot .why-acts button'), 'Откуда это');
     await page.context().close();
   }
-  {
+  {  // N1 supersedes "no link that only repeats the line": the memo's source is in the one disclosure too.
     const page = await callPage(browser, 'memo_question', { lang: 'ru', data: 'ru' });
-    assert.equal(await text(page, '#call-slot .why'), 'Из мемо, вопрос 2 · ООО Пример');
-    assert.equal(await page.locator('#call-slot .why-acts button').isVisible().catch(() => false), false);
+    assert.equal(await text(page, '#call-slot .why-acts button'), 'Откуда это');
+    assert.equal(await whereText(page), 'Из мемо, вопрос 2 · ООО Пример');
     await page.context().close();
   }
   {
@@ -1504,6 +1500,25 @@ async function round3(browser) {
 // Section L: critique 4 (30/40), and sections K3 and M.
 async function round4(browser) {
   const plain = value => String(value).replace(/\u00a0/g, ' ').trim();
+  // N1 (P1): every hint in the slot has one source component: Where this comes from, closed, holding the source; or,
+  // with no source, one muted line that says so. Nothing else under the line to say.
+  for (const [fixture, expected] of [['hint', 'open'], ['memo_question', 'open'], ['long_hint', 'open'], ['answer', 'none'],
+    ['heard', 'transcript'], ['own_answer', 'chat']]) {
+    const page = await callPage(browser, fixture, { lang: 'ru', data: 'ru' });
+    const parts = await page.$$eval('#call-slot > *', nodes => nodes.filter(node => node.getClientRects().length)
+      .map(node => ({ cls: node.className, text: node.textContent.trim() })));
+    const sources = parts.filter(part => /why/.test(part.cls));
+    assert.equal(sources.length, 1, `${fixture}: ${JSON.stringify(parts)}`);
+    assert.ok(!parts.some(part => /^Источник:|^Из мемо|^Из подготовки/.test(part.text)), `${fixture}: an inline source`);
+    if (expected === 'none') assert.equal(sources[0].text, 'Без источника - проверьте, прежде чем обещать');
+    else {
+      assert.equal(sources[0].text, 'Откуда это');
+      await page.click('#call-slot .why-acts button');
+      if (expected === 'open') assert.ok((await text(page, '#call-slot .why-more')).trim(), `${fixture}: opens the source`);
+      else assert.equal(await page.evaluate(() => document.body.dataset.callPanel), expected);
+    }
+    await page.context().close();
+  }
   // M5: a question that comes back while the field holds another draft is kept, and one click returns it; the
   // draft it replaces is kept in turn, so neither is lost.
   for (const server of [false, true]) {

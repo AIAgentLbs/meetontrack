@@ -98,6 +98,7 @@ function hintCandidates(state) {
       const parts = callParts(item.reply, item);
       // A source that only repeats the question is left out: the question shows once (B6).
       if (callSame(parts.raw, String(item.text || ""))) parts.source = "";
+      parts.detail = parts.detail.filter(line => line !== speaker); // who asked shows above the answer already (N1)
       hints.push({ kind: "answer", tier: 1, at, label, question: String(item.text || ""), speaker,
         ...callCut(callLine(item.reply).line), ...parts });
     } else if (item.category === "CONTRADICTION" && open) {
@@ -265,7 +266,7 @@ function callSlot(state, current, now, stopped = null) {
   // Who asked, in quotes, then Answer over the line, as in Earlier (B6, K3).
   if (current?.kind === "answer") {
     return { type: "answer", key: callHintKey(current), label: t("call.answer"), at: current.at, asked: callAsked(current),
-      text: current.text, full: current.full, source: "", detail: [] };
+      text: current.text, full: current.full, source: current.source, detail: current.detail };
   }
   const heard = state?.heard_question;
   if (heard?.text) {
@@ -307,29 +308,26 @@ function callSlotNodes(slot) {
   if (slot.type === "waiting") return [textNode("p", "waiting", slot.text), textNode("p", "heard-wait", t("call.waiting_help"))];
   if (slot.question) nodes.push(textNode("p", "heard-q", slot.question));
   if (slot.type === "pending" || slot.type === "heard") nodes.push(textNode("p", "heard-wait", t(slot.later ? "call.heard_later" : "call.heard_wait")));
+  // A heard question comes from the transcript: Where this comes from opens it (N1).
+  if (slot.type === "heard") nodes.push(callWhereLink(() => openCallPanel("transcript")));
   if (slot.type === "ask_error") nodes.push(textNode("p", "heard-wait fail", slot.text));
   if (slot.type === "own") {
-    nodes.push(textNode("p", "own-answer", readableAnswer(slot.text)));
-    const actions = document.createElement("p");
-    actions.className = "why-acts";
-    actions.append(callButton("ql", t("call.where"), () => openCallPanel("chat"))); // one name across Call (H2)
-    nodes.push(actions);
+    nodes.push(textNode("p", "own-answer", readableAnswer(slot.text)), callWhereLink(() => openCallPanel("chat")));
   }
   if (slot.type === "answer" || slot.type === "hint") {
     nodes.push(textNode("p", callWords(slot.text).length > CALL_HINT_WORDS ? "hint long" : "hint", slot.text));
   }
-  // Where this comes from opens what the slot does not show: the whole hint when it was cut, the whole source line
-  // and the detail. A source that fits on its line with nothing else to show gets no control (callFitWhere).
+  // One source component on every hint (N1): Where this comes from, closed, opens the source, the whole hint when it
+  // was cut and the detail. Nothing to open: one muted line says there is no source, never an empty space.
   const more = [slot.full, slot.source, ...(slot.detail || [])].filter(Boolean);
+  if ((slot.type === "answer" || slot.type === "hint") && !more.length) nodes.push(textNode("p", "why", t("call.no_source")));
   if ((slot.type === "answer" || slot.type === "hint") && more.length) {
-    const why = slot.source ? textNode("p", "why", slot.source) : null;
     const box = document.createElement("div");
     box.className = "why-more";
     box.id = "call-why-more";
     box.append(...more.map((line, index) => textNode("p", index === 0 && slot.full ? "why-full" : "", line)));
     const actions = document.createElement("p");
     actions.className = "why-acts";
-    if (!slot.full && !slot.detail?.length) actions.dataset.clip = "";
     const where = callButton("ql", "", () => {
       if (callWhereOpen.has(slot.key)) callWhereOpen.delete(slot.key);
       else callWhereOpen.add(slot.key);
@@ -339,16 +337,22 @@ function callSlotNodes(slot) {
     // Toggled in place: the live slot is not rebuilt, so the hint is not announced again.
     const show = () => {
       const open = callWhereOpen.has(slot.key);
-      if (why) why.hidden = open;
       box.hidden = !open;
       where.textContent = t(open ? "call.where_hide" : "call.where");
       where.setAttribute("aria-expanded", String(open));
     };
     show();
     actions.append(where);
-    nodes.push(...[why, box, actions].filter(Boolean));
+    nodes.push(box, actions);
   }
   return nodes;
+}
+// Where this comes from as a link to the place that holds it (the chat, the transcript): one name across Call (H2).
+function callWhereLink(open) {
+  const actions = document.createElement("p");
+  actions.className = "why-acts";
+  actions.append(callButton("ql", t("call.where"), open));
+  return actions;
 }
 
 function renderCall(state) {
@@ -404,7 +408,6 @@ function renderCall(state) {
   // Nothing else to show: the pause is the main line, one message (D2). Under a hint it stays a note.
   const pausedSlot = paused && slot.type === "waiting";
   callPart("call-slot", pausedSlot ? { type: "paused", text: t("call.paused"), retry: paused } : slot, callSlotNodes);
-  callFitWhere();
   const note = callAskNote || callKept ? { text: callAskNote || "", kept: callKept }
     : paused && !pausedSlot ? { text: `${t("call.paused")} ${paused}`, check: true } : null;
   $("call-note").hidden = !note;
@@ -511,14 +514,6 @@ setInterval(() => {
   if (callHeardSqueezed()) callFitHeard();
 }, 1000);
 
-// A source with nothing else to open shows Where this comes from only when its line is cut. Measured after every
-// render and on resize; an open source stays open.
-function callFitWhere() {
-  const actions = $("call-slot").querySelector(".why-acts[data-clip]");
-  const why = $("call-slot").querySelector(".why");
-  if (actions && why && !why.hidden) actions.hidden = why.scrollWidth <= why.clientWidth;
-}
-addEventListener("resize", callFitWhere);
 // The dock's height, for More's menu above it and for scrolling to Earlier past it (as --bar-h for the bar).
 const callDock = document.querySelector("#call .dock");
 new ResizeObserver(() => document.documentElement.style.setProperty("--dock-h", `${Math.ceil(callDock.getBoundingClientRect().height)}px`))
