@@ -22,7 +22,9 @@ const errors = [];
     { id: 'r1', category: 'RISK', source: 'copilot', text: 'Нет бюджета', meeting_id: 't', status: 'open' },
   ];
   const state = () => ({ preferences, journal, frames: [], project: {},
-    transcript: { meeting_id: 't', meeting: 'Test call', status: 'recording', live: true, started_at: '2026-10-22T10:00:00Z', segments: [], speakers: [] },
+    // The After view: tabs and status filters live there; the Call view shows the board's columns only (fix wave C1).
+    transcript: { meeting_id: 't', meeting: 'Test call', status: 'finished', live: false, started_at: '2026-10-22T10:00:00Z',
+      ended_at: new Date().toISOString(), segments: [], speakers: [] },
     recording_health: { capture: { audio_recording: true } },
     meeting_chat: [{ id: 'c1', sender: 'Anna', text: 'Когда релиз?' }],
     copilot: { busy: true, analysis: { state: 'idle' }, messages: [  // busy = an auto-analysis is running
