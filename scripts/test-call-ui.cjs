@@ -1517,6 +1517,10 @@ async function round4(browser) {
       assert.equal(await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('h3')?.textContent,
         [box.x + 4, box.y + box.height / 2]), heading, `${heading} is covered`);
     }
+    // No dead space: each column starts right under the one before it, not at an equal row height.
+    const gaps = await page.$$eval('#call-board .board-column', columns => columns.slice(1).map((column, index) =>
+      Math.round(column.getBoundingClientRect().top - columns[index].querySelector('.board-list').lastElementChild.getBoundingClientRect().bottom)));
+    assert.ok(gaps.every(gap => gap >= 0 && gap <= 48), `gaps between columns: ${gaps}`);
     const empties = await page.locator('#call-board .board-empty').evaluateAll(nodes => nodes.map(node =>
       Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight))));
     assert.ok(empties.length > 0 && empties.every(lines => lines <= 2), `empty states: ${empties}`);
@@ -1582,6 +1586,14 @@ async function round4(browser) {
     assert.ok(fit.over <= 1, `${lang} ${width}: cut by the box`);
     const rest = fit.text.replace(/^…/u, '');
     assert.ok(phrase === rest || phrase.endsWith(` ${rest}`), `${lang} ${width}: ${fit.text}`);
+    await page.context().close();
+  }
+  // Also on the first frame after the page opens at that width, before the clock's first tick (the critique shoots then).
+  for (const width of [1024, 400]) {
+    const page = await callPage(browser, 'earlier_open', { lang: 'ru', data: 'ru', width });
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    const over = await page.$eval('#call-heard .heard-words', node => node.scrollWidth - node.clientWidth);
+    assert.ok(over <= 1, `${width}: opens cut by the box (${over}px)`);
     await page.context().close();
   }
   {

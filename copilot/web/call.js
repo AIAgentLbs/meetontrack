@@ -456,6 +456,8 @@ function renderCallBar(state, now) {
     heard.replaceChildren(textNode("span", "", label), words);
     callFitHeard();
   }
+  // The rest of the bar renders after this (its buttons narrow the line): fit again once it has, if squeezed (L4).
+  requestAnimationFrame(() => callHeardSqueezed() && callFitHeard());
 }
 // Whole words only: they drop from the start until the line fits, so it never opens on half a word (G5, L4). Fewer
 // than three words left is a bare fragment: the line shows nothing. Run again whenever the bar's width changes.

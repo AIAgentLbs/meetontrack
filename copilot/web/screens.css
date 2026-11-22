@@ -318,6 +318,7 @@ body[data-view="call"] #speaker-edit { color: var(--text); }
   body[data-view="call"][data-call-panel] main.workspace { height: calc(100dvh - var(--bar-h)); min-height: 0; overflow: hidden; }
   body[data-view="call"][data-call-panel] .workspace-view:has(.call-board:not([hidden])) { max-height: none; min-height: 0; }
   body[data-view="call"] .call-board .board-list { max-height: none; overflow: visible; }
+  body[data-view="call"] .call-board .board-columns { grid-auto-rows: auto; }
 }
 /* A column with no counter keeps its rule in line with the others. */
 body[data-view="call"] .call-board .board-column-header p { min-height: 1lh; }
