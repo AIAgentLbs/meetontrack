@@ -1490,6 +1490,34 @@ async function round3(browser) {
   }
 }
 
+// Section L: critique 4 (30/40), and section K3.
+async function round4(browser) {
+  // L1 (P1): at 400 px the board stacks its four columns and the pane scrolls to each heading; an empty column says
+  // so in one line. L4: no pane makes the page taller than the window, and nothing shows under the dock.
+  {
+    const page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru', width: 400, height: 900 });
+    await page.click('#call-more');
+    await page.click('#call-more-board');
+    for (const heading of ['Спросить у клиента', 'Вопросы к вам', 'Риски и возражения', 'Проверка фактов']) {
+      const node = page.locator('#call-board .board-column-header h3', { hasText: heading });
+      await node.scrollIntoViewIfNeeded();
+      const box = await node.boundingBox();
+      assert.ok(box && box.y >= 0 && box.y + box.height <= 900, `${heading}: ${JSON.stringify(box)}`);
+      assert.equal(await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('h3')?.textContent,
+        [box.x + 4, box.y + box.height / 2]), heading, `${heading} is covered`);
+    }
+    const empties = await page.locator('#call-board .board-empty').evaluateAll(nodes => nodes.map(node =>
+      Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight))));
+    assert.ok(empties.length > 0 && empties.every(lines => lines <= 2), `empty states: ${empties}`);
+    for (const panel of ['board', 'transcript', 'notes', 'chat', null]) {
+      await page.evaluate(panel => openCallPanel(panel), panel);
+      const tall = await page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
+      assert.ok(tall <= 0, `${panel}: page ${tall}px taller than the window`);
+    }
+    await page.context().close();
+  }
+}
+
 async function expectPost(page, path, body) {
   for (let tries = 0; tries < 50 && !posts(page, path).length; tries++) await page.waitForTimeout(20);
   assert.deepEqual(posts(page, path), [body]);
@@ -1499,7 +1527,7 @@ async function expectPost(page, path, body) {
   const browser = await chromium.launch();
   try {
     // ONLY=round3 runs one block of checks while working on it.
-    if (process.env.ONLY) { await { round3, polish }[process.env.ONLY](browser); console.log(`${process.env.ONLY} passed`); return; }
+    if (process.env.ONLY) { await { round3, round4, polish }[process.env.ONLY](browser); console.log(`${process.env.ONLY} passed`); return; }
     await functions(browser);
     await fixtures(browser);
     await interactions(browser);
@@ -1509,6 +1537,7 @@ async function expectPost(page, path, body) {
     await fixWave(browser);
     await polish(browser);
     await round3(browser);
+    await round4(browser);
     console.log('call UI checks passed');
   } finally {
     await browser.close();
