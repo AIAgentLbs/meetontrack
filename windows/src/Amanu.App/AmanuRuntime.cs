@@ -429,6 +429,15 @@ public sealed class AmanuRuntime : IAsyncDisposable
 
     public Task TogglePauseAsync() => coordinator.TogglePauseAsync();
 
+    /// <summary>A pipe verb for one session, checked and done under the coordinator's gate (M1).</summary>
+    public async Task<bool> SessionCommandAsync(string verb, string? session)
+    {
+        var done = await coordinator.CommandAsync(verb, DateTimeOffset.Now,
+            () => RecordVerbs.Accepts(session, State.IsRecording ? LiveSessionId : ""));
+        if (done.Relisten) await ResumeRecognitionAsync();
+        return done.Accepted;
+    }
+
     public async Task StopForExitAsync()
     {
         if (State.IsRecording) await coordinator.StopAsync(DateTimeOffset.Now, "quit");

@@ -68,6 +68,68 @@ public sealed class RecordingCoordinatorTests
     }
 
     [Fact]
+    public async Task A_session_command_checks_the_session_under_the_gate()
+    {
+        // M1: the session check and the action are one step; nothing can start or stop between them.
+        using var root = new TemporaryDirectory();
+        var capture = new InspectableCapture();
+        var coordinator = Coordinator(root.Path, capture);
+        await coordinator.StartManualAsync(Started);
+        Task? racing = null;
+
+        var answer = await coordinator.CommandAsync("pause", Started, () =>
+        {
+            racing = coordinator.StopAsync(Started.AddMinutes(1), "manual");
+            Assert.False(racing.IsCompleted);
+            return true;
+        });
+
+        Assert.Equal(new SessionCommand(Accepted: true, Relisten: false), answer);
+        Assert.True(coordinator.State.IsPaused);
+        await racing!;
+        Assert.False(coordinator.State.IsRecording);
+    }
+
+    [Fact]
+    public async Task A_command_for_another_session_does_nothing()
+    {
+        using var root = new TemporaryDirectory();
+        var capture = new InspectableCapture();
+        var coordinator = Coordinator(root.Path, capture);
+        await coordinator.StartManualAsync(Started);
+
+        foreach (var verb in new[] { "stop", "pause", "resume", "relisten" })
+            Assert.False((await coordinator.CommandAsync(verb, Started, () => false)).Accepted);
+
+        Assert.True(coordinator.State.IsRecording);
+        Assert.False(coordinator.State.IsPaused);
+        Assert.False(capture.Stopped);
+    }
+
+    [Fact]
+    public async Task A_command_reads_the_pause_state_under_the_gate()
+    {
+        using var root = new TemporaryDirectory();
+        var capture = new InspectableCapture();
+        var coordinator = Coordinator(root.Path, capture);
+        await coordinator.StartManualAsync(Started);
+
+        Assert.Equal(new SessionCommand(true, false), await coordinator.CommandAsync("pause", Started, () => true));
+        Assert.Equal(new SessionCommand(true, false), await coordinator.CommandAsync("pause", Started, () => true));
+        Assert.True(coordinator.State.IsPaused);
+        Assert.Equal(new SessionCommand(true, false), await coordinator.CommandAsync("relisten", Started, () => true));
+        Assert.True(coordinator.State.IsPaused);
+        Assert.Equal(new SessionCommand(true, true), await coordinator.CommandAsync("resume", Started, () => true));
+        Assert.False(coordinator.State.IsPaused);
+        Assert.False(capture.Paused);
+
+        Assert.Equal(new SessionCommand(true, false), await coordinator.CommandAsync("stop", Started.AddMinutes(2), () => true));
+        Assert.False(coordinator.State.IsRecording);
+        Assert.True(capture.Stopped);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.CommandAsync("stop", Started, () => true));
+    }
+
+    [Fact]
     public async Task Automatic_observations_start_the_matching_process_family()
     {
         using var root = new TemporaryDirectory();

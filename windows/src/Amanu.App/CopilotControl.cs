@@ -31,8 +31,9 @@ public static class CopilotControl
                 object result;
                 try
                 {
-                    // J1: a command for a session that is no longer the live one (the next call began) does nothing.
-                    if (!RecordVerbs.Accepts(session, runtime.State.IsRecording ? runtime.LiveSessionId : ""))
+                    // J1, M1: a command for a session that is no longer the live one (the next call began) does nothing.
+                    // The check and the action run under the coordinator's gate, so no call starts between them.
+                    if (session is not null && command is not ("stop" or "pause" or "resume" or "relisten"))
                     {
                         await writer.WriteLineAsync(JsonSerializer.Serialize(new { ok=false, error=SessionMismatch }));
                         continue;
@@ -44,15 +45,14 @@ public static class CopilotControl
                             if (runtime.State.IsRecording) throw new InvalidOperationException("A meeting is already recording");
                             await runtime.StartManualAsync(); break;
                         case "stop":
-                            if (!runtime.State.IsRecording) throw new InvalidOperationException("No active recording");
-                            await runtime.StopManualAsync(); break;
                         case "pause":
                         case "resume":
                         case "relisten":
-                            if (!runtime.State.IsRecording) throw new InvalidOperationException("No active recording");
-                            var (togglePause, relisten) = RecordVerbs.Effects(command!, runtime.State.IsPaused);
-                            if (togglePause) await runtime.TogglePauseAsync();
-                            if (relisten) await runtime.ResumeRecognitionAsync();
+                            if (!await runtime.SessionCommandAsync(command, session))
+                            {
+                                await writer.WriteLineAsync(JsonSerializer.Serialize(new { ok=false, error=SessionMismatch }));
+                                continue;
+                            }
                             break;
                         case "quit-when-idle":
                             _ = System.Windows.Application.Current.Dispatcher.InvokeAsync(App.QuitWhenIdleAsync); break;
