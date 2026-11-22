@@ -392,8 +392,10 @@ const errors = [];
     await page.waitForFunction(() => document.querySelector('#updates-notice').hidden);
     await page.locator('#menu-button').click();
     assert.deepEqual(await updateItems(), [false, true]);
-    // In a call the call's own controls are in the menu.
-    assert.equal(await page.locator('#swap-panels').isVisible(), true);
+    // In a call the call's own controls are in the menu. Swap panels and Show transcript are not: the Call view
+    // shows one pane at a time, so they would do nothing there (Task 8).
+    assert.equal(await page.evaluate(() => document.body.dataset.view), 'call');
+    assert.equal(await page.locator('#swap-panels').isVisible(), false);
     assert.equal(await page.locator('#new-meeting-button').isVisible(), true);
     // Notes for the call name it and switch the workspace to the notes tab.
     const notes = page.locator('#menu-notes');

@@ -202,6 +202,8 @@ function renderStatus(view) {
   // Stop recording: during a live call until it is pressed; one click, no dialog.
   $("call-stop").hidden = !isLive(window.appState) || status.kind === "stopped";
   $("call-stop").disabled = homeBusy.has("status|stop");
+  $("call-more-stop").hidden = $("call-stop").hidden;
+  $("call-more-stop").disabled = $("call-stop").disabled;
   // R34: the bar owns a call that is not being recorded, and How to fix sits beside its button.
   $("call-status-help").hidden = status.kind !== "not_recording";
   $("menu-notes").hidden = view === "home";
@@ -247,7 +249,7 @@ const shortcuts = [
   { label: "shell.key.join", kbd: "J", match: event => event.code === "KeyJ", control: () => homeControl('.actions a.ql[target="_blank"]') },
   { label: "shell.key.skip", kbd: "N", match: event => event.code === "KeyN", control: () => homeControl('.actions button.quiet[data-key$="|skip"]') },
 ];
-const OVERLAYS = "dialog[open], #settings-panel:not([hidden]), #getting-started:not([hidden]), #archive-dialog:not([hidden]), #app-menu:not([hidden])";
+const OVERLAYS = "dialog[open], #settings-panel:not([hidden]), #getting-started:not([hidden]), #archive-dialog:not([hidden]), #app-menu:not([hidden]), #call-more-menu:not([hidden])";
 
 document.addEventListener("keydown", event => {
   const shortcut = shortcuts.find(item => item.match(event));
@@ -320,38 +322,44 @@ function renderShell() {
   renderShortcuts();
 }
 
-// The menu: opens on its first item, arrows move, Escape or a click outside closes it.
-// Choosing an item closes it too; focus goes back to Menu unless the item moved it elsewhere.
+// A menu (Menu in the bar, More in the dock): opens on its first item, arrows move, Escape or a click outside closes it.
+// Choosing an item closes it too; focus goes back to its button unless the item moved it elsewhere.
 const menu = $("app-menu");
-const menuItems = () => [...menu.querySelectorAll('[role="menuitem"]')].filter(item => item.getClientRects().length && !item.disabled);
+const MENUS = [[menu, $("menu-button")], [$("call-more-menu"), $("call-more")]];
+const menuItems = list => [...list.querySelectorAll('[role="menuitem"]')].filter(item => item.getClientRects().length && !item.disabled);
 
-function toggleMenu(open) {
-  if (!open && menu.contains(document.activeElement)) $("menu-button").focus();
-  if (open) renderShortcuts();
-  menu.hidden = !open;
-  $("menu-button").setAttribute("aria-expanded", String(open));
-  if (open) menuItems()[0]?.focus();
+function toggleMenu(list, button, open) {
+  if (!open && list.contains(document.activeElement)) button.focus();
+  if (open && list === menu) renderShortcuts();
+  list.hidden = !open;
+  button.setAttribute("aria-expanded", String(open));
+  if (open) menuItems(list)[0]?.focus();
 }
 
-$("menu-button").addEventListener("click", () => toggleMenu(menu.hidden));
-menu.addEventListener("click", event => event.target.closest('[role="menuitem"]') && toggleMenu(false));
-// While the menu is open its keys work wherever focus is, and Escape closes nothing else.
+for (const [list, button] of MENUS) {
+  button.addEventListener("click", () => toggleMenu(list, button, list.hidden));
+  list.addEventListener("click", event => event.target.closest('[role="menuitem"]') && toggleMenu(list, button, false));
+}
+// While a menu is open its keys work wherever focus is, and Escape closes nothing else.
 document.addEventListener("keydown", event => {
-  if (menu.hidden) return;
+  const [list, button] = MENUS.find(([list]) => !list.hidden) || [];
+  if (!list) return;
   if (event.key === "Escape") {
     event.stopPropagation();
-    toggleMenu(false);
-    $("menu-button").focus();
+    toggleMenu(list, button, false);
+    button.focus();
   } else if (event.key === "Tab") {
-    toggleMenu(false);
+    toggleMenu(list, button, false);
   } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();
-    const items = menuItems(), index = items.indexOf(document.activeElement), down = event.key === "ArrowDown";
+    const items = menuItems(list), index = items.indexOf(document.activeElement), down = event.key === "ArrowDown";
     items.at(index < 0 ? (down ? 0 : -1) : (index + (down ? 1 : -1)) % items.length)?.focus();
   }
 }, true);
 document.addEventListener("click", event => {
-  if (!menu.hidden && !menu.contains(event.target) && !$("menu-button").contains(event.target)) toggleMenu(false);
+  for (const [list, button] of MENUS) {
+    if (!list.hidden && !list.contains(event.target) && !button.contains(event.target)) toggleMenu(list, button, false);
+  }
 });
 const goHome = () => {
   if (!$("archive-dialog").hidden) closeArchive();
@@ -399,6 +407,7 @@ $("call-status-action").addEventListener("click", event => {
   renderShell();
 });
 $("call-stop").addEventListener("click", event => statusAction(event.currentTarget, "stop"));
+$("call-more-stop").addEventListener("click", () => $("call-stop").click());
 $("call-stop").querySelector("kbd").textContent = STOP_KEY;
 $("menu-notes").addEventListener("click", () => (document.body.dataset.view === "call" ? openCallPanel("notes")
   : document.querySelector('[data-content-view="notes"]').click()));

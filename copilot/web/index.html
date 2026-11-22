@@ -240,8 +240,13 @@
               <kbd aria-hidden="true">/</kbd>
             </span>
             <button id="call-send" type="submit"><span data-i18n="call.send">Спросить</span> <kbd aria-hidden="true">↵</kbd></button>
-            <button id="call-more" class="ask-more" type="button" aria-expanded="false" aria-controls="call-more-menu" hidden></button>
-            <div id="call-more-menu" class="menu" role="menu" hidden></div>
+            <button id="call-more" type="button" data-i18n="call.more" aria-haspopup="menu" aria-expanded="false" aria-controls="call-more-menu">Еще</button>
+            <div id="call-more-menu" class="menu" role="menu" aria-labelledby="call-more" hidden>
+              <button id="call-more-earlier" type="button" role="menuitem" hidden></button>
+              <button id="call-more-transcript" type="button" role="menuitem"><span class="mi"><span data-i18n="call.transcript">Расшифровка</span><small data-i18n="call.transcript_note">весь разговор текстом</small></span></button>
+              <button id="call-more-board" type="button" role="menuitem"><span class="mi"><span data-i18n="call.board">Доска</span><small data-i18n="call.board_note">вопросы, риски и проверка фактов</small></span></button>
+              <button id="call-more-stop" type="button" role="menuitem" data-i18n="action.stop" hidden>Остановить запись</button>
+            </div>
           </form>
         </div>
       </div>

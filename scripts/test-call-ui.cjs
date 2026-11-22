@@ -1,6 +1,6 @@
 // The Call view against a fake API. Task 5: the pure functions of call.js (hint choice, heartbeat, clock,
 // last phrase), evaluated on the `hint` page so they run with the real translations. Task 6: the feed, the dock
-// and the panels opened on demand.
+// and the panels opened on demand. Task 7: the top bar. Task 8: the narrow window and More.
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const { build, open, NAMES } = require('./call-fixtures.cjs');
@@ -711,6 +711,140 @@ async function callBar(browser) {
   await page.context().close();
 }
 
+// A narrow window (Task 8): under 700 px the dock's row goes into More, the call's name keeps one line, the slot is
+// in view without scrolling and the bar keeps Stop with its short label.
+const box = (page, selector) => page.$eval(selector, node => {
+  const { top, bottom, left, right, height } = node.getBoundingClientRect();
+  return { top, bottom, left, right, height, line: parseFloat(getComputedStyle(node).lineHeight) };
+});
+const items = page => page.$$eval('#call-more-menu [role="menuitem"]', nodes => nodes.filter(node => node.getClientRects().length)
+  .map(node => node.innerText.replace(/\s+/g, ' ').trim()));
+async function narrow(browser) {
+  for (const width of [400, 520]) for (const fixture of ['hint', 'heard', 'other_lost', 'stopped']) {
+    const label = `${fixture} ${width}`;
+    const page = await callPage(browser, fixture, { width });
+    assert.equal(await visible(page, '.dock-row'), false, `${label}: dock row`);
+    assert.equal(await visible(page, '#call-more'), true, `${label}: More`);
+    assert.equal(await text(page, '#call-more'), 'More');
+    assert.equal(await page.evaluate(() => scrollY), 0);
+    const slot = await box(page, '#call-slot :is(.hint, .heard-q)');
+    const dock = await box(page, '.dock');
+    const bar = await box(page, '.topbar');
+    assert.ok(slot.top >= bar.bottom && slot.bottom <= dock.top, `${label}: the slot is in view ${JSON.stringify([slot, bar.bottom, dock.top])}`);
+    // Stop stays in the bar with its short label; stopped, it is gone from the bar and from More.
+    const stop = await visible(page, '#call-stop');
+    assert.equal(stop, fixture !== 'stopped', `${label}: Stop`);
+    if (stop) {
+      assert.equal(await visible(page, '#call-stop .lbl-s'), true, `${label}: short label`);
+      assert.equal(await text(page, '#call-stop .lbl-s'), 'Stop');
+      assert.equal(await visible(page, '#call-stop .lbl-l'), false);
+    }
+    // "/" still goes to the ask field: More hides the row, never the field.
+    await page.locator('#call-name').click();
+    await page.keyboard.press('/');
+    assert.equal(await focused(page), '#call-question', `${label}: /`);
+    // The call's name keeps one line, a long one too, cut with an ellipsis (critique P3).
+    page.api.fixture.state.transcript.display_meeting = 'Pilot review with Example LLC on the regional offices, the committee and the second quarter';
+    await refresh(page);
+    const name = await page.$eval('#call-name', node => ({ height: node.clientHeight, line: parseFloat(getComputedStyle(node).lineHeight),
+      cut: node.scrollWidth > node.clientWidth, overflow: getComputedStyle(node).textOverflow }));
+    assert.ok(name.height > 0 && name.height < name.line * 1.5, `${label}: one line ${JSON.stringify(name)}`);
+    assert.deepEqual([name.cut, name.overflow], [true, 'ellipsis'], label);
+    if (width === 520 && fixture !== 'stopped') {
+      // 480-600 px: the clock and the sides on their own row under the record line, words kept, the last line heard on one.
+      const record = await box(page, '#call-status-text');
+      const live = await box(page, '#call-timer');
+      assert.ok(live.top >= record.bottom, `${label}: own row ${live.top} / ${record.bottom}`);
+      assert.match((await beatTexts(page)).join(' | '), /^You: heard \| Other side: (not )?heard$/);
+      const heard = await box(page, '#call-heard');
+      assert.ok(heard.height < (heard.line || 20) * 1.5, `${label}: one line heard`);
+    }
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, `${label}: scroll`);
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  }
+
+  // More at 400 px: four items in order, opened on the first, arrows move, Escape closes it back on More.
+  let page = await callPage(browser, 'more_open', { width: 400 });
+  const more = page.locator('#call-more');
+  assert.equal(await more.getAttribute('aria-haspopup'), 'menu');
+  await more.click();
+  assert.equal(await visible(page, '#call-more-menu'), true);
+  assert.equal(await more.getAttribute('aria-expanded'), 'true');
+  assert.deepEqual(await items(page), ['Earlier hints (1)', 'Transcript the whole conversation as text',
+    'Board questions, risks and fact checks', 'Stop recording']);
+  assert.equal(await focused(page), '#call-more-earlier');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await focused(page), '#call-more-transcript');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  assert.equal(await focused(page), '#call-more-stop');
+  const menuBox = await box(page, '#call-more-menu');
+  const barBox = await box(page, '.topbar');
+  assert.ok(menuBox.top >= barBox.bottom && menuBox.bottom <= 900 && menuBox.left >= 0 && menuBox.right <= 400,
+    `the menu fits ${JSON.stringify(menuBox)}`);
+  await page.keyboard.press('Escape');
+  assert.equal(await visible(page, '#call-more-menu'), false);
+  assert.equal(await more.getAttribute('aria-expanded'), 'false');
+  assert.equal(await focused(page), '#call-more');
+  assert.equal(await visible(page, '#call'), true, 'Escape on the menu leaves the feed');
+  // A click outside closes it.
+  await more.click();
+  await page.locator('#call-name').click();
+  assert.equal(await visible(page, '#call-more-menu'), false);
+  // Earlier shows the list under the slot.
+  await more.click();
+  await page.click('#call-more-earlier');
+  assert.equal(await visible(page, '#call-earlier'), true);
+  assert.equal(await visible(page, '#call-more-menu'), false);
+  // Transcript and Board open their panels; Escape returns to the feed with focus on More (F2).
+  for (const [item, target, heading] of [['#call-more-transcript', '.transcript-pane', '#transcript-heading'],
+    ['#call-more-board', '#call-board', 'button[board]']]) {
+    await more.click();
+    await page.click(item);
+    assert.equal(await visible(page, target), true, item);
+    assert.equal(await visible(page, '#call'), false);
+    assert.equal(await focused(page), heading);
+    await page.keyboard.press('Escape');
+    assert.equal(await visible(page, '#call'), true, `${item}: Escape`);
+    assert.equal(await focused(page), '#call-more');
+  }
+  // Stop recording in More does what the bar's Stop does.
+  await more.click();
+  await page.click('#call-more-stop');
+  await expectPost(page, '/api/recording/stop', { meeting_id: 'm1' });
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+
+  // Stopped: More has no Stop.
+  page = await callPage(browser, 'stopped', { width: 400 });
+  await page.click('#call-more');
+  assert.equal((await items(page)).includes('Stop recording'), false);
+  await page.context().close();
+
+  // RU: the item notes.
+  page = await callPage(browser, 'more_open', { width: 400, lang: 'ru', data: 'ru' });
+  await page.click('#call-more');
+  assert.deepEqual((await items(page)).slice(1, 3), ['Расшифровка весь разговор текстом', 'Доска вопросы, риски и проверка фактов']);
+  assert.equal(await text(page, '#call-more'), 'Еще');
+  await page.context().close();
+
+  // A wide window keeps the dock's row and has no More.
+  page = await callPage(browser, 'hint');
+  assert.equal(await visible(page, '.dock-row'), true);
+  assert.equal(await visible(page, '#call-more'), false);
+  // The menu in the Call view: Show transcript and Swap panels do nothing here, so they are not offered.
+  page.api.fixture.state.preferences.transcript_hidden = true;
+  await refresh(page);
+  await page.waitForSelector('#transcript-show:not([hidden])', { state: 'attached' });
+  await page.click('#menu-button');
+  const offered = await page.$$eval('#app-menu [role="menuitem"]', nodes => nodes.filter(node => node.getClientRects().length).map(node => node.id));
+  assert.ok(!offered.includes('transcript-show') && !offered.includes('swap-panels'), offered.join(', '));
+  await page.keyboard.press('Escape');
+  assert.equal(await focused(page), '#menu-button');
+  await page.context().close();
+}
+
 async function expectPost(page, path, body) {
   for (let tries = 0; tries < 50 && !posts(page, path).length; tries++) await page.waitForTimeout(20);
   assert.deepEqual(posts(page, path), [body]);
@@ -723,6 +857,7 @@ async function expectPost(page, path, body) {
     await fixtures(browser);
     await interactions(browser);
     await callBar(browser);
+    await narrow(browser);
     await everyFixture(browser);
     console.log('call UI checks passed');
   } finally {

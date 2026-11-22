@@ -300,8 +300,10 @@ function renderCall(state) {
   const count = t("call.earlier", { n: earlier.length });
   if (open.textContent !== count) open.textContent = count;
   open.setAttribute("aria-expanded", String(callEarlierOpen));
-  // Nothing earlier: no Earlier button at all (ruling 4).
+  // Nothing earlier: no Earlier button at all (ruling 4), in the dock or in More.
   open.hidden = !earlier.length;
+  if ($("call-more-earlier").textContent !== count) $("call-more-earlier").textContent = count;
+  $("call-more-earlier").hidden = !earlier.length;
   $("call-earlier").hidden = !callEarlierOpen || !earlier.length;
   callPart("call-earlier", earlier, list => {
     const items = document.createElement("ul");
@@ -357,13 +359,14 @@ function callFitWhere() {
 addEventListener("resize", callFitWhere);
 
 // The transcript or the board (and the chat and notes tabs) opened as a panel over the feed. Focus goes to the
-// panel's heading, and back to the control that opened it when the panel closes.
+// panel's heading, and back to the control that opened it when the panel closes (an item of More: More itself).
 let callOpener = null;
 function openCallPanel(panel) {
   const body = document.body;
   const wasOpen = Boolean(body.dataset.callPanel);
   if (panel) {
-    if (!wasOpen) callOpener = document.activeElement === body ? null : document.activeElement;
+    const active = document.activeElement;
+    if (!wasOpen) callOpener = active === body ? null : active.closest("#call-more-menu") ? $("call-more") : active;
     body.dataset.callPanel = panel;
     if (panel !== "transcript") document.querySelector(`[data-content-view="${panel}"]`).click();
   } else {
@@ -381,6 +384,10 @@ addEventListener("DOMContentLoaded", () => {
   });
   $("call-transcript-open").addEventListener("click", () => openCallPanel("transcript"));
   $("call-board-open").addEventListener("click", () => openCallPanel("board"));
+  // More (under 700 px) holds the dock's row: each item presses its control.
+  for (const [item, control] of [["earlier", "earlier-open"], ["transcript", "transcript-open"], ["board", "board-open"]]) {
+    $(`call-more-${item}`).addEventListener("click", () => $(`call-${control}`).click());
+  }
   $("call-back").addEventListener("click", () => openCallPanel(null));
   // A tab switched inside a panel: the panel follows it, so the composer rule (F5) holds.
   document.querySelectorAll("[data-content-view]").forEach(button => button.addEventListener("click", () => {
@@ -400,7 +407,7 @@ addEventListener("DOMContentLoaded", () => {
 });
 // Escape closes the panel, unless a menu, a dialog or an overlay is open: that one closes first.
 document.addEventListener("keydown", event => {
-  if (event.key !== "Escape" || !document.body.dataset.callPanel || document.querySelector(`${OVERLAYS}, #call-more-menu:not([hidden])`)) return;
+  if (event.key !== "Escape" || !document.body.dataset.callPanel || document.querySelector(OVERLAYS)) return;
   event.preventDefault();
   openCallPanel(null);
 }, true);
