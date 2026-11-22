@@ -326,7 +326,7 @@ function renderCall(state) {
   // A heard question says who asked, in quotes; our answer sits under its own label, so it never reads as hers (B6).
   const earlier = pick.earlier.map(hint => (hint.kind === "answer"
     ? { asked: hint.speaker ? t("call.asked", { name: hint.speaker, question: hint.question }) : t("call.asked_plain", { question: hint.question }),
-      label: callLabel(t("call.answer"), hint.at, state), text: hint.text, source: hint.source }
+      label: callLabel(t("call.answer"), hint.at, state), text: hint.text, source: callSame(hint.source, hint.question) ? "" : hint.source }
     : { label: hint.label, text: hint.text, source: hint.source }));
   const open = $("call-earlier-open");
   const count = t("call.earlier", { n: earlier.length });

@@ -1065,6 +1065,9 @@ async function fixWave(browser) {
     assert.deepEqual(await item.locator('p').allTextContents().then(lines => [lines[0], lines[1].replace(/\d\d:\d\d/, '00:00'), lines[2]]),
       [asked, label.source.includes('Answer') ? 'Answer · 00:00' : 'Ответ · 00:00', build('earlier_open', lang).state.journal[1].reply], lang);
     assert.match(await item.locator('p.say').textContent(), label);
+    // The question shows once: no source line repeating it under the answer.
+    const question = build('earlier_open', lang).state.journal[1].text;
+    assert.equal((await item.locator('p').allTextContents()).filter(line => line.trim() === question).length, 0, `${lang}: question once`);
     await page.context().close();
   }
   // B5: the server skipped the automatic analysis (the start of an automatic recording): a heard question is not
