@@ -1,6 +1,6 @@
 param(
     [string]$PackagePath,
-    [string]$ExpectedSha256 = '144a2541504d253aac353a3956b7f12a18e02135a551cc9d63c33b433b2a1d6f',
+    [string]$ExpectedSha256 = '6225b9711a4ccc5505fac276baa6a06c2733b7b3b28ec24331a447b0688893e2',
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'MeetingCopilot'),
     [string]$UserRoot = $env:USERPROFILE,
     [switch]$SkipModels,

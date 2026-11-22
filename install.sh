@@ -4,7 +4,7 @@ set -euo pipefail
 REPO="AIAgentLbs/meetontrack"
 VERSION="v0.1.34"
 ASSET="meeting-copilot-macos.zip"
-SHA256="8b58e3f7e19c4c39437ee5ec79985a9497dc72cb35034d7f63369803f293bfe1"
+SHA256="0419c37e3ec5bb932bf5ee680fe193134b5c7e22a930ef6e5bf3da1b66e35aa3"
 SHARE="${MEETING_COPILOT_SHARE_ROOT:-$HOME/.local/share/meeting-copilot}"
 CONFIG="${MEETING_COPILOT_CONFIG_ROOT:-$HOME/.config/meeting-copilot}"
 BIN="${MEETING_COPILOT_BIN_ROOT:-$HOME/.local/bin}"
