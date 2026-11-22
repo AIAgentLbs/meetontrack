@@ -11,7 +11,7 @@ const TEXT = {
   en: {
     review: 'Pilot review', anna: 'Anna Petrova', company: 'Example LLC', me: 'Me',
     questions: ['What budget is set for the pilot this year?', 'Who signs off the purchase?', 'Which part of the proposal matters most now?'],
-    ask: 'Ask who signs off the purchase?\nEvidence: Anna mentioned a committee but no name.',
+    ask: 'Ask who signs off the purchase?\nEvidence: Anna mentioned a committee but not who decides in it.',
     risk: 'The start slips if the committee does not meet this Thursday.\nEvidence: Anna said the committee decides the purchase.',
     objection: 'Setup is already in the price, there is nothing extra to pay.\nEvidence: Anna compared the price with her own estimate.',
     contradiction: 'Clarify: does the start fall in March or in April?\nEvidence: Anna said March, the memo says April.',
@@ -28,7 +28,7 @@ const TEXT = {
   ru: {
     review: 'Обзор пилота', anna: 'Анна Петрова', company: 'ООО Пример', me: 'Вы',
     questions: ['Какой бюджет заложен на пилот в этом году?', 'Кто подписывает закупку?', 'Какая часть предложения сейчас важнее всего?'],
-    ask: 'Спросите, кто подписывает закупку?\nОснование: Анна упомянула комитет, но без имени.',
+    ask: 'Спросите, кто подписывает закупку?\nОснование: Анна упомянула комитет, но не сказала, кто в нем решает.',
     risk: 'Старт сдвинется, если комитет не соберется в этот четверг.\nОснование: Анна сказала, что закупку решает комитет.',
     objection: 'Настройка уже входит в цену, доплачивать не нужно.\nОснование: Анна сравнила цену со своей оценкой.',
     contradiction: 'Уточните: старт в марте или в апреле?\nОснование: Анна назвала март, в мемо апрель.',

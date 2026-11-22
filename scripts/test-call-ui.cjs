@@ -1292,7 +1292,7 @@ async function polish(browser) {
   // detail uses the same word.
   {
     let page = await ru('hint', { at });
-    assert.equal(await whereText(page), 'Источник: Анна упомянула комитет, но без имени.');
+    assert.equal(await whereText(page), 'Источник: Анна упомянула комитет, но не сказала, кто в нем решает.'); // N7
     await page.click('#call-board-open');
     await page.$$eval('#call-board details', nodes => nodes.forEach(node => { node.open = true; }));
     const board = await page.locator('#call-board').innerText();
@@ -1566,6 +1566,15 @@ async function round4(browser) {
       }
       await page.context().close();
     }
+  }
+  // N7: the RU wording P3s of critique 5 that are strings only.
+  {
+    const page = await callPage(browser, 'waiting', { lang: 'ru', data: 'ru' });
+    const ru = await page.evaluate(() => ['call.heard_wait', 'call.other_lost_text', 'call.you_lost_text', 'speakers.open']
+      .map(key => translations.ru[key]));
+    await page.context().close();
+    assert.deepEqual(ru, ['Готовлю ответ, обычно это несколько секунд.', 'Вас слышно. Когда звук вернется, подсказки пойдут снова.',
+      'Собеседника слышно. Ваши слова не попадут в расшифровку, пока микрофон не заработает.', 'Изменить имена']);
   }
   // N4: the heard line names its speaker, the first name or "Вы", and at 400 px it stays with three words or more.
   for (const [lang, anna, you] of [['ru', 'Анна: ', 'Вы: '], ['en', 'Anna: ', 'You: ']]) for (const width of [1440, 400]) {
