@@ -1,5 +1,6 @@
-// Real UI, synthetic API only: interface language in Settings and the hideable transcript,
-// both saved in the shared preferences (config.json) and restored after a reload.
+// Real UI, synthetic API only: interface language in Settings, saved in the shared preferences (config.json) and
+// restored after a reload. The After view replaced the two panes (MEETONTRACK-163), so the side-by-side transcript and
+// its Hide and Show have no screen left; their checks went with them.
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -9,7 +10,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
   const browser = await chromium.launch({headless: true});
   const root = path.resolve(__dirname, '../copilot/web');
   const errors = [], saved = [];
-  let preferences = {interface_language: 'ru'}, slowNextSave = false;
+  let preferences = {interface_language: 'ru'};
   try {
     const context = await browser.newContext({viewport: {width: 1440, height: 900}});
     const page = await context.newPage();
@@ -18,25 +19,21 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       const url = new URL(route.request().url());
       if (url.pathname === '/api/preferences') {
         const change = route.request().postDataJSON();
-        if (slowNextSave) { slowNextSave = false; await new Promise(resolve => setTimeout(resolve, 1500)); }
         saved.push(change);
         preferences = {...preferences, ...change};
         return route.fulfill({json: {ok: true, preferences: change}});
       }
       if (url.pathname === '/api/state') return route.fulfill({json: {preferences,
-        // A call that just ended (After): the two panes side by side. During a live call the transcript is a panel
-        // of its own, which the transcript_hidden preference never empties (test-call-ui.cjs, F12).
+        // A call that just ended: the After view.
         transcript: {meeting_id: 'test', meeting: 'Test call', status: 'finished', live: false, ended_at: new Date().toISOString(),
           segments: [], speakers: []},
         copilot: {messages: [], busy: false, analysis: {state: 'idle'}}, journal: [], frames: [], meeting_chat: [], project: {}}});
       if (url.pathname.startsWith('/api/')) return route.fulfill({json: {ok: true}});
       const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-      if (!['index.html', 'app.js', 'styles.css', 'screens.css', 'home.js', 'call.js', 'shell.js'].includes(file)) return route.abort();
+      if (!['index.html', 'app.js', 'styles.css', 'screens.css', 'home.js', 'call.js', 'after.js', 'shell.js'].includes(file)) return route.abort();
       const type = file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html';
       return route.fulfill({contentType: type, body: await fs.readFile(path.join(root, file))});
     });
-    const transcript = page.locator('.transcript-pane'), copilot = page.locator('.copilot-pane');
-    const hide = page.locator('#transcript-hide'), show = page.locator('#transcript-show');
     await page.goto('http://preferences-ui.test/');
     await page.waitForFunction(() => document.documentElement.lang === 'ru');
 
@@ -57,26 +54,14 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.deepEqual(saved, [{interface_language: 'en'}]);
     await page.locator('#settings-close').click();
 
-    // Outside the Call view the panels keep their tab bars (C1 changes the Call view only).
-    assert.equal(await page.locator('#workspace-filters').isVisible(), true, 'the After view keeps the board tab bar');
-    assert.equal(await page.locator('.transcript-tabs').isVisible(), true, 'the After view keeps the transcript tabs');
-
-    // Transcript: one click hides it, the other panel takes the width, the menu brings it back.
-    assert.equal(await hide.textContent(), 'Hide');
+    // After shows its own view; the old panes and their Show transcript are gone from it.
+    assert.equal(await page.locator('#after').isVisible(), true);
+    assert.equal(await page.locator('.workspace').isVisible(), false);
     await page.locator('#menu-button').click();
-    assert.equal(await show.isVisible(), false);
+    assert.equal(await page.locator('#transcript-show').isVisible(), false, 'Show transcript has nothing to show in After');
     await page.keyboard.press('Escape');
-    const fullWidth = (await page.locator('.workspace').boundingBox()).width;
-    await hide.click();
-    await transcript.waitFor({state: 'hidden'});
-    assert.equal(await show.textContent(), 'Show transcript');
-    await page.locator('#menu-button').click();
-    assert.equal(await show.isVisible(), true);
-    await page.keyboard.press('Escape');
-    assert(Math.abs((await copilot.boundingBox()).width - fullWidth) < 2, 'freed width goes to the other panel');
-    assert.deepEqual(saved.at(-1), {transcript_hidden: true});
 
-    // Both choices come back from config.json, even in a browser with no local copy.
+    // The choice comes back from config.json, even in a browser with no local copy.
     const fresh = await context.newPage();
     fresh.on('pageerror', error => errors.push(String(error)));
     await page.close();
@@ -84,41 +69,17 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await fresh.evaluate(() => localStorage.clear());
     await fresh.reload();
     await fresh.waitForFunction(() => document.documentElement.lang === 'en');
-    await fresh.locator('.transcript-pane').waitFor({state: 'hidden'});
     assert.equal(await fresh.locator('#interface-language').inputValue(), 'en');
 
     // Another browser changing config.json wins over this browser's earlier choice.
     preferences = {...preferences, interface_language: 'ru'};
     await fresh.reload();
     await fresh.waitForFunction(() => document.documentElement.lang === 'ru');
-    assert.equal(await fresh.locator('#transcript-show').textContent(), 'Показать расшифровку');
 
-    // Narrow screen: the show control stays reachable in the menu and nothing scrolls sideways.
+    // Narrow screen: nothing scrolls sideways.
     await fresh.setViewportSize({width: 390, height: 844});
-    await fresh.locator('#menu-button').click();
-    assert.equal(await fresh.locator('#transcript-show').isVisible(), true);
     assert.equal(await fresh.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-    await fresh.locator('#transcript-show').click();
-    await fresh.locator('.transcript-pane').waitFor({state: 'visible'});
-    assert.equal(await fresh.locator('#transcript-show').isVisible(), false);
-    assert.deepEqual(saved.at(-1), {transcript_hidden: false});
-    await fresh.reload();
-    await fresh.waitForFunction(() => document.documentElement.lang === 'ru');
-    await fresh.locator('.transcript-pane').waitFor({state: 'visible'});
-    assert.equal(await fresh.locator('#transcript-hide').getAttribute('aria-label'), 'Скрыть расшифровку');
-
-    // Hide then show quickly while the first save is slow: the last click is what stays saved.
-    const before = saved.length;
-    slowNextSave = true;
-    await fresh.locator('#transcript-hide').click();
-    await fresh.locator('#menu-button').click();
-    await fresh.locator('#transcript-show').click();
-    for (let wait = 0; saved.length < before + 2 && wait < 100; wait++) await new Promise(resolve => setTimeout(resolve, 100));
-    assert.deepEqual(saved.slice(before), [{transcript_hidden: true}, {transcript_hidden: false}], 'saves keep click order');
-    assert.equal(preferences.transcript_hidden, false);
-    await fresh.waitForTimeout(2500);  // a poll after the saves must not fold the panel again
-    assert.equal(await fresh.locator('.transcript-pane').isVisible(), true);
     assert.deepEqual(errors, []);
-    console.log('PASS: no header language switch, no removed helper lines, language in Settings saved and restored, transcript hide/persist/show, narrow width');
+    console.log('PASS: no header language switch, no removed helper lines, language in Settings saved and restored, narrow width');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

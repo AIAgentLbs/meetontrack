@@ -54,6 +54,7 @@ class StaticFilesTests(unittest.TestCase):
             for path, content_type in (('/shell.js', 'text/javascript; charset=utf-8'),
                                        ('/home.js', 'text/javascript; charset=utf-8'),
                                        ('/call.js', 'text/javascript; charset=utf-8'),
+                                       ('/after.js', 'text/javascript; charset=utf-8'),
                                        ('/screens.css', 'text/css; charset=utf-8')):
                 connection = http.client.HTTPConnection('127.0.0.1', httpd.server_port, timeout=3)
                 connection.request('GET', path)

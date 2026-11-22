@@ -251,6 +251,34 @@
         </div>
       </div>
     </section>
+    <section id="after" class="after" aria-labelledby="after-title" hidden>
+      <div class="col">
+        <div class="after-top">
+          <header class="after-head">
+            <h2 id="after-title"></h2>
+            <p id="after-meta"></p>
+            <div class="to-links">
+              <button id="after-transcript" class="ql" type="button" data-i18n="after.open_transcript">Открыть расшифровку</button>
+              <button id="after-chat" class="ql" type="button" data-i18n="call.ask_placeholder">Спросить про звонок</button>
+            </div>
+          </header>
+          <section id="after-send" class="send" aria-label="Отчет" data-i18n-aria-label="after.report"></section>
+      <p id="after-said" class="visually-hidden" aria-live="polite"></p>
+        </div>
+        <div class="two">
+          <div class="field">
+            <label for="after-summary"></label>
+            <textarea id="after-summary" class="edit" maxlength="4000" rows="6"></textarea>
+          </div>
+          <div class="field">
+            <label for="after-next"></label>
+            <textarea id="after-next" class="edit" maxlength="4000" rows="6"></textarea>
+          </div>
+          <p class="after-note"></p>
+        </div>
+        <section id="after-board" class="board" aria-labelledby="after-board-title"></section>
+      </div>
+    </section>
     <main class="workspace">
       <button id="call-back" class="ql" type="button" data-i18n="call.back" hidden>Вернуться к звонку</button>
       <section class="transcript-pane" aria-labelledby="transcript-heading">
@@ -279,7 +307,7 @@
         </section>
         <div class="transcript" id="transcript" aria-live="polite">
           <div class="empty-state">
-            <strong data-i18n="transcript.empty_title">Жду стенограмму</strong>
+            <strong data-i18n="transcript.empty_title">Жду расшифровку</strong>
             <span data-i18n="transcript.empty_text">MeetOnTrack передает локальную расшифровку примерно раз в секунду.</span>
           </div>
         </div>
@@ -496,6 +524,7 @@
     <script src="/app.js" defer></script>
     <script src="/home.js" defer></script>
     <script src="/call.js" defer></script>
+    <script src="/after.js" defer></script>
     <script src="/shell.js" defer></script>
     <script src="/getting-started.js" defer></script>
     <script src="/speech.js" defer></script>

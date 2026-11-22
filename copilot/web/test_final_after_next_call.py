@@ -8,6 +8,7 @@ call is still recording. All text is synthetic.
 
 import json
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,6 +18,16 @@ import archive
 from archive import MeetingArchive
 from delivery_health import DeliveryHealth
 from speaker_edits import carry_corrections
+from functools import partial
+from after_state import AfterState
+
+
+def setUpModule():
+    # Written before the 30 s pause in which After shows a ready report (MEETONTRACK-163);
+    # test_after_archive covers the pause, these keep testing their own rule.
+    patcher = patch("archive.AfterState", partial(AfterState, pause=0))
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
 
 
 def iso(moment: datetime) -> str:
@@ -109,6 +120,47 @@ class FinalTranscriptAfterNextCallTests(unittest.TestCase):
         self.assertEqual(report["mail_status"], "sent")
         self.assertNotIn("delivery_on_request", report)
         self.assertEqual(len(self.stored("NEXT-CALL")["segments"]), 1, "The next call is left alone")
+
+    def test_default_pause_defers_then_retry_sends_only_the_final_text(self):
+        """The route every automatic send now takes (MEETONTRACK-163): the first ready
+        report waits 30 s on screen, then retry sends it; live text never goes (MEETONTRACK-94)."""
+        if not self.sent_automatically:
+            self.skipTest("an old meeting is sent only on request")
+        clock = [time.time()]
+        self.archive.after.pause = 30  # the real pause; this module runs the others at 0
+        self.archive.after.clock = lambda: clock[0]
+
+        def retry():
+            def deliver(detail, meta, **kwargs):
+                self.sent.append(detail["meeting_id"])
+                return {"mail_status": "sent"}
+            with patch.object(self.archive, "deliver", side_effect=deliver):
+                self.archive.retry_pending_deliveries(meeting_ids=self.archive.after.due())
+                self.archive.retry_pending_deliveries()
+
+        final = (self.first / "transcript.json").read_text()
+        (self.first / "transcript.json").unlink()
+        self.next_call_ends()
+        with patch.object(self.archive, "_print_pdf", side_effect=lambda html, pdf: pdf.write_bytes(b"%PDF live")):
+            self.archive.generate_report("FIRST-CALL")  # a report from live text, as Create report makes
+        live = json.loads((self.root / "reports/FIRST-CALL/report.json").read_text())
+        self.assertEqual((live["mail_status"], live.get("ready_at")), ("waiting_for_end", None))
+        clock[0] += 31
+        retry()
+        self.assertEqual(self.sent, [])
+
+        (self.first / "transcript.json").write_text(final)
+        self.finalize()
+        report = json.loads((self.root / "reports/FIRST-CALL/report.json").read_text())
+        self.assertEqual((self.sent, report["mail_status"]), ([], "waiting_for_end"))
+        self.assertTrue(report["ready_at"])
+        clock[0] += 10
+        retry()
+        self.assertEqual(self.sent, [])
+        clock[0] += 21
+        retry()
+        self.assertEqual(self.sent, ["FIRST-CALL"])
+        self.assertEqual(len(self.stored()["segments"]), 406)
 
     def test_dropout_in_the_last_minute_is_explained_not_flagged(self):
         self.next_call_ends()

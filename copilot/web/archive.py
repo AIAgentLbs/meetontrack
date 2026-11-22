@@ -26,6 +26,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 from speaker_edits import SpeakerEdits, carry_corrections, segment_id, _seconds
 from fact_check import with_speakers
+from memo_check import NOT_CHECKED, current as memo_current
 from delivery_health import DeliveryHealth, drive_links_ready
 from recording_health import RecordingLocations
 from question_quality import register_question
@@ -35,6 +36,7 @@ from private_dirs import private_dir
 from canonical_transcript import canonical_segments
 from meeting_boundaries import interval_contains
 from live_translation import echoes
+from after_state import AfterState
 
 
 def _json(path: Path, fallback: Any) -> Any:
@@ -51,6 +53,19 @@ def _date(value: str | None) -> datetime | None:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def auto_send_allowed(settings: dict, channel: str, started_at: str | None) -> bool:
+    """A channel turned on after the meeting began never sends it on its own (only on request)."""
+    boundary = _date(settings.get(channel + "_enabled_at"))
+    started = _date(started_at)
+    return not boundary or bool(started and started >= boundary)
+
+
+def _went(report: dict) -> bool:
+    """At least one channel confirmed the report."""
+    return any(report.get(key) in {"sent", "uploaded"}
+               for key in ("mail_status", "telegram_status", "twenty_status", "drive_status"))
 
 
 def _atomic_json(path: Path, payload: Any) -> None:
@@ -188,6 +203,8 @@ class MeetingArchive:
         self.delivery_settings = DeliverySettings(config_root, self.lock)
         self._index_state = threading.local()
         self.speaker_edits = SpeakerEdits(archive_root)
+        # The person's hold, send now, edits and removals per report (MEETONTRACK-163).
+        self.after = AfterState(reports_root)
         self.delivery_monitor = DeliveryHealth(
             reports_root, config_root / "delivery-health.json", self.delivery_retry_days, archive_root
         )
@@ -198,6 +215,9 @@ class MeetingArchive:
         # A meeting whose lost live analysis is being rebuilt (MEETONTRACK-107) is
         # not sent until the rebuild ends; the server wires its rebuild state in.
         self.analysis_pending: Callable[[str], bool] = lambda meeting_id: False
+        # The memo check (MEETONTRACK-163): the server wires the meeting's plan and the check on ai.choice.
+        self.memo_plan: Callable[[dict], dict | None] = lambda detail: None
+        self.memo_checker: Callable[[dict], dict | None] | None = None
         # meeting_id -> (meeting.json, report.json) versions already found up to date.
         self._history_checked: dict[str, tuple] = {}
         # Recorded at start, before any meeting is checked (MEETONTRACK-118): a lazy first use could
@@ -486,17 +506,19 @@ class MeetingArchive:
                 return False
             if not failure.exists() or not self._report_retry_ready(meeting_id):
                 return False
-        detail = self.report_detail(meeting_id) or {}
+        self.generate_report(meeting_id, on_request=not self._in_delivery_window(self.report_detail(meeting_id) or {}))
+        return True
+
+    def _in_delivery_window(self, detail: dict) -> bool:
+        """The call is recent enough to be sent on its own (and memo-checked)."""
         ended = _date(str(detail.get("ended_at") or ""))
         report = detail.get("report") or {}
         # A final transcript arriving after the window still sends a report that never went out,
         # as the waiting warning promised (MEETONTRACK-118); older history waits for the button.
-        recent = bool(ended and ((datetime.now().astimezone() - ended).total_seconds()
-                                 <= self.delivery_retry_days * 86400 or (
+        return bool(ended and ((datetime.now().astimezone() - ended).total_seconds()
+                               <= self.delivery_retry_days * 86400 or (
             ended >= self._final_wait_from() and not report.get("delivery_started_at")
             and not report.get("delivery_on_request"))))
-        self.generate_report(meeting_id, on_request=not recent)
-        return True
 
     def report_identity(self, meeting_id: str) -> str:
         """The folder a meeting's report lives in: the last chunk of a continuous call."""
@@ -552,7 +574,7 @@ class MeetingArchive:
             try:
                 # A finished analysis rebuild changes no file of the meeting, yet its report may go now.
                 version = (path.stat().st_mtime_ns, _mtime(self.reports_root / meeting_id / "report.json"),
-                           self.analysis_pending(meeting_id))
+                           self.analysis_pending(meeting_id), _mtime(self.reports_root / meeting_id / "after.json"))
                 if self._history_checked.get(meeting_id) == version:
                     continue
                 # Remember "nothing to do" only once the 2-minute settling time is long over.
@@ -1032,6 +1054,14 @@ class MeetingArchive:
         if canonical.get("explicit_boundary"):
             canonical["audio_file"] = ""
             canonical["audio_note"] = "Original continuous recording is local only; this meeting uses the indicated audio range."
+        # The person's edits after the call: what the screen shows is what is sent (MEETONTRACK-163).
+        after = self.after.read(canonical["meeting_id"])
+        removed = set(after["removed"])
+        canonical["removed_journal"] = [item for item in canonical["journal"]
+                                        if f"journal:{item.get('id')}" in removed]
+        canonical["journal"] = [item for item in canonical["journal"] if f"journal:{item.get('id')}" not in removed]
+        canonical["fact_checks"] = [item for item in canonical["fact_checks"] if f"fact:{item.get('id')}" not in removed]
+        canonical["after_edits"] = {key: after[key] for key in ("summary", "next_steps", "removed") if after[key]}
         return canonical
 
     @staticmethod
@@ -1171,12 +1201,53 @@ class MeetingArchive:
         except Exception as error:  # The original failure is what the caller reports.
             print(f"report failure marker not saved: {type(error).__name__}", flush=True)
 
+    def _memo_check(self, meeting_id: str, on_request: bool) -> dict | None:
+        """Run the memo check once per meeting, when its final transcript is ready (MEETONTRACK-163).
+
+        Only inside the delivery window: an old meeting or a report made on request is stored as
+        NOT_CHECKED, with no AI run and no plan read (the report button, a recreate or a speaker
+        rename on a meeting delivered before this release included).
+        Any stored outcome, failed included, is final. A report.json on disk gets the result at
+        once; with none yet, the caller hands it to the first full meta (never a half report).
+        """
+        if self.memo_checker is None:
+            return None
+        with self.lock:
+            detail = self.report_detail(meeting_id)
+            report = (detail or {}).get("report") or {}
+            if not detail or "memo_check" in report:
+                return None
+            on_request = on_request or bool(report.get("delivery_on_request"))
+            if not on_request and not self._ready_for_delivery(detail):
+                return None  # a live or unfinished call is never marked: it may still be checked
+            recent = not on_request and self._in_delivery_window(detail)
+        if not recent:
+            result = dict(NOT_CHECKED)
+        else:
+            try:
+                result = self.memo_checker(detail)  # the AI call runs outside the archive lock
+            except Exception as exc:  # noqa: BLE001 - the check never holds the report back
+                print(f"memo check {detail['meeting_id']}: {type(exc).__name__}", flush=True)
+                return None
+        if result is None:
+            return None
+        with self.lock:
+            path = self.reports_root / detail["meeting_id"] / "report.json"
+            stored = _json(path, None)
+            if isinstance(stored, dict):
+                result = stored.setdefault("memo_check", result)
+                _atomic_json(path, stored)
+        return result
+
     def _generate_report(self, meeting_id: str, *, deliver: bool, on_request: bool) -> dict:
+        memo_check = self._memo_check(meeting_id, on_request)
         for attempt in range(3):
             with self.lock:
                 detail = self.report_detail(meeting_id)
                 if detail is None:
                     raise ValueError("Встреча не найдена")
+                if memo_check is not None and isinstance(detail.get("report"), dict):
+                    detail["report"].setdefault("memo_check", memo_check)  # _report_meta keeps it
                 if not detail["transcript"] and not detail["journal"] and not detail["frames"]:
                     raise ValueError("Для этой записи пока нет стенограммы, заметок или кадров")
                 source_signature = self.source_signature(detail)
@@ -1229,63 +1300,85 @@ class MeetingArchive:
                                                             deliver=deliver, on_request=on_request,
                                                             pdf_error=str(pdf_error or ""))
                 ready = self._ready_for_delivery(detail)
-                sending = deliver and not meta.get("delivery_on_request") and ready
+                identity = detail["meeting_id"]
+                if ready and not meta.get("ready_at"):
+                    # One time source with the gate: AfterState's clock (MEETONTRACK-163).
+                    meta["ready_at"] = datetime.fromtimestamp(self.after.clock()).astimezone().isoformat()
+                ready_at = _date(str(meta.get("ready_at") or ""))
+                ready_epoch = ready_at.timestamp() if ready_at else None
+                # Never send text older than what is on disk now (the last print attempt keeps it).
+                current = not fresh or self.source_signature(fresh) == source_signature
+                # The gate check and the "sending" mark in one step: a Hold after it answers "sending".
+                taken = (self.after.begin_send(identity, ready_epoch)
+                         if deliver and not meta.get("delivery_on_request") and ready and current else None)
+                sending = taken is not None
+                if ready and not sending and not self.after.gate(identity, ready_epoch)["open"]:
+                    self.after.blocked(identity, ready_epoch)
                 # ponytail: sending holds the archive lock (settings and the Google
                 # profile must not change mid-send); a slow Drive upload still blocks it.
-                if sending:
-                    delivery = self.deliver(detail, meta, previous=previous_delivery)
-                elif deliver and not meta.get("delivery_on_request"):
-                    # "unknown" (a send whose outcome was lost) stays: only the person resends it.
-                    delivery = {
-                        "drive_status": (
-                            "uploaded" if previous_report.get("drive_status") == "uploaded"
-                            else "waiting_for_end"
-                        ),
-                        "mail_status": (
-                            previous_report["mail_status"] if previous_report.get("mail_status") in {"sent", "unknown"}
-                            else "waiting_for_end"
-                        ),
-                        "telegram_status": (
-                            previous_report["telegram_status"]
-                            if previous_report.get("telegram_status") in {"sent", "unknown"}
-                            else "waiting_for_end"
-                        ),
-                        **{key: previous_report[key] for key in TWENTY_OUTCOME if key in previous_report},
-                    }
-                else:
-                    # Nothing is sent: the earlier outcome stays as it was, with
-                    # its dates, so expiry and auto-close still apply (MEETONTRACK-99).
-                    delivery = {key: previous_delivery[key] for key in DELIVERY_OUTCOME if key in previous_delivery}
-                    if delivery.get("drive_status") in {None, "not_configured", "waiting_for_end"}:
-                        delivery["drive_status"] = "pending"  # A finished call no longer waits for its end.
-                    for key in ("mail_status", "telegram_status", "twenty_status"):
-                        if delivery.get(key) == "waiting_for_end" and meta.get("delivery_on_request"):
-                            delivery[key] = "pending"
-                meta.update(delivery)
-                checked_at = datetime.now().astimezone()
-                if sending:
-                    meta["delivery_checked_at"] = checked_at.isoformat(timespec="seconds")
-                    meta["delivery_retry_at"] = (
-                        checked_at + timedelta(minutes=15)
-                    ).isoformat(timespec="seconds")
-                else:
-                    meta.update({key: previous_delivery[key] for key in ("delivery_checked_at", "delivery_retry_at")
-                                 if key in previous_delivery})
-                # The retry window runs from the first send; older reports have no
-                # such date, so a report that already had an outcome keeps its own.
-                started = previous_delivery.get("delivery_started_at") or (
-                    previous_report.get("generated_at") if any(
-                        previous_report.get(key) not in {None, "not_configured", "pending", "waiting_for_end"}
-                        for key in ("drive_status", "mail_status", "telegram_status", "twenty_status")) else None)
-                # A send past the window is the person's own request ("Create the report
-                # again"): it starts a new window, so its failure is retried and shown.
-                if sending and (previous_report.get("delivery_on_request") or (
-                        _date(str(started or "")) and (checked_at - _date(str(started))).total_seconds()
-                        > self.delivery_retry_days * 86400)):
-                    started = None
-                if started or sending:
-                    meta["delivery_started_at"] = started or checked_at.isoformat(timespec="seconds")
-                _atomic_json(report_dir / "report.json", meta)
+                try:
+                    if sending:
+                        delivery = self.deliver(detail, meta, previous=previous_delivery)
+                    elif deliver and not meta.get("delivery_on_request"):
+                        # "unknown" (a send whose outcome was lost) stays: only the person resends it.
+                        delivery = {
+                            "drive_status": (
+                                "uploaded" if previous_report.get("drive_status") == "uploaded"
+                                else "waiting_for_end"
+                            ),
+                            "mail_status": (
+                                previous_report["mail_status"] if previous_report.get("mail_status") in {"sent", "unknown"}
+                                else "waiting_for_end"
+                            ),
+                            "telegram_status": (
+                                previous_report["telegram_status"]
+                                if previous_report.get("telegram_status") in {"sent", "unknown"}
+                                else "waiting_for_end"
+                            ),
+                            **{key: previous_report[key] for key in TWENTY_OUTCOME if key in previous_report},
+                        }
+                        if "twenty_status" not in delivery and delivery_enabled(
+                                _json(self.config_root / "delivery.json", {}), "twenty"):
+                            delivery["twenty_status"] = "waiting_for_end"  # a held report is never a CRM failure
+                    else:
+                        # Nothing is sent: the earlier outcome stays as it was, with
+                        # its dates, so expiry and auto-close still apply (MEETONTRACK-99).
+                        delivery = {key: previous_delivery[key] for key in DELIVERY_OUTCOME if key in previous_delivery}
+                        if delivery.get("drive_status") in {None, "not_configured", "waiting_for_end"}:
+                            delivery["drive_status"] = "pending"  # A finished call no longer waits for its end.
+                        for key in ("mail_status", "telegram_status", "twenty_status"):
+                            if delivery.get(key) == "waiting_for_end" and meta.get("delivery_on_request"):
+                                delivery[key] = "pending"
+                    meta.update(delivery)
+                    checked_at = datetime.now().astimezone()
+                    if sending:
+                        meta["delivery_checked_at"] = checked_at.isoformat(timespec="seconds")
+                        meta["delivery_retry_at"] = (
+                            checked_at + timedelta(minutes=15)
+                        ).isoformat(timespec="seconds")
+                    else:
+                        meta.update({key: previous_delivery[key] for key in ("delivery_checked_at", "delivery_retry_at")
+                                     if key in previous_delivery})
+                    # The retry window runs from the first send; older reports have no
+                    # such date, so a report that already had an outcome keeps its own.
+                    started = previous_delivery.get("delivery_started_at") or (
+                        previous_report.get("generated_at") if any(
+                            previous_report.get(key) not in {None, "not_configured", "pending", "waiting_for_end"}
+                            for key in ("drive_status", "mail_status", "telegram_status", "twenty_status")) else None)
+                    # A send past the window is the person's own request ("Create the report
+                    # again"): it starts a new window, so its failure is retried and shown.
+                    if sending and (previous_report.get("delivery_on_request") or (
+                            _date(str(started or "")) and (checked_at - _date(str(started))).total_seconds()
+                            > self.delivery_retry_days * 86400)):
+                        started = None
+                    if started or sending:
+                        meta["delivery_started_at"] = started or checked_at.isoformat(timespec="seconds")
+                    _atomic_json(report_dir / "report.json", meta)
+                    if sending and _went(meta):
+                        self.after.delivered(identity, taken)  # the text of this first delivery (E)
+                finally:
+                    if sending:
+                        self.after.end_send(identity)
             return {**meta, "meeting_id": detail["meeting_id"]}
         raise AssertionError("unreachable")  # The last attempt always saves.
 
@@ -1302,7 +1395,9 @@ class MeetingArchive:
             # delivered email or Telegram message must never be resent.
             previous_delivery["drive_status"] = "pending"
         meta = {
-            **{key: previous_report[key] for key in ("last_delivery_request", "last_delivery_result", "mail_error") if key in previous_report},
+            **{key: previous_report[key] for key in ("last_delivery_request", "last_delivery_result", "mail_error",
+                                                     "ready_at", "memo_check", "mail_to", "telegram_to")
+               if key in previous_report},
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "html": f"/api/archive/report/{detail['meeting_id']}/index.html",
             "pdf": f"/api/archive/report/{detail['meeting_id']}/meeting-report.pdf" if pdf_path else "",
@@ -1369,6 +1464,11 @@ class MeetingArchive:
             )
             if not pending:
                 continue
+            ready_at = _date(str(meta.get("ready_at") or ""))
+            ready_epoch = ready_at.timestamp() if ready_at else None
+            if not self.after.gate(path.parent.name, ready_epoch)["open"]:
+                self.after.blocked(path.parent.name, ready_epoch)  # The delivery loop wakes it when it opens.
+                continue
             detail = self.report_detail(path.parent.name)
             if detail and not self.report_matches(detail, meta):
                 # Made from older text (live text, or before a late fact check): the next
@@ -1388,10 +1488,25 @@ class MeetingArchive:
                         # Report generation may have completed while we prepared
                         # the retry. Re-check next scan instead of resending it.
                         continue
-                    meta.update(self.deliver(detail, meta, previous=meta))
-                    meta["delivery_checked_at"] = now.isoformat(timespec="seconds")
-                    meta["delivery_retry_at"] = (now + timedelta(minutes=15)).isoformat(timespec="seconds")
-                    _atomic_json(path, meta)
+                    # The person may have changed the report since the check above (a removal and Send now):
+                    # the attachment must still be made from the text on disk now (MEETONTRACK-94, -163).
+                    detail = self.report_detail(path.parent.name)
+                    if not detail or not self.report_matches(detail, meta) or not self._ready_for_delivery(detail):
+                        continue
+                    taken = self.after.begin_send(path.parent.name, ready_epoch)
+                    if taken is None:
+                        self.after.blocked(path.parent.name, ready_epoch)
+                        continue  # A Hold pressed since the check above wins.
+                    try:
+                        meta.update(self.deliver(detail, meta, previous=meta))
+                        meta.setdefault("delivery_started_at", now.isoformat(timespec="seconds"))
+                        meta["delivery_checked_at"] = now.isoformat(timespec="seconds")
+                        meta["delivery_retry_at"] = (now + timedelta(minutes=15)).isoformat(timespec="seconds")
+                        _atomic_json(path, meta)
+                        if _went(meta):
+                            self.after.delivered(path.parent.name, taken)
+                    finally:
+                        self.after.end_send(path.parent.name)
             finally:
                 gate.release()
             retried += 1
@@ -1697,6 +1812,8 @@ class MeetingArchive:
         settled = [item for item in detail.get("fact_checks", []) if item.get("status") != "checking"]
         if settled:  # absent when empty, so reports made before fact checks keep their signature
             material["fact_checks"] = settled
+        if detail.get("after_edits"):  # likewise: unedited reports keep their signature
+            material["after"] = detail["after_edits"]
         return hashlib.sha256(
             json.dumps(material, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
@@ -1929,9 +2046,7 @@ class MeetingArchive:
                 return False
             if not delivery_enabled(settings, channel):
                 return False
-            boundary = _date(settings.get(channel + "_enabled_at"))
-            started = _date(detail.get("started_at"))
-            return manual or not boundary or bool(started and started >= boundary)
+            return manual or auto_send_allowed(settings, channel, detail.get("started_at"))
         local_drive_setting = str(settings.get("drive_local_path") or "").strip()
         local_drive = Path(local_drive_setting).expanduser() if local_drive_setting else None
         remote = str(settings.get("drive_remote") or "").strip()
@@ -2048,6 +2163,7 @@ class MeetingArchive:
 
         mail_status = str(previous.get("mail_status") or "not_configured")
         gmail_message_id = previous.get("gmail_message_id")
+        mail_to = previous.get("mail_to")
         mail_error = {
             key: value for key, value in (previous.get("mail_error") or {}).items()
             if key in {"provider", "reason", "exit_code"}
@@ -2121,9 +2237,12 @@ class MeetingArchive:
                     mail_status = "unknown"
             receipt({"mail_status": mail_status,
                      "gmail_message_id": gmail_message_id if mail_status == "sent" else None})
+            if mail_status == "sent":
+                mail_to = recipient
 
         telegram_status = str(previous.get("telegram_status") or "not_configured")
         telegram_message_id = previous.get("telegram_message_id")
+        telegram_to = previous.get("telegram_to")
         telegram_config = Path(
             str(settings.get("telegram_config") or "")
         ).expanduser()
@@ -2171,6 +2290,8 @@ class MeetingArchive:
                 telegram_status = "failed"
             receipt({"telegram_status": telegram_status,
                      "telegram_message_id": telegram_message_id if telegram_status == "sent" else None})
+            if telegram_status == "sent":
+                telegram_to = telegram_target
         twenty = {key: previous[key] for key in TWENTY_OUTCOME if key in previous}
         if (allowed("twenty") and twenty.get("twenty_status") not in {"sent", "unknown"}
                 and (manual or twenty.get("twenty_status") != "needs_choice")):
@@ -2190,6 +2311,9 @@ class MeetingArchive:
             "mail_error": mail_error,
             "telegram_status": telegram_status,
             "telegram_message_id": telegram_message_id,
+            # Where each confirmed delivery went: After names it even after the settings change.
+            **({"mail_to": mail_to} if mail_to else {}),
+            **({"telegram_to": telegram_to} if telegram_to else {}),
         }
         return outcome
 
@@ -2402,6 +2526,79 @@ class MeetingArchive:
                         f'<p>{esc(item.get("claim"))}</p>{fact}{source_html}</article>')
         return "".join(rows)
 
+    @staticmethod
+    def _memo_check_html(memo_check: dict | None, removed, esc) -> str:
+        """The memo check in the report: answered and open memo questions, statements that differ."""
+        if not isinstance(memo_check, dict) or not memo_check.get("state") or memo_check == NOT_CHECKED:
+            return ""  # never checked (an old call): the report says nothing about it
+        if memo_check["state"] != "done":
+            reasons = {"ai_needs_choice": "ИИ не выбран или не может выполнить сверку",
+                       "ai_unavailable": "выбранный ИИ сейчас недоступен",
+                       "timeout": "ИИ не ответил вовремя", "ai_no_answer": "ИИ не дал ответа",
+                       "too_long": "расшифровка слишком длинная для сверки"}
+            return (f'<section id="memo-check"><h2>Сверка с мемо</h2><p class="empty">Сверки с мемо нет: '
+                    f'{esc(reasons.get(memo_check.get("reason"), "ошибка при сверке"))}.</p></section>')
+        removed = set(removed or ())
+
+        def said(item: dict) -> str:
+            moment = _date(str(item.get("at") or ""))
+            where = " · ".join(part for part in (
+                str(item.get("speaker") or ""), moment.astimezone().strftime("%H:%M:%S") if moment else "") if part)
+            return f'<p>«{esc(item.get("quote"))}»</p><small class="provenance">{esc(where)}</small>'
+
+        questions = [item for item in memo_check.get("questions") or [] if f"memo:{item.get('id')}" not in removed]
+        answered = "".join(f'<article class="note"><p><strong>{esc(item.get("text") or item.get("id"))}</strong></p>'
+                           f'{said(item)}</article>' for item in questions if item.get("status") == "answered")
+        open_items = "".join(f'<li>{esc(item.get("text") or item.get("id"))}</li>'
+                             for item in questions if item.get("status") != "answered")
+        differs = "".join(f'<article class="note"><p>В мемо: {esc(item.get("memo"))}</p>{said(item)}</article>'
+                          for item in memo_check.get("differs") or [] if item.get("key") not in removed)
+        body = (f'{"<h3>Отвечено на звонке</h3>" + answered if answered else ""}'
+                f'{"<h3>Осталось без ответа</h3><ul>" + open_items + "</ul>" if open_items else ""}'
+                f'{"<h3>Расходится с мемо</h3>" + differs if differs else ""}')
+        return f'<section id="memo-check"><h2>Сверка с мемо</h2>{body}</section>' if body else ""
+
+    @staticmethod
+    def _edited_lines(detail: dict, field: str) -> list[str] | None:
+        text = (detail.get("after_edits") or {}).get(field)
+        return [line.strip() for line in str(text).splitlines() if line.strip()][:10] if text else None
+
+    @staticmethod
+    def _journal_groups(detail: dict) -> dict[str, list[dict]]:
+        groups: dict[str, list[dict]] = {}
+        for item in detail.get("journal", []):
+            groups.setdefault(str(item.get("category") or "OTHER"), []).append(item)
+        return groups
+
+    def report_summary(self, detail: dict) -> list[str]:
+        """The report's "Суть звонка" lines; the After screen shows these same lines (MEETONTRACK-163)."""
+        edited = self._edited_lines(detail, "summary")
+        if edited is not None:
+            return edited
+        groups = self._journal_groups(detail)
+        brief = []
+        for category in ("DECISION", "FACT", "COMMITMENT"):
+            for item in groups.get(category, [])[-2:]:
+                if category == "FACT" and re.search(r"(?:На экране|Источник:\s*OCR)", str(item.get("text") or ""), re.IGNORECASE):
+                    continue
+                line = self._brief_line(item.get("text"), 240)
+                if line and line not in brief:
+                    brief.append(line)
+        return brief[:3]
+
+    def report_next_steps(self, detail: dict) -> list[str]:
+        """The report's "Следующие шаги" lines; the After screen shows these same lines."""
+        edited = self._edited_lines(detail, "next_steps")
+        if edited is not None:
+            return edited
+        groups = self._journal_groups(detail)
+        followups = []
+        for item in [*groups.get("COMMITMENT", []), *groups.get("FACT", [])]:
+            line = self._brief_line(self._followup_sentence(item.get("text")), 220)
+            if line and line not in followups:
+                followups.append(line)
+        return followups[:5]
+
     def _report_html(self, detail: dict, frames: list[dict]) -> str:
         esc = lambda value: html.escape(str(value or ""))
         def provenance(item):
@@ -2417,9 +2614,7 @@ class MeetingArchive:
         started = _date(detail["started_at"])
         date_label = started.astimezone().strftime("%d.%m.%Y %H:%M") if started else "—"
         duration = _fmt_seconds(detail["duration_seconds"])
-        groups: dict[str, list[dict]] = {}
-        for item in detail["journal"]:
-            groups.setdefault(str(item.get("category") or "OTHER"), []).append(item)
+        groups = self._journal_groups(detail)
 
         labels = {
             "FACT": "Факты", "CONTRADICTION": "Противоречия", "HISTORY": "История",
@@ -2464,21 +2659,8 @@ class MeetingArchive:
                 '<li>Вы — локальный микрофон.</li><li>Другие голоса — имена не подтверждены записью или чатом.</li>'
                 if microphone_seen else '<li>Голоса есть, но имена участников не подтверждены записью или чатом.</li>'
             )
-        brief = []
-        for category in ("DECISION", "FACT", "COMMITMENT"):
-            for item in groups.get(category, [])[-2:]:
-                if category == "FACT" and re.search(r"(?:На экране|Источник:\s*OCR)", str(item.get("text") or ""), re.IGNORECASE):
-                    continue
-                line = self._brief_line(item.get("text"), 240)
-                if line and line not in brief:
-                    brief.append(line)
-        summary_items = "".join(f"<li>{esc(line)}</li>" for line in brief[:3])
-        followups = []
-        for item in [*groups.get("COMMITMENT", []), *groups.get("FACT", [])]:
-            line = self._brief_line(self._followup_sentence(item.get("text")), 220)
-            if line and line not in followups:
-                followups.append(line)
-        followup_items = "".join(f"<li>{esc(line)}</li>" for line in followups[:5])
+        summary_items = "".join(f"<li>{esc(line)}</li>" for line in self.report_summary(detail))
+        followup_items = "".join(f"<li>{esc(line)}</li>" for line in self.report_next_steps(detail))
         topics = []
         if (not self._is_generic_title(detail["title"])
                 and not re.match(r"^(?:Meet|Zoom)\s*[-—]\s*[a-z]{3}-[a-z]{4}-[a-z]{3}$", detail["title"], re.IGNORECASE)):
@@ -2497,6 +2679,11 @@ class MeetingArchive:
             '<li><a href="#followups">Следующие шаги</a></li>',
             '<li><a href="#summary">Краткое резюме</a></li>',
         ]
+        memo_html = self._memo_check_html(memo_current((detail.get("report") or {}).get("memo_check"),
+                                                       detail.get("transcript") or []),
+                                          (detail.get("after_edits") or {}).get("removed"), esc)
+        if memo_html:
+            toc.append('<li><a href="#memo-check">Сверка с мемо</a></li>')
         if detail.get("participants"):
             toc.append('<li><a href="#participants">Справка о собеседниках</a></li>')
         toc.append('<li><a href="#notes">Заметки и сигналы</a></li>')
@@ -2625,6 +2812,7 @@ h1{{font-size:26pt;line-height:1.1;margin:0 0 8mm;color:#174c3e}} h2{{font-size:
 {'' if not followup_items else '<p class="uncertain">Если срок или ответственный не указаны в пункте, они не были подтверждены автоматически.</p>'}</section>
 <section id="summary" class="opening"><h2>Суть звонка</h2><div class="summary"><ul>{summary_items or '<li>Проверенное краткое резюме пока не сформировано; см. заметки и стенограмму ниже.</li>'}</ul></div>
 <h2>Повестка и темы</h2><ul>{topic_items or '<li>Повестка не зафиксирована; ключевые темы смотрите в резюме.</li>'}</ul></section>
+{memo_html}
 <nav class="toc"><h2>Оглавление</h2><ol>{''.join(toc)}</ol></nav>
 {f'<section id="participants"><h2>Справка о собеседниках</h2>{participants_html}</section>' if participants_html else ''}
 <section id="notes"><h2>Заметки и сигналы</h2>{''.join(notes_sections) or '<p class="empty">Заметок пока нет.</p>'}</section>

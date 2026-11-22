@@ -29,6 +29,7 @@ from urllib.parse import urldefrag, urlparse, urlsplit, urlunsplit, parse_qs
 
 import hidden_consoles
 hidden_consoles.install()  # before any helper starts: no console windows on Windows
+from after_state import after_payload
 from archive import MeetingArchive
 from permissions import RecorderProbe, open_settings
 from skip_recording import SkipRecording
@@ -53,6 +54,7 @@ from meet_participants import meet_active_speaker, meet_participant_labels
 from teams_participants import teams_one_to_one_name, teams_participant_labels
 from first_run import AIReadiness
 from ai_providers import AIChoiceError, AIService, SignIns
+import memo_check
 from fact_check import FactChecks, extraction_rules, fetch_text, parse_claims, strip_claims, verify as verify_fact, with_speakers
 from stt import STTService
 from local_context import LocalContext
@@ -2537,6 +2539,24 @@ ARCHIVE = MeetingArchive(
     event_router=routed_event,
     transcript_annotator=FRAMES.annotate,
 )
+def _archive_plan(detail: dict) -> dict | None:
+    """The meeting's call plan, as the /api/archive route reads it."""
+    return PLANS.snapshot({
+        "meeting_id": detail.get("meeting_id"),
+        "meeting": detail.get("title"),
+        "started_at": detail.get("started_at"),
+        "remote_attendees": detail.get("remote_attendees", []),
+        "meeting_link": detail.get("meeting_link", ""),
+        # A split call never inherits the previous part's memo (CallPlans._plan_for).
+        **{key: detail[key] for key in ("explicit_boundary", "physical_meeting_id") if key in detail},
+    })
+
+
+# The memo check (MEETONTRACK-163): offline only, on the one AI choice.
+ARCHIVE.memo_plan = _archive_plan
+ARCHIVE.memo_checker = lambda detail: memo_check.check(
+    detail, ARCHIVE.memo_plan(detail),
+    lambda prompt: AI.run("memo_check", prompt, web=False, timeout=memo_check.TIMEOUT))
 DELIVERY_RETRY = DeliveryRetry(ARCHIVE)
 GOOGLE_CONTEXT.delivery_settings = ARCHIVE.delivery_settings
 
@@ -3023,14 +3043,103 @@ def archive_loop() -> None:
         TRANSCRIPT.stop.wait(10)
 
 
+# Set to check the send gate now instead of within 5 s (MEETONTRACK-163).
+DELIVERY_WAKE = threading.Event()
+# meeting_id -> last GET /api/after payload, answered with "stale" while the archive is busy.
+AFTER_CACHE: dict[str, dict] = {}  # ponytail: one entry per meeting opened in After; tiny, never pruned
+AFTER_ROUTES = {"/api/after/hold", "/api/after/send", "/api/after/edit", "/api/after/remove",
+                "/api/after/send-again", "/api/after/editing"}
+
+
+def after_post(path: str, payload: dict) -> tuple[dict, int]:
+    """One After control. It never waits for a whole send (SMTP, Telegram, Drive hold the archive)."""
+    meeting_id = payload.get("meeting_id")
+    if not isinstance(meeting_id, str) or not 0 < len(meeting_id) <= 1024:
+        raise ValueError("bad_meeting_id")
+    # Taken on arrival: a Send now that waits below never undoes a Hold pressed after it.
+    ticket = ARCHIVE.after.ticket()
+    try:
+        if path == "/api/after/hold" and meeting_id in AFTER_CACHE:
+            # A Hold never waits: retry takes the (unfair) archive lock again for each queued report,
+            # so a Hold that waited could lose to the next send. Every send takes the gate first.
+            return {"ok": True, **after_action(path, AFTER_CACHE[meeting_id]["meeting_id"], payload, ticket)}, HTTPStatus.OK
+        if not ARCHIVE.lock.acquire(timeout=1):
+            # Act on the report the page last showed; its after.json needs only AfterState's lock,
+            # and every send takes the gate under the archive lock first.
+            cached = AFTER_CACHE.get(meeting_id)
+            if cached is None:
+                return {"ok": False, "error": "busy"}, HTTPStatus.SERVICE_UNAVAILABLE
+            return {"ok": True, **after_action(path, cached["meeting_id"], payload, ticket)}, HTTPStatus.OK
+        try:  # written while holding the archive, so no send slips in between
+            if ARCHIVE.detail(meeting_id) is None:
+                return {"ok": False, "error": "not_found"}, HTTPStatus.NOT_FOUND
+            return {"ok": True, **after_action(path, ARCHIVE.report_identity(meeting_id), payload, ticket)}, HTTPStatus.OK
+        finally:
+            ARCHIVE.lock.release()
+    except ValueError as error:
+        if str(error) != "sending":
+            raise
+        # The report is going out right now: a Hold can no longer stop it, and says so.
+        return {"ok": False, "error": "sending"}, HTTPStatus.CONFLICT
+
+
+def after_action(path: str, identity: str, payload: dict, ticket: int | None = None) -> dict:
+    """Hold, Send now, an edit, a board removal or Send again for one report (MEETONTRACK-163)."""
+    if path == "/api/after/hold":
+        ARCHIVE.after.hold(identity, ticket)
+    elif path == "/api/after/send":
+        ARCHIVE.after.send_now(identity, ticket)
+        DELIVERY_WAKE.set()
+    elif path == "/api/after/editing":
+        # Typing started: the report waits before the text is saved (the save follows 1 s after the last key).
+        send_at = ARCHIVE.after.touch(identity)
+        return {"send_at": datetime.fromtimestamp(send_at).astimezone().isoformat(timespec="seconds")}
+    elif path == "/api/after/edit":
+        text = payload.get("text")
+        if not isinstance(text, str) or len(text) > 4000:
+            raise ValueError("bad_text")
+        send_at = ARCHIVE.after.edit(identity, payload.get("field"), text)
+        return {"send_at": datetime.fromtimestamp(send_at).astimezone().isoformat(timespec="seconds")}
+    elif path == "/api/after/remove":
+        if not isinstance(payload.get("removed"), bool):
+            raise ValueError("bad_removed")
+        ARCHIVE.after.remove(identity, payload.get("key"), payload["removed"])
+    else:  # send-again: the CRM note is not sent again; Retry names only the failed channels (C9)
+        from delivery_settings import enabled
+        settings = ARCHIVE.delivery_settings.read()
+        channels = [name for name in ("email", "telegram", "drive") if enabled(settings, name)]
+        retry = "channels" in payload
+        if retry:
+            asked = payload["channels"]
+            if not isinstance(asked, list) or any(name not in channels for name in asked):
+                raise ValueError("invalid_retry_channels")
+            channels = [name for name in channels if name in asked]
+        # The job records resent_at itself, only once the report went out. Retry rechecks the
+        # channels under the delivery lock: one sent since the page showed it is not sent again.
+        return {"job": DELIVERY_RETRY.submit({"meeting_id": identity, "request_id": uuid.uuid4().hex,
+                                              "channels": channels, "confirm": True, "after": True,
+                                              "retry": retry})}
+    return {}
+
+
 def delivery_loop() -> None:
-    """Retry missing reports independently of live capture and report creation."""
+    """Retry missing reports independently of live capture and report creation.
+
+    Every 5 s the reports whose send gate just opened go; every 60 s all are scanned.
+    """
+    last_full = None
     while not TRANSCRIPT.stop.is_set():
         try:
-            ARCHIVE.retry_pending_deliveries()
+            due = ARCHIVE.after.due()
+            if due:
+                ARCHIVE.retry_pending_deliveries(meeting_ids=due)
+            if last_full is None or time.monotonic() - last_full >= 60:
+                last_full = time.monotonic()
+                ARCHIVE.retry_pending_deliveries()
         except Exception as exc:
             print(f"meeting delivery retry failed: {exc}", flush=True)
-        TRANSCRIPT.stop.wait(60)
+        DELIVERY_WAKE.wait(5)
+        DELIVERY_WAKE.clear()
 
 
 def delivery_health_loop() -> None:
@@ -3162,7 +3271,7 @@ class Handler(BaseHTTPRequestHandler):
             self._static("getting-started.js", "text/javascript; charset=utf-8")
         elif path == "/speech.js":
             self._static("speech.js", "text/javascript; charset=utf-8")
-        elif path in ("/shell.js", "/home.js", "/call.js"):
+        elif path in ("/shell.js", "/home.js", "/call.js", "/after.js"):
             self._static(path[1:], "text/javascript; charset=utf-8")
         elif path == "/screens.css":
             self._static("screens.css", "text/css; charset=utf-8")
@@ -3244,6 +3353,27 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/agenda":
             # Today's and tomorrow's meetings with their memos; not part of the 2.5 s state poll.
             self._json({"ok": True, **agenda_payload()})
+        elif path == "/api/after":
+            # The After screen's 3 s poll: never wait long behind a send that holds the archive.
+            meeting_id = parse_qs(urlparse(self.path).query).get("meeting_id", [""])[0]
+            if not 0 < len(meeting_id) <= 1024:
+                self._json({"ok": False, "error": "bad_meeting_id"}, HTTPStatus.BAD_REQUEST)
+            elif not ARCHIVE.lock.acquire(timeout=1):
+                cached = AFTER_CACHE.get(meeting_id)
+                if cached:
+                    self._json({**cached, "stale": True})
+                else:
+                    self._json({"ok": False, "error": "busy"}, HTTPStatus.SERVICE_UNAVAILABLE)
+            else:
+                try:
+                    payload = after_payload(ARCHIVE, meeting_id, ARCHIVE.delivery_settings.read(), time.time())
+                finally:
+                    ARCHIVE.lock.release()
+                if payload is None:
+                    self._json({"ok": False, "error": "not_found"}, HTTPStatus.NOT_FOUND)
+                else:
+                    AFTER_CACHE[meeting_id] = payload
+                    self._json(payload)
         elif path == "/api/repositories":
             self._json({"ok": True, **REPOSITORIES.catalog()})
         elif path == "/api/projects":
@@ -3288,13 +3418,7 @@ class Handler(BaseHTTPRequestHandler):
             if detail is None:
                 self.send_error(HTTPStatus.NOT_FOUND)
             else:
-                detail["call_plan"] = PLANS.snapshot({
-                    "meeting_id": detail.get("meeting_id"),
-                    "meeting": detail.get("title"),
-                    "started_at": detail.get("started_at"),
-                    "remote_attendees": detail.get("remote_attendees", []),
-                    "meeting_link": detail.get("meeting_link", ""),
-                })
+                detail["call_plan"] = _archive_plan(detail)
                 detail["analysis_rebuild"] = rebuild_state(str(detail.get("meeting_id") or ""), detail)
                 for frame in detail["frames"]:
                     frame["url"] = f"/api/archive/frame/{frame.get('id', '')}"
@@ -3492,6 +3616,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, **twenty_action(str(payload.get("meeting_id") or ""), payload)})
             elif path == "/api/delivery/smtp/check":
                 self._json({"ok": True, "account": ARCHIVE.delivery_settings.smtp_check(payload)})
+            elif path in AFTER_ROUTES:
+                self._json(*after_post(path, payload))
             elif path == "/api/delivery/retry":
                 self._json({"ok": True, "job": DELIVERY_RETRY.submit(payload)})
             elif path == "/api/google-context/settings":

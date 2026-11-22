@@ -17,6 +17,16 @@ from unittest.mock import patch
 import archive
 from archive import MeetingArchive
 import test_final_after_next_call as base
+from functools import partial
+from after_state import AfterState
+
+
+def setUpModule():
+    # Written before the 30 s pause in which After shows a ready report (MEETONTRACK-163);
+    # test_after_archive covers the pause, these keep testing their own rule.
+    patcher = patch("archive.AfterState", partial(AfterState, pause=0))
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
 
 PDF = lambda html, pdf: pdf.write_bytes(b"%PDF synthetic")  # noqa: E731
 NO_PDF = archive.ReportPdfError("Не найден браузер Chrome или Edge для создания PDF")

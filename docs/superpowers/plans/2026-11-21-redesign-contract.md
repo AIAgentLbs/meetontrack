@@ -12,7 +12,7 @@ or drop one listed here without changing this file in the same commit.
 | `2026-11-21-redesign-1-chrome-home.md` | MEETONTRACK-165, 161 | page shell, view switching, Home, permissions, "do not record" |
 | `2026-11-21-redesign-2-memo-writer.md` | MEETONTRACK-164 | event ids, external-meeting detection, the memo loop, the memo block of the agenda |
 | `2026-11-21-redesign-3-call.md` | MEETONTRACK-162 | Call view, stop and resume (the `record pause` verb in both recorders), heartbeat, hint selection, the heard question |
-| `2026-11-21-redesign-4-after.md` (written after plan 3 lands) | MEETONTRACK-163 | After view, hold and send, edits, board removal, memo check, participants |
+| `2026-11-22-redesign-4-after.md` | MEETONTRACK-163 | After view, hold and send, edits, board removal, memo check (participants deferred) |
 
 Branch: `redesign-call-flow`, one git worktree per plan in progress, merged
 into the branch task by task. `main` receives the branch when a view passes
@@ -180,3 +180,143 @@ The undo window is 30 s, a builder timing the spec leaves open (spec "Left to
 the builder"); the spec's "10 s" wording is kept with `{n}`. The `record pause`
 verb (plan 3 Task 3) is the minimum native change the spec's own Resume needs,
 despite the spec's non-goal "No native recorder changes".
+
+## After (plan 4)
+
+### `after.json`
+
+The person's choices for one report, written by `AfterState`
+(`copilot/web/after_state.py`) beside `report.json`:
+`<reports root>/<safe report identity>/after.json`, mode 0600, atomic write,
+one lock. A missing or unreadable file reads as the defaults below.
+
+```
+{"version": 1, "held": false, "send_now_at": null, "changed_at": null,
+ "summary": null, "next_steps": null, "removed": [], "resent_at": null, "delivered_at": null}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `held` | bool | Do not send: no automatic send while true |
+| `send_now_at` | epoch or null | Send now pressed; skips the 30 s pauses and the hold, never the final transcript (MEETONTRACK-94) |
+| `changed_at` | epoch or null | last edit or removal |
+| `summary`, `next_steps` | string or null | the person's text, stripped, at most 4000 chars; null means "not edited" and the report uses the app's lines |
+| `removed` | list of string, at most 500 | board items left out of the report, keys `^(journal\|fact\|memo\|differs):[A-Za-z0-9_-]{1,80}$` |
+| `resent_at` | epoch or null | last Send again that reached at least one channel: the time its text was taken |
+| `delivered_at` | epoch or null | the time the text of the first delivery was taken (precise); set once. An edit is "after sending" when `changed_at` is later than `delivered_at` and `resent_at` (older reports: `delivery_started_at`) |
+
+The send gate, `AfterState.gate(identity, ready_at)` with `ready_at` the
+report's `ready_at` as epoch, answers `{"open", "reason", "send_at"}`; the
+first rule that matches wins:
+
+1. `held` gives closed, `reason` `"held"`, `send_at` null;
+2. `send_now_at` set and no change after it gives open;
+3. less than 30 s since `changed_at` gives closed, `"changes"`, `send_at` = `changed_at` + 30;
+4. less than 30 s since `ready_at` gives closed, `"showing"`, `send_at` = `ready_at` + 30;
+5. otherwise open, `reason` `""`.
+
+Every automatic send takes the gate with `begin_send(identity, ready_at)`: the
+gate check and a "sending" mark in one step under AfterState's lock, released by
+`end_send` once report.json is written. While a report is marked, Hold raises
+`sending`. Hold and Send now carry a ticket taken when the request arrives; an
+older one never undoes a newer one (a Send now queued behind the archive lock
+loses to a later Hold). The retry re-reads the report and checks
+`report_matches` under the archive lock right before `begin_send`.
+
+Every automatic send asks the gate first. A report a closed gate stopped is
+remembered with its `ready_at` (`blocked(identity, ready_at)`); `due()` returns
+and forgets the remembered ones whose gate is open now, and the delivery loop
+retries those at once. The memory is not persisted: the 60 s full retry scan
+covers a restart.
+
+### `report.json` gains
+
+| Field | Type | Meaning |
+|---|---|---|
+| `ready_at` | ISO time | first time the report was made from the final transcript; taken from `AfterState.clock`, the gate's own clock; kept on regeneration |
+| `memo_check` | object | one per meeting, never rerun, failed included (see below) |
+
+The existing `delivery_started_at` (first send) tells an edit made after
+sending; a send that has none yet sets it.
+
+`mail_to` and `telegram_to` record where a confirmed e-mail or Telegram
+delivery went; the After screen names them for sent rows (older reports: no
+destination).
+
+`memo_check`, from the AI purpose `memo_check` (offline, `web=False`):
+
+```
+{"state": "done",
+ "questions": [{"id", "status": "answered" | "open", "quote", "speaker", "at", "segment_id"}],
+ "differs": [{"key": "differs:<12 hex>", "memo", "quote", "speaker", "at", "segment_id"}],
+ "model": "<model the AI service reported>"}
+| {"state": "failed", "reason": "ai_no_answer" | "timeout" | "too_long" | "error", "model"?}
+| {"state": "unavailable", "reason": "ai_needs_choice"}
+| {"state": "unavailable", "reason": "ai_unavailable", "detail": "<the AI service's reason>"}
+| {"state": "unavailable", "reason": "not_checked"}   // past the window or a report on request: no AI run
+```
+
+`model` is on every verdict the AI gave (owner audit-trail rule). `segment_id`
+names the quoted line; the payload and the report show that line's current
+speaker, so a speaker correction after the check is followed.
+
+`at` is the ISO timestamp of the quoted transcript line. A quote is kept only
+when it is found in that line; a question without one is `open`.
+
+### `GET /api/after?meeting_id=<id>`
+
+```
+{"ok": true, "meeting_id", "title", "started_at", "ended_at", "duration_seconds",
+ "send": {"state", "send_at": ISO | null, "send_now": bool,
+          "channels": [{"channel": "email" | "telegram" | "twenty" | "drive", "to": string,
+                        "status": "waiting" | "held" | "sent" | "failed" | "unknown" | "needs_choice",
+                        "at": ISO | null, "retry_at": ISO | null}]},
+ "summary": {"lines": [string], "edited": bool, "final": bool},
+ "next_steps": {"lines": [string], "edited": bool, "final": bool},
+ "removed": [string],
+ "removed_journal": [{"key": "journal:<id>", "category", "text"}],  // report_detail leaves them out; listed to bring back
+ "memo_check": null | {"state": "waiting"} | <memo_check above>,
+ "stale": true}   // only when the archive was busy and this is the last payload
+```
+
+Rows: a channel turned on after the call began (its `<channel>_enabled_at`)
+is left out unless it was sent, as the sender never sends it on its own.
+`unknown` may already have arrived and is never retried on its own. `retry_at`
+is set only for a `failed` row (not `auth_required`) inside the retry window.
+No listed row gives `no_channels`.
+
+`send.state` is one of `no_channels`, `held`, `sent`, `edited`, `draft`,
+`preparing`, `failed`, `changes`, `showing`, `sending` (order of the rules:
+plan 4, Task 4, with ruling C10). For `sent` and `edited` a CRM row in
+`needs_choice` counts as done (it is never sent on its own); at least one row
+must be `sent`. An edit to a sent report reads `sent` until the report is made
+again, then `edited`. `summary.lines` and `next_steps.lines` come
+from the same functions the report uses, so what is on screen is what leaves.
+The archive lock is awaited at most 1 s; then the last payload is answered with
+`stale: true`, or 503 `{"ok": false, "error": "busy"}` when there is none.
+An unknown meeting is 404; a `meeting_id` over 1024 chars is 400.
+
+### `POST /api/after/*`
+
+Each takes `{"meeting_id"}` plus the fields below, resolves the report
+identity (unknown meeting: 404) and answers `{"ok": true}` unless stated.
+None waits for a send: after 1 s on the archive lock the control acts on the
+report of the last `GET /api/after` for that meeting, or answers 503
+`{"ok": false, "error": "busy"}` when there was none. Hold on a meeting the
+page has shown is written at once, without the archive lock, so a send queued
+behind another one sees it. A Hold while this report is being sent answers 409
+`{"ok": false, "error": "sending"}`.
+
+| Route | Body adds | Effect |
+|---|---|---|
+| `/api/after/hold` | | `held` true, `send_now_at` null |
+| `/api/after/send` | | Send now: `held` false, `send_now_at` now; wakes the delivery loop |
+| `/api/after/editing` | | typing started: `changed_at` now, the text unchanged; answers `{"ok": true, "send_at": ISO}` |
+| `/api/after/edit` | `"field": "summary" \| "next_steps"`, `"text"` | text over 4000 chars is 400; answers `{"ok": true, "send_at": ISO}` |
+| `/api/after/remove` | `"key"`, `"removed": bool` | a bad key is 400 `bad_key`; a 501st key is 400 `too_many` |
+| `/api/after/send-again` | optional `"channels"` | resends e-mail, Telegram and Drive (the enabled ones, or the listed subset: Retry sends only the failed ones, ruling C9) with `confirm: true`; with `channels` (Retry) the job drops, under the delivery lock, a channel sent since; the job sets `resent_at` only when a channel confirmed, to the time it checked the report's text; answers `{"ok": true, "job": {..., "request_id"}}`, and the page polls `/api/delivery/job` for its outcome; the CRM note is not updated |
+
+### Deferred
+
+Writing `participants.json` from calendar attendees and its 90-day backfill
+are not part of plan 4; past-report matching keeps falling back to title words.
