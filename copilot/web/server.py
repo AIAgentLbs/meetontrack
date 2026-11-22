@@ -3849,10 +3849,10 @@ def main() -> None:
             }) == "Встреча: Санджар"
         hidden = CodexSession()
         style_scope = {"kind": "all", "repositories": []}
-        assert "один конкретный вопрос, до 18 слов" in hidden._base_prompt(
+        assert "один конкретный вопрос, около восьми слов" in hidden._base_prompt(
             "Что спросить?", "microphone: короткая реплика", "Встреча", style_scope
         )
-        assert "один прямой разговорный вопрос до 18 слов" in hidden._continuation_prompt(
+        assert "один прямой разговорный вопрос около восьми слов" in hidden._continuation_prompt(
             "Что спросить?", "microphone: короткая реплика", "Встреча", style_scope
         )
         hidden._run_ai = lambda prompt: "НЕТ НОВОГО СИГНАЛА"
