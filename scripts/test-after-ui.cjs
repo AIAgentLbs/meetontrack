@@ -88,6 +88,18 @@ async function functions(browser) {
   });
   assert.deepEqual(crmOnly, [[], [], 'The report goes by itself once the final transcript is ready, usually in 2-3 minutes.']);
 
+  // An e-mail channel with no address reads plainly, never "e-mail " with nothing after it.
+  const noAddress = await page.evaluate(() => {
+    const send = { send: { state: 'draft', channels: [{ channel: 'email', to: '', status: 'waiting', at: null, retry_at: null }] } };
+    const en = afterSend(send).recipients;
+    uiLanguage = 'ru';
+    const ru = afterSend(send).recipients;
+    uiLanguage = 'en';
+    return [en, ru];
+  });
+  assert.deepEqual(noAddress, ['You receive it: e-mail. The other side does not receive the report.',
+    'Получите вы: почта. Собеседнику отчет не уходит.']);
+
   // A channel line never ends on "at": with no time the time clause goes.
   const timeless = await page.evaluate(() => afterSend({ send: { state: 'failed', channels: [
     { channel: 'email', to: '', status: 'sent', at: null, retry_at: null },

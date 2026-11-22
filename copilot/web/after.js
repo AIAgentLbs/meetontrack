@@ -90,7 +90,9 @@ function afterSend(after) {
   const resend = channels.filter(row => AFTER_RESEND.has(row.channel));
   // Send again needs a channel it can resend (ruling C11); Retry resends only the failed ones (ruling C9).
   const stuck = state === "edited" ? !resend.length : state === "failed" && !resend.some(row => row.status === "failed");
+  // Telegram without a chat is Saved messages; e-mail without an address reads plainly, never "e-mail " and nothing.
   const parts = channels.map(row => (row.channel === "telegram" && !row.to ? t("after.to.telegram_me")
+    : row.channel === "email" && !row.to ? t("after.to.email_plain")
     : t(`after.to.${row.channel}${row.channel === "twenty" && row.to ? "_named" : ""}`, { to: row.to })));
   return {
     state,
