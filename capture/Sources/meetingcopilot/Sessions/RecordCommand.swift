@@ -20,6 +20,14 @@ struct Record: ParsableCommand {
     @Option(help: "Act only if this is the app's live session (the meeting_id in its live file); exit 3 if not.")
     var session: String?
 
+    /// Only an omitted --session means "whatever records". An empty one, or one with a space (it would split
+    /// the request), is a mistake and never reaches the app (M6); Windows rejects the same.
+    func validate() throws {
+        if let session, session.isEmpty || session.contains(where: \.isWhitespace) {
+            throw ValidationError("--session needs the session id, without spaces; leave it out to act on any recording.")
+        }
+    }
+
     /// Test seam: who answers the request. The real one rings the running app.
     @MainActor static var ask: (RecordRequest.Action, String?) -> RecordRequest.Answer = {
         RecordRequest.askRunningApp($0, session: $1)

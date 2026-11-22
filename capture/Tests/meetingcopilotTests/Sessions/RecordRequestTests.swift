@@ -63,6 +63,18 @@ struct RecordRequestTests {
     }
 
     /// A refusal exits with its own code (3), so the server tells "another recording" from "no answer".
+    /// M6: only an omitted --session means "whatever records"; an empty one is a mistake, never unscoped.
+    @Test func emptySessionIsAnError() {
+        let real = Record.ask
+        defer { Record.ask = real }
+        var asked = false
+        Record.ask = { _, _ in asked = true; return .done }
+        for bad in ["", " ", "A1 B2"] {
+            #expect(throws: (any Error).self) { try Record.parse(["stop", "--session", bad]).run() }
+        }
+        #expect(!asked)
+    }
+
     @Test func refusalHasItsOwnExitCode() throws {
         let real = Record.ask
         defer { Record.ask = real }
