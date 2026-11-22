@@ -264,8 +264,10 @@
     blockerState.health = data.recording_health || null;
     blockerState.live = data.transcript || null;
     const analysisError = data.copilot?.analysis?.state === "error" ? data.copilot.analysis.message || "" : "";
-    blockerState.aiFailure = data.copilot?.error ? { text: data.copilot.error, analysis: false }
-      : analysisError ? { text: analysisError, analysis: true } : null;
+    // A failed analysis also sets copilot.error (CodexSession.ask): the analysis wins, so in Call it shows once,
+    // as the feed's pause (D3). A failed Ask shows in the Call feed too (call.js callAskFailed).
+    blockerState.aiFailure = analysisError ? { text: analysisError, analysis: true }
+      : data.copilot?.error ? { text: data.copilot.error, analysis: false } : null;
     renderBlockers();
     const wasRecording = recording;
     recording = Boolean(data.recording_health?.audio_recording);

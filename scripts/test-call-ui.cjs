@@ -887,6 +887,19 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // D3: a failed automatic analysis shows once, as the feed's pause, never also as the red banner; copilot.error
+  // arrives with it from the server. Outside Call the banner still says the AI failed.
+  {
+    const page = await callPage(browser, 'paused_ai');
+    assert.equal(build('paused_ai').state.copilot.error.startsWith('AI_TIMEOUT'), true);
+    await page.waitForTimeout(300);
+    assert.equal(await visible(page, '#blocker-banner'), false);
+    assert.equal(await page.locator('#call').innerText().then(value => value.match(/AI did not answer/g).length), 1);
+    await page.evaluate(() => openView('after'));
+    await page.waitForFunction(() => !document.getElementById('blocker-banner').hidden);
+    assert.match(await text(page, '#blocker-banner'), /^AI help failed: /);
+    await page.context().close();
+  }
   // D2: paused AI with nothing to show: the main line says hints are paused, one message, no waiting line under it.
   for (const [lang, main, retry] of [['en', 'Hints paused: the AI did not answer.', /^Recording continues, next try in 5\u00a0min\. Check the AI in settings$/],
     ['ru', 'Подсказки на паузе: ИИ не ответил.', /^Запись идет, следующая попытка через 5\u00a0мин\. /]]) {

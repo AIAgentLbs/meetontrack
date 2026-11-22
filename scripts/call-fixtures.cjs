@@ -105,7 +105,8 @@ function build(name, lang = 'en', now = Date.now()) {
     // Recording and heard, nothing to say yet, no memo.
     waiting: () => { state.call_plan = null; },
     // The analysis failed: hints pause, the recording goes on.
-    paused_ai: () => { state.call_plan = null;
+    // The real server shape: CodexSession.ask sets copilot.error and record_analysis the analysis error (D3).
+    paused_ai: () => { state.call_plan = null; state.copilot.error = 'AI_TIMEOUT: no answer within the limit';
       state.copilot.analysis = { state: 'error', at: ago(20 * SEC), message: 'AI_TIMEOUT: no answer within the limit' }; },
     // The call audio stopped growing 40 s ago, and the transcript carries the open gap.
     other_lost: () => { hint(); state.recording_health.capture = capture(now, [track('mic'), track('system', 'stalled', 40)]);
