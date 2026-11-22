@@ -129,6 +129,9 @@ class AnalysisReplyTests(unittest.TestCase):
             self.assertNotRegex(prompt, r"Майк|Mike")
         self.assertIn("в звонке один на один каждый вопрос собеседника адресован пользователю", question)
         self.assertNotIn("до 18 слов", prompts[1] + prompts[2])  # one length rule: SPEAKABLE_RULE's
+        # D1: the Call view shows elapsed call time; a clock time in the source line would be a second clock.
+        for prompt in prompts[:3]:
+            self.assertIn("источник без времени", prompt)
 
     def test_other_sides_question_without_a_named_speaker_is_incoming(self):
         # A call-audio segment the diarizer did not name is still the other side: it keeps its reply.

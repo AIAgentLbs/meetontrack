@@ -16,7 +16,14 @@ const callAt = value => {
   const at = Date.parse(value);
   return Number.isNaN(at) ? null : at;
 };
-const callLabel = (label, at) => (at === null ? label : t("call.at", { label, time: homeClock(at) }));
+// Every time in Call is elapsed call time, the top-bar clock (D1): a wall-clock time next to 12:40 reads as hours old.
+const callStartIso = state => state?.recording_health?.capture?.started_at || state?.transcript?.started_at;
+// Without a known start there is no top-bar clock either, so the wall clock cannot contradict it.
+const callElapsed = (at, state) => (at === null ? "" : callAt(callStartIso(state)) === null ? homeClock(at) : callClock(callStartIso(state), at));
+const callLabel = (label, at, state) => {
+  const time = callElapsed(at, state);
+  return time ? t("call.at", { label, time }) : label;
+};
 // The verb the label says (Ask, Say, Clarify): a line that starts with it loses it, so the verb is said once
 // (ruling 8). The verb comes from the whole line, so a cut never turns Ask into Say (ruling 6).
 const CALL_VERBS = [["ask", "Спросите|Ask"], ["say", "Скажите|Say"], ["clarify", "Уточните|Clarify"]];
@@ -56,7 +63,7 @@ function hintCandidates(state) {
   const own = messages.findLastIndex((message, index) => message.role === "assistant" && messages[index - 1]?.role === "user");
   if (own > 0) {
     const at = callAt(messages[own].at);
-    hints.push({ kind: "own", tier: 0, at, label: callLabel(t("call.own"), at), question: String(messages[own - 1].text || ""),
+    hints.push({ kind: "own", tier: 0, at, label: callLabel(t("call.own"), at, state), question: String(messages[own - 1].text || ""),
       text: String(messages[own].text || ""), source: "", detail: [] });
   }
   for (const item of state?.journal || []) {
@@ -65,15 +72,15 @@ function hintCandidates(state) {
     if (item.category === "INCOMING_QUESTION" && item.reply && open) {
       const speaker = String(item.speaker || "").trim();
       const label = speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
-      hints.push({ kind: "answer", tier: 1, at, label: callLabel(label, at), question: String(item.text || ""), speaker,
+      hints.push({ kind: "answer", tier: 1, at, label: callLabel(label, at, state), question: String(item.text || ""), speaker,
         ...callCut(callLine(item.reply).line), ...callParts(item.reply, item) });
     } else if (item.category === "CONTRADICTION" && open) {
       const line = callLine(item.text);
-      hints.push({ kind: "check", tier: 2, at, label: callLabel(t("call.clarify"), at), question: "",
+      hints.push({ kind: "check", tier: 2, at, label: callLabel(t("call.clarify"), at, state), question: "",
         ...callCut(line.verb === "clarify" ? line.rest : line.line), ...callParts(item.text, item) });
     } else if (["ASK", "RISK", "OBJECTION"].includes(item.category) && open) {
       const line = callLine(item.text);
-      hints.push({ kind: "signal", tier: 3, at, label: callLabel(callVerbLabel(line), at), question: "", ...callCut(line.rest),
+      hints.push({ kind: "signal", tier: 3, at, label: callLabel(callVerbLabel(line), at, state), question: "", ...callCut(line.rest),
         ...callParts(item.text, item) });
     }
   }
@@ -84,7 +91,7 @@ function hintCandidates(state) {
     const said = item.quote || item.claim || "";
     const quote = uiLanguage === "ru" ? `«${said}»` : `“${said}”`;
     const line = callLine(item.fact);
-    hints.push({ kind: "check", tier: 2, at, label: callLabel(t("call.clarify"), at), question: "",
+    hints.push({ kind: "check", tier: 2, at, label: callLabel(t("call.clarify"), at, state), question: "",
       ...callCut(line.verb === "clarify" ? line.rest : line.line), source: speaker ? `${speaker}: ${quote}` : quote, detail: [] });
   }
   const questions = (state?.call_plan?.items || []).filter(item => item.kind === "question");
@@ -182,7 +189,8 @@ function callProblem(state, now) {
   const side = beat.other.state === "not_heard" ? "other" : beat.you.state === "not_heard" ? "you" : null;
   if (!side) return null;
   const since = beat[side].since;
-  return { side, title: since === null ? t(`call.${side}_lost_now`) : t(`call.${side}_lost`, { time: homeClock(since) }) };
+  const time = callElapsed(since, state);
+  return { side, title: time ? t(`call.${side}_lost`, { time }) : t(`call.${side}_lost_now`) };
 }
 
 // What the slot shows: the pending own question, then the hint picked, a heard question, or the waiting line.
@@ -204,7 +212,7 @@ function callSlot(state, current, now, stopped = null) {
     const speaker = String(heard.speaker || "").trim();
     const label = speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
     const later = analysisSkipped !== null && analysisSkipped === state?.transcript?.meeting_id;
-    return { type: "heard", label: callLabel(label, callAt(heard.at)), question: String(heard.text), later };
+    return { type: "heard", label: callLabel(label, callAt(heard.at), state), question: String(heard.text), later };
   }
   if (current) {
     const key = callHintKey(current);
@@ -303,14 +311,14 @@ function renderCall(state) {
   const failed = analysis?.state === "error" ? callAt(analysis.at) : null;
   const retry = failed === null ? null : failed + 300000;
   // A retry time that has passed is not shown: the next try comes with the next analysis.
-  const note = retry === null || stopped ? null : retry > now ? t("call.paused", { time: homeClock(retry) }) : t("call.paused_next");
+  const note = retry === null || stopped ? null : retry > now ? t("call.paused", { n: Math.ceil((retry - now) / 60000) }) : t("call.paused_next");
   $("call-note").hidden = !note;
   callPart("call-note", note, text => [`${text} `, callButton("ql", t("call.check_ai"), () => $("getting-started-open").click())]);
 
   // A heard question says who asked, in quotes; our answer sits under its own label, so it never reads as hers (B6).
   const earlier = pick.earlier.map(hint => (hint.kind === "answer"
     ? { asked: hint.speaker ? t("call.asked", { name: hint.speaker, question: hint.question }) : t("call.asked_plain", { question: hint.question }),
-      label: callLabel(t("call.answer"), hint.at), text: hint.text, source: hint.source }
+      label: callLabel(t("call.answer"), hint.at, state), text: hint.text, source: hint.source }
     : { label: hint.label, text: hint.text, source: hint.source }));
   const open = $("call-earlier-open");
   const count = t("call.earlier", { n: earlier.length });

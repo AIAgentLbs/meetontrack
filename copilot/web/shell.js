@@ -70,12 +70,12 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
   }
   if (stopping && stopping.meeting_id === meeting) {
     const n = Math.max(0, Math.ceil((Date.parse(stopping.until) - now) / 1000));
-    return { kind: "stopped", text: t("status.stopped", { time: homeClock(stopping.stopped_at), n }), action: action("resume", false) };
+    return { kind: "stopped", text: t("status.stopped", { time: callElapsed(callAt(stopping.stopped_at), state), n }), action: action("resume", false) };
   }
   // A live recording that began after the final stop is a new one, even under the same id.
   const started = Date.parse(state?.recording_health?.capture?.started_at || state?.transcript?.started_at || "");
   if (!stopping && isLive(state, now) && control.last_stop?.meeting_id === meeting && !(started > Date.parse(control.last_stop.stopped_at))) {
-    return { kind: "stopped", text: t("status.stopped_final", { time: homeClock(control.last_stop.stopped_at) }), action: null };
+    return { kind: "stopped", text: t("status.stopped_final", { time: callElapsed(callAt(control.last_stop.stopped_at), state) }), action: null };
   }
   if (stateConnectionFailed && !isLive(state, now)) return { kind: "disconnected", text: t("status.disconnected"), action: null };
   if (isLive(state, now)) {

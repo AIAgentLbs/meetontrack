@@ -237,7 +237,7 @@ const errors = [];
     const stops = await page.evaluate(() => {
       const now = Date.parse('2026-11-21T12:00:00Z');
       const at = seconds => new Date(now + seconds * 1000).toISOString();
-      const call = (control, extra = {}) => ({ transcript: { meeting_id: 'm1', status: 'recording', live: true },
+      const call = (control, extra = {}) => ({ transcript: { meeting_id: 'm1', status: 'recording', live: true, started_at: at(-900) },
         recording_control: { stopping: null, last_stop: null, ...control }, ...extra });
       const tracks = (...states) => ({ recording_health: { checked_at: now / 1000 - 2, capture: { state: 'stalled', audio_recording: false,
         tracks: states.map((state, index) => ({ source: index ? 'system' : 'mic', state, last_growth_age_seconds: 40 })) } } });
@@ -255,15 +255,16 @@ const errors = [];
       };
       cases.startedAfterStop.transcript.started_at = at(-10);
       cases.startedBeforeStop.transcript.started_at = at(-600);
-      return { time: homeClock(at(-10)), finalTime: homeClock(at(-4)), beforeTime: homeClock(at(-60)),
+      // Elapsed call time, the top-bar clock (D1): the call began 15 min before now.
+      return { time: '14:50', finalTime: '14:56', beforeTime: '09:00',
         ...Object.fromEntries(Object.entries(cases).map(([name, state]) => [name, short(callStatus(state, { meetings: [] }, {}, now))])) };
     });
     assert.deepEqual(stops, {
       time: stops.time, finalTime: stops.finalTime, beforeTime: stops.beforeTime,
       startedAfterStop: ['recording', 'Запись', null],
-      startedBeforeStop: ['stopped', `Запись остановлена в ${stops.beforeTime}.`, null],
-      stopping: ['stopped', `Запись остановлена в ${stops.time}. Через 20\u00a0с откроется отчет.`, 'resume'],
-      final: ['stopped', `Запись остановлена в ${stops.finalTime}.`, null],
+      startedBeforeStop: ['stopped', `Запись остановлена на ${stops.beforeTime}.`, null],
+      stopping: ['stopped', `Запись остановлена на ${stops.time}. Через 20\u00a0с откроется отчет.`, 'resume'],
+      final: ['stopped', `Запись остановлена на ${stops.finalTime}.`, null],
       otherLastStop: ['recording', 'Запись', null],
       otherStopping: ['recording', 'Запись', null],
       oneStalled: ['recording', 'Запись', null],

@@ -12,7 +12,7 @@ const TEXT = {
     review: 'Pilot review', anna: 'Anna Petrova', company: 'Example LLC', me: 'Me',
     questions: ['What budget is set for the pilot this year?', 'Who signs off the purchase?', 'Which part of the proposal matters most now?'],
     ask: 'Ask who signs off the purchase?\nEvidence: Anna mentioned a committee but no name.',
-    risk: 'The start date slips if the contract waits for the committee.\nSource: Anna, 12:31',
+    risk: 'The start date slips if the contract waits for the committee.\nSource: Anna, 09:31',
     objection: 'The price looks high next to their own estimate.',
     contradiction: 'Anna said two offices, the memo says five.\nSource: memo, background',
     claim: 'Our pilot last year covered every regional office.', fact: 'Last year the pilot covered two offices out of five.',
@@ -27,7 +27,7 @@ const TEXT = {
     review: 'Обзор пилота', anna: 'Анна Петрова', company: 'ООО Пример', me: 'Я',
     questions: ['Какой бюджет заложен на пилот в этом году?', 'Кто подписывает закупку?', 'Какая часть предложения сейчас важнее всего?'],
     ask: 'Спросите, кто подписывает закупку?\nОснование: Анна упомянула комитет, но без имени.',
-    risk: 'Старт сдвинется, если договор будет ждать комитет.\nИсточник: Анна, 12:31',
+    risk: 'Старт сдвинется, если договор будет ждать комитет.\nИсточник: Анна, 09:31',
     objection: 'Цена кажется высокой рядом с их собственной оценкой.',
     contradiction: 'Анна сказала про два офиса, в мемо пять.\nИсточник: мемо, контекст',
     claim: 'Наш пилот в прошлом году охватил все региональные офисы.', fact: 'В прошлом году пилот охватил два офиса из пяти.',
@@ -120,9 +120,10 @@ function build(name, lang = 'en', now = Date.now()) {
     earlier_open: () => { state.journal = [...older(), event('CONTRADICTION', L.contradiction, 70 * SEC)];
       state.fact_checks.items = [refuted(60 * SEC)]; },
     // Stop pressed 10 s ago: the recorder is paused, the stop lands in 20 s.
-    stopped: () => { hint(); state.recording_control.stopping = { meeting_id: 'm1', stopped_at: ago(10 * SEC), until: iso(now + 20 * SEC) }; },
+    // The hints in the stop fixtures come before the stop (D1).
+    stopped: () => { hint(); state.journal[0] = event('ASK', L.ask, 15 * SEC); state.recording_control.stopping = { meeting_id: 'm1', stopped_at: ago(10 * SEC), until: iso(now + 20 * SEC) }; },
     // The deferred stop was not acknowledged: it is retried every 5 s, and the bar says so.
-    stop_failed: () => { hint(); state.recording_control.stopping = { meeting_id: 'm1', stopped_at: ago(40 * SEC),
+    stop_failed: () => { hint(); state.journal[0] = event('ASK', L.ask, 45 * SEC); state.recording_control.stopping = { meeting_id: 'm1', stopped_at: ago(40 * SEC),
       until: iso(now + 3 * SEC), failed: 2 }; },
     // A recorder without pause stopped at once; the call still reads live until the recorder's last write ages out.
     stopped_final: () => { hint(); state.recording_control.last_stop = { meeting_id: 'm1', stopped_at: ago(4 * SEC) }; },

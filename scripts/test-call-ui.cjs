@@ -53,14 +53,16 @@ async function functions(browser) {
         { kind: 'question', text: 'What budget is set?', status: 'resolved' },
         { kind: 'question', text: 'Who signs off the purchase?', status: 'open' },
       ] },
-      copilot: { messages: [] },
+      copilot: { messages: [] }, transcript: { started_at: ago(600) },
     });
     const kinds = pick => ({ current: pick.current?.kind ?? null, label: pick.current?.label, source: pick.current?.source,
       detail: pick.current?.detail, text: pick.current?.text, earlier: pick.earlier.map(hint => hint.kind) });
     const own = base(20, 10, 5);
     own.copilot.messages = [{ role: 'user', text: 'What did Anna say?', at: ago(52) }, { role: 'assistant', text: 'She said one quarter.', at: ago(50) }];
-    const ask = { journal: [{ category: 'ASK', text: 'Who signs the purchase?', created_at: ago(3) }], copilot: { messages: [] } };
-    const risk = { journal: [{ category: 'RISK', text: 'The start date slips.', created_at: ago(3) }], copilot: { messages: [] } };
+    const ask = { journal: [{ category: 'ASK', text: 'Who signs the purchase?', created_at: ago(3) }], copilot: { messages: [] },
+      transcript: { started_at: ago(600) } };
+    const risk = { journal: [{ category: 'RISK', text: 'The start date slips.', created_at: ago(3) }], copilot: { messages: [] },
+      transcript: { started_at: ago(600) } };
     return {
       answer: kinds(pickHint(base(20, 10, 5), now)),
       check: kinds(pickHint(base(31, 10, 5), now)),
@@ -74,7 +76,7 @@ async function functions(browser) {
   });
   assert.equal(picks.answer.current, 'answer');
   assert.equal(picks.answer.text, 'On the first Monday after signing.');
-  assert.match(picks.answer.label, /^Anna Petrova asks · \d\d:\d\d$/);
+  assert.equal(picks.answer.label, 'Anna Petrova asks · 09:40', 'elapsed call time (D1)');
   assert.equal(picks.check.current, 'check');
   assert.match(picks.check.label, /^Clarify · \d\d:\d\d$/);
   assert.equal(picks.memo.current, 'memo');
@@ -95,7 +97,7 @@ async function functions(browser) {
     text: 'Say the date slips.\nSource: Anna, 12:31\nThe memo has no date.', evidence: 'we wait for the committee', speaker: 'Anna Petrova' }] })[0]);
   // The label says the verb once: a line that starts with it loses it (ruling 8).
   assert.equal(parts.text, 'The date slips.');
-  assert.match(parts.label, /^Say · /);
+  assert.match(parts.label, /^Say · \d\d:\d\d$/, 'no call start known: the wall clock, as no call clock shows either');
   assert.equal(parts.source, 'Source: Anna, 12:31');
   assert.deepEqual(parts.detail, ['The memo has no date.', 'we wait for the committee', 'Anna Petrova']);
   const fallback = await run(() => hintCandidates({ journal: [{ category: 'ASK', created_at: new Date().toISOString(),
@@ -367,9 +369,7 @@ async function interactions(browser) {
   // The AI did not answer: hints pause with the next try, and the link opens the guide.
   page = await callPage(browser, 'paused_ai');
   const note = await text(page, '#call-note');
-  assert.match(note, /^Hints paused: the AI did not answer\. Recording continues, next try at \d\d:\d\d\./);
-  const retry = await page.evaluate(() => homeClock(Date.parse(window.appState.copilot.analysis.at) + 300000));
-  assert.ok(note.includes(retry), `${note} / ${retry}`);
+  assert.match(note, /^Hints paused: the AI did not answer\. Recording continues, next try in 5\u00a0min\./);
   // The note is the only message: no analysis-failure banner over the Call view.
   assert.equal(await visible(page, '#blocker-banner'), false);
   // A retry time that has passed is not shown.
@@ -392,10 +392,8 @@ async function interactions(browser) {
   await page.context().close();
 
   // The other side not heard: since when, the sound output first, How to fix on the guide's audio step.
-  const at = Math.floor(Date.now() / 60000) * 60000 + 50000; // since = :10 of this minute, a few seconds of drift never cross it
-  page = await callPage(browser, 'other_lost', { at });
-  const since = await page.evaluate(at => homeClock(at - 40000), at);
-  assert.equal(await text(page, '#call-problem .problem h3'), `The other side is not heard since ${since}`);
+  page = await callPage(browser, 'other_lost', { at: Date.now() });
+  assert.equal(await text(page, '#call-problem .problem h3'), 'The other side is not heard since 12:00');
   assert.match(await text(page, '#call-problem .problem p'), /^You are heard\./);
   assert.equal(await text(page, '#call-problem button.primary'), 'Choose where to listen to the call from');
   await page.click('#call-problem button.primary');
@@ -885,6 +883,30 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // D1: every time in Call is elapsed call time, the top-bar clock (the call began 12:40 before `at`).
+  {
+    const at = Date.now();
+    let page = await callPage(browser, 'hint', { at });
+    assert.equal(await text(page, '#call-slot .say'), 'Ask · 12:35');
+    await page.context().close();
+    page = await callPage(browser, 'other_lost', { at });
+    assert.equal(await text(page, '#call-problem .problem h3'), 'The other side is not heard since 12:00');
+    await page.context().close();
+    page = await callPage(browser, 'stopped', { at });
+    assert.match(await text(page, '#call-status-text'), /^Recording stopped at 12:30\. /);
+    await page.context().close();
+    page = await callPage(browser, 'paused_ai', { at });
+    assert.match(await text(page, '#call'), /next try in 5\u00a0min\./);
+    await page.context().close();
+    page = await callPage(browser, 'paused_ai', { at, lang: 'ru' });
+    assert.match(await text(page, '#call'), /следующая попытка через 5\u00a0мин\./);
+    await page.context().close();
+    for (const name of ['stopped', 'stop_failed', 'stopped_final']) {
+      const { state } = build(name, 'en', at);
+      const stop = Date.parse((state.recording_control.stopping || state.recording_control.last_stop).stopped_at);
+      assert.ok(state.journal.every(item => Date.parse(item.created_at) <= stop), `${name}: no hint after the stop`);
+    }
+  }
   // C1: in Call a panel shows only what it was opened for. Board: the four columns, no tab bar, no chips, no
   // per-card pill or dropdown, no red, and the current hint once. Transcript: one heading, no Frames tab.
   {
