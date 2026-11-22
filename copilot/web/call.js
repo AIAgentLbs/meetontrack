@@ -175,7 +175,7 @@ function lastPhrase(state) {
 // The feed: the call's name, a problem when a side is not heard, the one slot, the paused note and the earlier
 // hints. Each part is rebuilt only when what it shows changes, so focus and an open source line survive the poll.
 let callPending = null; // {question, at, queued}: the person's own question, its answer not back yet; queued: not sent yet
-let callAskError = null; // {question, text}: the last Ask failed, shown in the feed until the next one (B3)
+let callAskError = null; // {question, text, at}: the last Ask failed, shown in the feed for a while (B3, I1)
 let callEarlierOpen = false;
 const callWhereOpen = new Set(); // keys of the hints whose source is open
 const callSignatures = {};
@@ -218,6 +218,8 @@ function callProblem(state, now) {
 function callSlot(state, current, now, stopped = null) {
   const own = current?.kind === "own" ? current : null;
   if (callPending && !callPending.queued && ((own && own.at > callPending.at) || (!requestBusy && !state?.copilot?.busy))) callPending = null;
+  // A failed Ask shows for the hold every error gets, until a newer hint, and never over a stop (I1).
+  if (callAskError && (stopped || now - callAskError.at > STATUS_ERROR_MS || (current?.at ?? -Infinity) > callAskError.at)) callAskError = null;
   if (callPending) return { type: "pending", label: t("call.own"), question: callPending.question };
   if (callAskError) return { type: "ask_error", label: t("call.own"), question: callAskError.question, text: callAskError.text };
   if (own) return { type: "own", label: own.label, at: own.at, question: own.question, text: own.text };
@@ -509,7 +511,7 @@ addEventListener("DOMContentLoaded", () => {
 // A failed Ask (app.js sendQuestion): the feed says so, and the question goes back into an empty field to try again.
 window.callAskFailed = (question, text) => {
   if (callPending?.question === question) callPending = null;
-  callAskError = { question, text };
+  callAskError = { question, text, at: Date.now() };
   const field = $("call-question");
   if (!field.value.trim()) field.value = question;
   if (document.body.dataset.view === "call") renderCall(window.appState);

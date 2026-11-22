@@ -6,6 +6,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const { build, open, NAMES } = require('./call-fixtures.cjs');
 
 const SEC = 1000;
+const STATUS_ERROR_MS_TEST = 8000; // shell.js STATUS_ERROR_MS: the hold of every error
 
 async function functions(browser) {
   const page = await open(browser, { fixture: 'hint', lang: 'en' });
@@ -1300,6 +1301,35 @@ async function polish(browser) {
   }
 }
 
+// Sections H, I and J: critique 3, the re-review and Codex on the fix wave.
+async function round3(browser) {
+  // I1: a failed Ask never locks the slot. A newer hint replaces it, it goes after the error hold, and a stop
+  // outranks it, so "Запись сохранена" and the results button always show.
+  for (const then of ['hint', 'time', 'stopped_final']) {
+    const page = await callPage(browser, 'waiting', { at: Date.now() });
+    page.api.responses['/api/chat'] = 'abort';
+    await page.fill('#call-question', 'Who signs?');
+    await page.press('#call-question', 'Enter');
+    const unreachable = await page.evaluate(() => t('error.unreachable'));
+    await page.waitForFunction(text => document.getElementById('call-slot').textContent.includes(text), unreachable);
+    const state = page.api.fixture.state;
+    if (then === 'hint') state.journal = [{ id: 'j-new', category: 'ASK', text: 'Ask who signs off the purchase?', meeting_id: 'm1',
+      created_at: new Date(await page.evaluate(() => Date.now()) + 1000).toISOString(), status: 'open' }];
+    if (then === 'time') await page.clock.fastForward(STATUS_ERROR_MS_TEST + 1000);
+    if (then === 'stopped_final') state.recording_control.last_stop = { meeting_id: 'm1', stopped_at: new Date(await page.evaluate(() => Date.now())).toISOString() };
+    if (then === 'hint') await page.clock.fastForward(2000);
+    await refresh(page);
+    const slot = await text(page, '#call-slot');
+    assert.ok(!slot.includes(unreachable), `${then}: ${slot}`);
+    if (then === 'hint') assert.equal(await text(page, '#call-slot .hint'), 'Who signs off the purchase?');
+    if (then === 'stopped_final') {
+      assert.equal(await text(page, '#call-slot p'), 'The recording is saved.');
+      assert.equal(await text(page, '#call-slot button'), 'Open the call results');
+    }
+    await page.context().close();
+  }
+}
+
 async function expectPost(page, path, body) {
   for (let tries = 0; tries < 50 && !posts(page, path).length; tries++) await page.waitForTimeout(20);
   assert.deepEqual(posts(page, path), [body]);
@@ -1308,6 +1338,8 @@ async function expectPost(page, path, body) {
 (async () => {
   const browser = await chromium.launch();
   try {
+    // ONLY=round3 runs one block of checks while working on it.
+    if (process.env.ONLY) { await { round3, polish }[process.env.ONLY](browser); console.log(`${process.env.ONLY} passed`); return; }
     await functions(browser);
     await fixtures(browser);
     await interactions(browser);
@@ -1316,6 +1348,7 @@ async function expectPost(page, path, body) {
     await everyFixture(browser);
     await fixWave(browser);
     await polish(browser);
+    await round3(browser);
     console.log('call UI checks passed');
   } finally {
     await browser.close();
