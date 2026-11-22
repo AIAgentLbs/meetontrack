@@ -487,3 +487,4 @@ body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcrip
   .row > .main { display: contents; }
   .row .who { padding-top: 0; }
 }
+.after .row-act .after-why { color: var(--muted); font-size: 13px; align-self: center; }

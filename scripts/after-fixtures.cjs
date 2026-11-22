@@ -16,6 +16,7 @@ const TEXT = {
     risk: 'The start slips if the committee does not meet this Thursday.\nEvidence: Anna said the committee decides the purchase.',
     objection: 'Setup is already in the price, there is nothing extra to pay.\nEvidence: Anna compared the price with her own estimate.',
     claim: 'Our pilot last year covered every regional office.', fact: 'Last year the pilot covered two offices out of five.',
+    report: 'Pilot report, 12 October',
     march: 'We plan to start in March.', memoStart: 'The pilot starts in April.',
     summary: ['Two offices start the pilot.', 'The committee decides the purchase on Thursday.'],
     refined: ['Two offices start the pilot in March.', 'The committee decides the purchase on Thursday.'],
@@ -31,6 +32,7 @@ const TEXT = {
     risk: 'Старт сдвинется, если комитет не соберется в этот четверг.\nОснование: Анна сказала, что закупку решает комитет.',
     objection: 'Настройка уже входит в цену, доплачивать не нужно.\nОснование: Анна сравнила цену со своей оценкой.',
     claim: 'Наш пилот в прошлом году охватил все региональные офисы.', fact: 'В прошлом году пилот охватил два офиса из пяти.',
+    report: 'Отчет о пилоте, 12 октября',
     march: 'Старт у нас в марте.', memoStart: 'Пилот стартует в апреле.',
     summary: ['Пилот начинают два офиса.', 'Комитет решает закупку в четверг.'],
     refined: ['Пилот начинают два офиса в марте.', 'Комитет решает закупку в четверг.'],
@@ -81,7 +83,7 @@ function build(name, lang = 'en', now = Date.now()) {
     fact_checks: { web: true, provider: '', web_providers: [], items: [{ id: 'fc-1', category: 'FACT_CHECK', source: 'fact_check',
       meeting_id: 'm1', meeting: L.review, created_at: at(30 * MIN + 5 * SEC), status: 'refuted', claim: L.claim, quote: L.claim,
       query: 'pilot offices', segment: { source: 'microphone', speaker: L.me }, timestamp: at(30 * MIN), fact: L.fact,
-      sources: [{ kind: 'web', url: 'https://example.com/pilot-report', quote: L.fact }], checked_at: at(30 * MIN + 20 * SEC) }] },
+      sources: [{ kind: 'kb', title: L.report, location: 'https://example.com/pilot-report', quote: L.fact }], checked_at: at(30 * MIN + 20 * SEC) }] },
     recording_control: { stopping: null, last_stop: { meeting_id: 'm1', stopped_at: stoppedAt } },
   };
 

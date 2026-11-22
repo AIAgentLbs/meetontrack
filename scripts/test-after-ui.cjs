@@ -28,9 +28,12 @@ async function functions(browser) {
   assert.deepEqual(risks.rows.map(row => row.tag), ['risk', 'objection']);
   assert.equal(risks.rows[0].text, 'The start slips if the committee does not meet this Thursday.', 'the first line, whole');
   assert.deepEqual(facts.rows.map(row => [row.key, row.tag]), [['fact:fc-1', 'differs'], ['differs:0123456789ab', 'differs']]);
-  assert.equal(facts.rows[0].other, 'Fact check: Last year the pilot covered two offices out of five.', 'the correct fact is labelled');
-  assert.match(facts.rows[1].other, /Example LLC/);
-  assert.match(facts.rows[1].other, /The pilot starts in April\./);
+  // A differing row names where each side comes from and quotes both (critique 1, C).
+  assert.equal(facts.rows[0].other, 'Pilot report, 12 October: “Last year the pilot covered two offices out of five”');
+  assert.equal(facts.rows[1].other, 'Example LLC, memo: “The pilot starts in April”');
+  const web = await page.evaluate(({ state, after }) => afterBoard({ ...state, fact_checks: { items: [{ ...state.fact_checks.items[0],
+    sources: [{ kind: 'web', url: 'https://news.example.org/pilot', quote: 'q' }] }] } }, after).lanes[3].rows[0].other, data);
+  assert.equal(web, 'news.example.org: “Last year the pilot covered two offices out of five”', 'a web source is its site');
   assert.equal(facts.rows[1].quote, 'We plan to start in March.');
   assert.equal(facts.rows[1].at, '33:40');
   assert.ok(board.lanes.every(lane => [...lane.rows, ...lane.folded].every(row => row.removed === false)));
@@ -61,7 +64,7 @@ async function functions(browser) {
     const pick = ({ state, headline, rules, actions, recipients, channels }) => ({ state, headline, rules, actions, recipients, channels });
     return Object.fromEntries(Object.entries(names).map(([name, after]) => [name, pick(afterSend(after))]));
   }, { draft: data.after, held: build('held').after, sent: build('sent').after, edited: build('edited').after,
-    failed: build('failed').after, no_channels: build('no_channels').after,
+    failed: build('failed').after, no_channels: build('no_channels').after, sending: build('sending').after,
     send_now: { ...data.after, send: { ...data.after.send, send_now: true } } });
   assert.deepEqual(send.draft.actions, ['send_now', 'hold']);
   assert.deepEqual(send.draft.rules, ['Changes to the summary, the next steps or the board hold the report for 30 seconds.',
@@ -70,6 +73,12 @@ async function functions(browser) {
   assert.equal(send.draft.recipients, 'You receive it: e-mail owner@example.org, Telegram (Saved messages), a note in your CRM, record Example LLC. The other side does not receive the report.');
   assert.deepEqual(send.draft.channels, []);
   assert.deepEqual(send.held.actions, ['send_now']);
+  assert.deepEqual(send.sending.actions, [], 'nothing can be stopped once it is being sent (G)');
+  assert.equal(send.sending.headline, 'The report is being sent.');
+  // Past tense once it went (B).
+  assert.equal(send.sent.recipients, 'You received it: e-mail owner@example.org, Telegram (Saved messages), a note in your CRM, record Example LLC. The other side did not receive the report.');
+  assert.match(send.edited.recipients, /^You received it: /);
+  assert.match(send.failed.recipients, /^You received it: /);
   assert.deepEqual(send.held.rules, []);
   assert.deepEqual(send.sent.actions, []);
   assert.equal(send.sent.channels.length, 3);
@@ -199,6 +208,127 @@ async function everyScreen(browser) {
       await page.context().close();
     }));
   }
+}
+
+// Critique 1 fixes (A-G) and the Task 6 leftovers (H-J).
+async function critique1(browser) {
+  // A. The transcript panel shows the call's own clock, as the board does.
+  let page = await afterPage(browser, 'transcript_open');
+  await page.click('#after-transcript');
+  const times = await page.locator('.transcript-pane time').allInnerTexts();
+  assert.ok(times.includes('33:40') && times.includes('05:12'), `elapsed call time in the transcript (${times})`);
+  assert.ok(times.every(time => /^\d?\d:\d\d$/.test(time)), `no wall clock (${times})`);
+  await page.context().close();
+
+  // B. After sending, the field note, the board line and the recipients speak in the past.
+  for (const fixture of ['sent', 'edited', 'failed']) {
+    page = await afterPage(browser, fixture);
+    assert.equal(await text(page, '.two .after-note'), 'Edits do not go by themselves: Send again appears after them.', fixture);
+    assert.equal(await text(page, '#after-board .board-head'), 'Went into the report. What was said on the call, checked against the memo.', fixture);
+    assert.match(await text(page, '#after-to'), /^You received it: /, fixture);
+    await page.context().close();
+  }
+  page = await afterPage(browser, 'sent', { lang: 'ru' });
+  assert.equal(await text(page, '.two .after-note'), 'Правки не уйдут сами: после них появится «Отправить еще раз».');
+  assert.equal(await text(page, '#after-board .board-head'), 'Ушло в отчет. Что прозвучало на звонке, сверено с мемо.');
+  assert.match(await text(page, '#after-to'), /^Получили вы: /);
+  await page.context().close();
+
+  // C. Both sides of a differing fact in quotes, each with where it comes from; no "Fact check:" in the Fact check column.
+  page = await afterPage(browser, 'draft');
+  const fact = await page.locator('#after-board .bcol').nth(3).locator('li.bitem').first().innerText();
+  assert.match(fact, /Me, on this call, 30:00: “Our pilot last year covered every regional office”/);
+  assert.match(fact, /Pilot report, 12 October: “Last year the pilot covered two offices out of five”/);
+  assert.doesNotMatch(fact, /Fact check:/);
+  await page.context().close();
+
+  // D. Right after Stop: a placeholder in each empty box, and Send now says why it waits.
+  for (const [lang, placeholder, why] of [['en', 'Preparing the draft summary, usually a few seconds', 'Available once the draft appears'],
+    ['ru', 'Готовлю черновик итога, обычно несколько секунд', 'Станет доступно, когда появится черновик']]) {
+    page = await open(browser, { fixture: 'just_stopped', lang });
+    await page.waitForFunction(() => document.querySelector('#after-send .after-headline')?.textContent);
+    assert.deepEqual([await page.getAttribute('#after-summary', 'placeholder'), await page.getAttribute('#after-next', 'placeholder')],
+      [placeholder, placeholder], lang);
+    assert.equal(await page.locator('#after-send .row-act button').first().isDisabled(), true);
+    assert.equal(await text(page, '#after-send .row-act .after-why'), why, lang);
+    // Once the draft is there: no placeholder, no reason.
+    await until(() => page.api.afterPolls >= 2, 'the draft');
+    await page.locator('#after-send .row-act .after-why').waitFor({ state: 'detached' });
+    assert.equal(await page.getAttribute('#after-summary', 'placeholder'), '');
+    await page.context().close();
+  }
+  // The recipients sentence is there in every state that has recipients.
+  for (const fixture of ['draft', 'refining', 'showing', 'changes', 'held', 'sending', 'sent', 'edited', 'failed', 'removed']) {
+    page = await afterPage(browser, fixture);
+    assert.match(await text(page, '#after-to'), /^You rece/, fixture);
+    await page.context().close();
+  }
+
+  // E and F. The rule about the person's text is said once, in the send block; "полная расшифровка" in RU.
+  page = await afterPage(browser, 'draft', { lang: 'ru' });
+  assert.equal(await text(page, '.two .after-note'), 'Итог уточняется по полной расшифровке.');
+  const words = await page.locator('#after').innerText();
+  assert.equal(words.split('не заменяет ваш текст').length - 1, 1, 'the rule once');
+  assert.doesNotMatch(words, /итогов(ая|ой) расшифровк/u);
+  assert.match(await text(page, '#after-send .after-headline'), /когда будет готова полная расшифровка/);
+  assert.equal(await page.evaluate(() => Object.values(translations.ru).filter(line => /итогов\S* расшифровк/u.test(line))
+    .filter(line => Object.entries(translations.ru).some(([key, value]) => value === line && key.startsWith('after.'))).length), 0);
+  await page.context().close();
+  page = await afterPage(browser, 'draft');
+  assert.equal(await text(page, '.two .after-note'), 'The summary is being refined from the final transcript.');
+  await page.context().close();
+
+  // G. Sending: no Send now, no Do not send.
+  page = await afterPage(browser, 'sending');
+  assert.equal(await page.locator('#after-send .row-act button').count(), 0);
+  assert.equal(await text(page, '#after-send .after-headline'), 'The report is being sent.');
+  await page.context().close();
+
+  // H. A save the 1 s timer already started is waited for: one save in flight per field.
+  page = await afterPage(browser, 'showing', { at: Date.now() });
+  let release;
+  page.api.responses['/api/after/edit'] = new Promise(resolve => { release = resolve; });
+  await page.click('#after-summary');
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('Pilot starts');
+  await page.clock.runFor(1100);
+  await until(() => posts(page, '/api/after/edit').length === 1, 'the timer save');
+  await page.keyboard.type(' in March.');
+  await page.click('#after-send button:has-text("Send now")');
+  await page.waitForFunction(() => afterBusy.has('send_now'));
+  assert.equal(posts(page, '/api/after/edit').length, 1, 'the second save waits for the first');
+  release({ status: 200, json: { ok: true } });
+  await until(() => posts(page, '/api/after/send').length, 'send after both saves');
+  assert.deepEqual(posts(page, '/api/after/edit').map(post => post.body.text), ['Pilot starts', 'Pilot starts in March.']);
+  await page.context().close();
+
+  // I. A good save clears its own error only, never the busy line of Do not send.
+  page = await afterPage(browser, 'draft', { at: Date.now() });
+  page.api.responses['/api/after/hold'] = { status: 503, json: { ok: false, error: 'busy' } };
+  await page.click('#after-send button:has-text("Do not send")');
+  await page.locator('#after-send .after-error').waitFor();
+  await page.fill('#after-summary', 'Pilot starts in March.');
+  await page.clock.runFor(1100);
+  await until(() => posts(page, '/api/after/edit').length, 'the save');
+  const polls = page.api.afterPolls;
+  await until(() => page.api.afterPolls > polls, 'the refresh after the save');
+  await drawn(page, polls + 1);
+  assert.equal(await text(page, '#after-send .after-error'), 'The app is sending a report right now. Try again in a few seconds.');
+  await page.context().close();
+
+  // J. Send now, then Do not send while the save is still going: the hold wins, the send is not posted.
+  page = await afterPage(browser, 'draft');
+  let free;
+  page.api.responses['/api/after/edit'] = new Promise(resolve => { free = resolve; });
+  await page.fill('#after-summary', 'Pilot starts in March.');
+  await page.click('#after-send button:has-text("Send now")');
+  await until(() => posts(page, '/api/after/edit').length, 'the flush save');
+  await page.click('#after-send button:has-text("Do not send")');
+  await until(() => posts(page, '/api/after/hold').length, 'hold');
+  free({ status: 200, json: { ok: true } });
+  await page.waitForFunction(() => !afterBusy.has('send_now') && !afterBusy.has('hold'));
+  assert.equal(posts(page, '/api/after/send').length, 0, 'the hold wins');
+  await page.context().close();
 }
 
 async function interactions(browser) {
@@ -502,6 +632,7 @@ async function words(browser) {
     console.log('After UI: board, send state and times: OK');
     await words(browser);
     await interactions(browser);
+    await critique1(browser);
     await needsChoice(browser);
     await topBar(browser);
     await narrow(browser);

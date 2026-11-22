@@ -1642,10 +1642,10 @@ Object.assign(translations.en, {
 
 // After (after.js): the send block and the board's memo line.
 Object.assign(translations.ru, {
-  "after.send.draft": "Отчет уйдет сам, когда будет готова итоговая расшифровка, обычно через 2-3 минуты.",
-  "after.send.send_now_pending": "Отчет уйдет, как только будет готова итоговая расшифровка.",
+  "after.send.draft": "Отчет уйдет сам, когда будет готова полная расшифровка, обычно через 2-3 минуты.",
+  "after.send.send_now_pending": "Отчет уйдет, как только будет готова полная расшифровка.",
   "after.send.preparing": "Отчет готовится.",
-  "after.send.showing": "Итог уточнен по итоговой расшифровке. Отчет уйдет через 30 секунд.",
+  "after.send.showing": "Итог уточнен по полной расшифровке. Отчет уйдет через 30 секунд.",
   "after.send.changes": "Отчет ждет ваших правок и уйдет через 30 секунд после последней.",
   "after.send.sending": "Отчет отправляется.",
   "after.send.held": "Отчет не уйдет сам. Он уйдет, только когда вы нажмете «Отправить сейчас».",
@@ -1655,7 +1655,7 @@ Object.assign(translations.ru, {
   "after.send.no_channels": "Отправка отчетов не настроена. Отчет сохранен на этом компьютере.",
   "after.rule.changes": "Правки итога, шагов или доски задерживают отправку на 30 секунд.",
   "after.rule.keep": "Уточненный итог не заменяет ваш текст.",
-  "after.to": "Получите вы: {list}. Собеседнику отчет не уходит.",
+  "after.to": "Получите вы: {list}. Собеседнику отчет не уходит.", "after.to_sent": "Получили вы: {list}. Собеседнику отчет не ушел.",
   "after.to.email": "почта {to}", "after.to.email_plain": "почта", "after.to.telegram": "Telegram ({to})", "after.to.telegram_me": "Telegram (Избранное)",
   "after.to.twenty": "заметка в CRM", "after.to.twenty_named": "заметка в CRM, карточка {to}", "after.to.drive": "копия в Google Drive",
   "after.channel.email": "Почта", "after.channel.telegram": "Telegram", "after.channel.twenty": "CRM", "after.channel.drive": "Google Drive",
@@ -1664,12 +1664,12 @@ Object.assign(translations.ru, {
   "after.ch.sent_plain": "{channel}: отправлено", "after.ch.failed_plain": "{channel}: не доставлено",
   "after.busy": "Приложение сейчас отправляет отчет. Повторите через несколько секунд.",
   "after.memo_checked": "Что прозвучало на звонке, сверено с мемо.",
-  "after.memo_waiting": "Сверка с мемо будет готова вместе с итоговой расшифровкой.",
+  "after.memo_waiting": "Сверка с мемо будет готова вместе с полной расшифровкой.",
   "after.memo_failed": "Сверки с мемо нет: {reason}. Отчет уйдет без нее.",
   "after.memo_reason.timeout": "ИИ не ответил вовремя", "after.memo_reason.ai_no_answer": "ИИ не дал ответа",
   "after.memo_reason.ai_needs_choice": "ИИ не выбран в настройках", "after.memo_reason.too_long": "звонок слишком длинный для сверки",
   "after.memo_reason.error": "сверка не удалась", "after.memo_reason.not_checked": "сверка идет только для недавних звонков",
-  "after.differs_memo": "{source}, мемо: {memo}", "after.differs_fact": "Проверка: {fact}",
+  "after.differs_memo": "{source}, мемо: «{text}»", "after.differs_fact": "{source}: «{text}»", "after.quoted": "«{text}»",
 });
 Object.assign(translations.en, {
   "after.send.draft": "The report goes by itself once the final transcript is ready, usually in 2-3 minutes.",
@@ -1686,6 +1686,7 @@ Object.assign(translations.en, {
   "after.rule.changes": "Changes to the summary, the next steps or the board hold the report for 30 seconds.",
   "after.rule.keep": "The refined summary never replaces your text.",
   "after.to": "You receive it: {list}. The other side does not receive the report.",
+  "after.to_sent": "You received it: {list}. The other side did not receive the report.",
   "after.to.email": "e-mail {to}", "after.to.email_plain": "e-mail", "after.to.telegram": "Telegram ({to})", "after.to.telegram_me": "Telegram (Saved messages)",
   "after.to.twenty": "a note in your CRM", "after.to.twenty_named": "a note in your CRM, record {to}", "after.to.drive": "a copy in Google Drive",
   "after.channel.email": "E-mail", "after.channel.telegram": "Telegram", "after.channel.twenty": "CRM", "after.channel.drive": "Google Drive",
@@ -1699,7 +1700,7 @@ Object.assign(translations.en, {
   "after.memo_reason.timeout": "the AI did not answer in time", "after.memo_reason.ai_no_answer": "the AI gave no answer",
   "after.memo_reason.ai_needs_choice": "no AI is chosen in settings", "after.memo_reason.too_long": "the call is too long to check",
   "after.memo_reason.error": "the check failed", "after.memo_reason.not_checked": "the memo check runs only for recent calls",
-  "after.differs_memo": "{source}, memo: {memo}", "after.differs_fact": "Fact check: {fact}",
+  "after.differs_memo": "{source}, memo: “{text}”", "after.differs_fact": "{source}: “{text}”", "after.quoted": "“{text}”",
 });
 // After (after.js): the view itself.
 Object.assign(translations.ru, {
@@ -1710,15 +1711,17 @@ Object.assign(translations.ru, {
   "after.send_again_note": "Письмо и сообщение в Telegram придут повторно, заметка в CRM останется прежней.",
   "after.retry": "Повторить", "after.channel_settings": "Проверить настройки отправки",
   "after.summary": "Итог", "after.next_steps": "Следующие шаги", "after.draft": "черновик",
-  "after.updated": "обновлен по итоговой расшифровке",
-  "after.refining": "Итог уточняется по итоговой расшифровке. Если начнете править, уточненная версия не заменит ваш текст.",
+  "after.updated": "обновлен по полной расшифровке",
+  "after.refining": "Итог уточняется по полной расшифровке.",
   "after.fields_note": "Уйдет в отчет как написано.",
-  "after.board": "Доска", "after.board_note": "Уйдет в отчет, лишнее можно убрать.",
+  "after.fields_note_sent": "Правки не уйдут сами: после них появится «Отправить еще раз».",
+  "after.placeholder": "Готовлю черновик итога, обычно несколько секунд", "after.why_wait": "Станет доступно, когда появится черновик",
+  "after.board": "Доска", "after.board_note": "Уйдет в отчет, лишнее можно убрать.", "after.board_note_sent": "Ушло в отчет.",
   "after.col_risks": "Риски и возражения", "after.col_facts": "Проверка фактов",
   "after.tag.no_answer": "Без ответа", "after.tag.answered": "Отвечено", "after.tag.differs": "Расходится", "after.tag.risk": "Риск",
   "after.tag.objection": "Возражение", "after.tag.confirmed": "Подтверждено", "after.from_memo": "Из мемо",
   "after.answered_n": "Отвечено: {n}", "after.confirmed_n": "Подтверждено: {n}",
-  "after.quote": "«{quote}», {speaker}, {time}", "after.differs_call": "{speaker}, на этом звонке, {time}: {quote}",
+  "after.quote": "«{quote}», {speaker}, {time}", "after.differs_call": "{speaker}, на этом звонке, {time}: «{quote}»",
   "after.remove": "Убрать", "after.removed": "Убрано из отчета.", "after.bring_back": "Вернуть", "after.empty": "Пусто",
 });
 Object.assign(translations.en, {
@@ -1729,14 +1732,16 @@ Object.assign(translations.en, {
   "after.retry": "Retry", "after.channel_settings": "Check the delivery settings",
   "after.summary": "Summary", "after.next_steps": "Next steps", "after.draft": "draft",
   "after.updated": "updated from the final transcript",
-  "after.refining": "The summary is being refined from the final transcript. If you edit it, the refined version will not replace your text.",
+  "after.refining": "The summary is being refined from the final transcript.",
   "after.fields_note": "Goes into the report as written.",
-  "after.board": "Board", "after.board_note": "Goes into the report, remove what does not belong.",
+  "after.fields_note_sent": "Edits do not go by themselves: Send again appears after them.",
+  "after.placeholder": "Preparing the draft summary, usually a few seconds", "after.why_wait": "Available once the draft appears",
+  "after.board": "Board", "after.board_note": "Goes into the report, remove what does not belong.", "after.board_note_sent": "Went into the report.",
   "after.col_risks": "Risks and objections", "after.col_facts": "Fact check",
   "after.tag.no_answer": "No answer", "after.tag.answered": "Answered", "after.tag.differs": "Differs", "after.tag.risk": "Risk",
   "after.tag.objection": "Objection", "after.tag.confirmed": "Confirmed", "after.from_memo": "From the memo",
   "after.answered_n": "Answered: {n}", "after.confirmed_n": "Confirmed: {n}",
-  "after.quote": "“{quote}”, {speaker}, {time}", "after.differs_call": "{speaker}, on this call, {time}: {quote}",
+  "after.quote": "“{quote}”, {speaker}, {time}", "after.differs_call": "{speaker}, on this call, {time}: “{quote}”",
   "after.remove": "Remove", "after.removed": "Removed from the report.", "after.bring_back": "Bring back", "after.empty": "Nothing here",
 });
 
@@ -1989,7 +1994,7 @@ function renderTranscript(transcript) {
   }
 
   // In Call the transcript is stamped in elapsed call time, the bar's clock (G1); elsewhere in clock time.
-  const start = document.body.dataset.view === "call" ? callStartIso({ ...window.appState, transcript }) : "";
+  const start = ["call", "after"].includes(document.body.dataset.view) ? callStartIso({ ...window.appState, transcript }) : "";
   const signature = `${transcript.meeting_id}:${transcript.updated_at}:${transcript.segments.length}:${transcript.translation_revision || 0}:${transcript.speaker_revision || 0}:${start}`;
   if (signature === transcriptSignature) return;
   transcriptSignature = signature;

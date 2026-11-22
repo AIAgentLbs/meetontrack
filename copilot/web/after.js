@@ -8,6 +8,20 @@ function afterTime(atIso, startIso) {
   return startIso && !Number.isNaN(at) ? callClock(startIso, at) : "";
 }
 const afterClock = iso => (Number.isNaN(Date.parse(iso || "")) ? "" : homeClock(iso));
+// A quoted statement loses its own full stop: «...офисы.», or “...year.”, reads as a typo before the closing mark.
+const afterBare = text => String(text || "").replace(/\.$/u, "");
+// Where a fact check's correction comes from: a document by its title, a web page by its site.
+function afterSource(item) {
+  const source = item.sources?.[0];
+  if (source?.title) return String(source.title);
+  try {
+    return new URL(source?.url || source?.location).hostname;
+  } catch {
+    return "";
+  }
+}
+// The report has gone: its copy speaks in the past.
+const afterWent = after => ["sent", "edited", "failed"].includes(after?.send?.state);
 // A reason the memo check has no result, in words; one the page does not know reads as a failed check.
 function afterReason(reason) {
   const key = `after.memo_reason.${reason}`;
@@ -62,14 +76,15 @@ function afterBoard(state, after) {
     const said = String(item.quote || item.claim || "");
     put("facts", row(`fact:${item.id}`, item.claim || said, item.status === "refuted" ? "differs" : "confirmed", { quote: said,
       speaker: String(item.segment?.speaker || item.segment?.speaker_label || ""), at: item.timestamp || item.checked_at,
-      other: item.fact ? t("after.differs_fact", { fact: item.fact }) : "" }, true), item.status === "confirmed");
+      other: !item.fact ? "" : t(afterSource(item) ? "after.differs_fact" : "after.quoted", { source: afterSource(item), text: afterBare(item.fact) }) },
+    true), item.status === "confirmed");
   }
   // What was said against what the memo says: `other` is the memo's whole line, with where the memo came from.
   const source = String(state?.call_plan?.source_label || "");
   for (const item of checked ? memo.differs || [] : []) {
     const said = String(item.quote || "");
     put("facts", row(String(item.key), said, "differs", { quote: said, speaker: String(item.speaker || ""), at: item.at,
-      other: source ? t("after.differs_memo", { source, memo: item.memo }) : String(item.memo || "") }, true));
+      other: t(source ? "after.differs_memo" : "after.quoted", { source, text: afterBare(item.memo) }) }, true));
   }
 
   const memoLine = !memo ? "" : memo.state === "done" ? t("after.memo_checked") : memo.state === "waiting" ? t("after.memo_waiting")
@@ -78,7 +93,8 @@ function afterBoard(state, after) {
 }
 
 const AFTER_WAITS = ["draft", "preparing", "showing", "changes"]; // states in which a change still holds the report
-const AFTER_ACTIONS = Object.fromEntries([...AFTER_WAITS, "sending"].map(state => [state, ["send_now", "hold"]]));
+// Once it is being sent nothing can stop it: no Send now, no Do not send.
+const AFTER_ACTIONS = Object.fromEntries(AFTER_WAITS.map(state => [state, ["send_now", "hold"]]));
 Object.assign(AFTER_ACTIONS, { held: ["send_now"], edited: ["send_again"], failed: ["retry"] });
 const AFTER_RESEND = new Set(["email", "telegram", "drive"]); // what Send again and Retry can send; the CRM note stays
 
@@ -98,7 +114,7 @@ function afterSend(after) {
     state,
     headline: t(state === "draft" && send.send_now ? "after.send.send_now_pending" : `after.send.${state}`),
     rules: AFTER_WAITS.includes(state) ? [t("after.rule.changes"), t("after.rule.keep")] : [],
-    recipients: state === "no_channels" || !parts.length ? "" : t("after.to", { list: parts.join(", ") }),
+    recipients: state === "no_channels" || !parts.length ? "" : t(afterWent(after) ? "after.to_sent" : "after.to", { list: parts.join(", ") }),
     actions: stuck ? [] : AFTER_ACTIONS[state] || [],
     channels: ["sent", "edited", "failed", "held"].includes(state) ? channels.map(row => {
       // A line never ends on "at": without a time the time clause goes.
@@ -123,11 +139,14 @@ let afterSeq = 0;
 let afterSignature = "";
 let afterSendSignature = "";
 let afterError = "";
+let afterSaveError = false; // the error line is a save's: the next good save clears it, and only then
+let afterHolds = 0; // Do not send presses: one during a send's flush wins over it
 const afterBusy = new Set(); // focus keys of the controls whose POST is in flight: a second press posts nothing
 const afterOpen = new Set(); // lanes whose answered or confirmed rows are shown
 const afterDirty = new Set(); // fields typed in and not saved yet
 const afterKeep = {}; // field -> the first request seq that already carries its saved text
 const afterTimers = {};
+const afterSaving = {}; // field -> its save in flight: one at a time per field, in order
 
 // One GET at a time; a 503 or a dropped answer keeps the last payload.
 function afterFetch() {
@@ -168,9 +187,12 @@ async function afterFlush() {
 async function afterPost(key, path, body = {}, flush = false) {
   if (afterBusy.has(key) || !window.afterData?.data) return;
   afterBusy.add(key);
+  if (key === "hold") afterHolds++;
+  const holds = afterHolds;
   afterError = "";
+  afterSaveError = false;
   try {
-    if (!flush || (await afterFlush())) await post(path, { meeting_id: window.afterData.id, ...body });
+    if (!flush || ((await afterFlush()) && holds === afterHolds)) await post(path, { meeting_id: window.afterData.id, ...body });
   } catch (error) {
     afterError = afterFailed(error);
   }
@@ -185,19 +207,26 @@ function afterInput(field) {
   clearTimeout(afterTimers[field]);
   afterTimers[field] = setTimeout(() => void afterSave(field), AFTER_SAVE_MS);
 }
-async function afterSave(field) {
+function afterSave(field) {
+  afterSaving[field] = (afterSaving[field] || Promise.resolve()).then(() => afterSaveNow(field));
+  return afterSaving[field];
+}
+async function afterSaveNow(field) {
   const node = $(AFTER_FIELDS[field]);
   const text = node.value;
+  if (!afterDirty.has(field)) return true; // an earlier save in the queue already carried it (or the meeting changed)
   if (!window.afterData?.data) return false;
   let saved = false;
   try {
     await post("/api/after/edit", { meeting_id: window.afterData.id, field, text });
     afterKeep[field] = afterSeq + 1;
     if (node.value === text) afterDirty.delete(field);
-    afterError = "";
+    if (afterSaveError) afterError = "";
+    afterSaveError = false;
     saved = true;
   } catch (error) {
     afterError = afterFailed(error);
+    afterSaveError = true;
     clearTimeout(afterTimers[field]);
     afterTimers[field] = setTimeout(() => void afterSave(field), AFTER_POLL_MS); // kept, and tried again
   }
@@ -218,9 +247,8 @@ function afterButton(label, className, key, onClick) {
 // "«quote», speaker, time": a part that is missing leaves no empty comma behind.
 function afterQuote(row) {
   if (!row.quote) return "";
-  if (row.tag === "differs" && row.speaker && row.at) return t("after.differs_call", { speaker: row.speaker, time: row.at, quote: row.quote });
-  // The quote's own full stop would sit before the closing mark and the comma: "year.”," reads as a typo.
-  const quote = row.quote.replace(/\.$/u, "");
+  const quote = afterBare(row.quote);
+  if (row.tag === "differs" && row.speaker && row.at) return t("after.differs_call", { speaker: row.speaker, time: row.at, quote });
   return t("after.quote", { quote, speaker: row.speaker, time: row.at }).replace(/, (?=, |$)/gu, "");
 }
 
@@ -316,6 +344,8 @@ function afterSendBlock(after, send) {
         afterButton(t("after.channel_settings"), "ql", "settings", openDeliverySettings));
     }
   }
+  // Before the draft exists Send now is disabled: the line says why.
+  if (!after && send.actions.includes("send_now")) row.append(textNode("span", "after-why", t("after.why_wait")));
   if (row.childElementCount) nodes.push(row);
   return nodes;
 }
@@ -339,12 +369,14 @@ function afterFields(after) {
     const tag = document.querySelector(`label[for="${id}"]`);
     if (tag.textContent !== label) tag.textContent = label;
     node.disabled = !window.afterData?.data;
+    const placeholder = window.afterData?.data ? "" : t("after.placeholder");
+    if (node.placeholder !== placeholder) node.placeholder = placeholder;
     const value = (after?.[field]?.lines || []).join("\n");
     const fresh = (window.afterData?.seq || 0) >= (afterKeep[field] || 0);
     if (fresh && !afterDirty.has(field) && document.activeElement !== node && node.value !== value) node.value = value;
   }
   const note = document.querySelector("#after .after-note");
-  const line = t(final ? "after.fields_note" : "after.refining");
+  const line = t(afterWent(after) ? "after.fields_note_sent" : final ? "after.fields_note" : "after.refining");
   if (note.textContent !== line) note.textContent = line;
 }
 
@@ -393,7 +425,7 @@ function renderAfter(state) {
   afterSignature = signature;
   const head = textNode("h3", "", t("after.board"));
   head.id = "after-board-title";
-  afterReplace($("after-board"), [head, textNode("p", "board-head", [t("after.board_note"), board.memoLine].filter(Boolean).join(" ")),
+  afterReplace($("after-board"), [head, textNode("p", "board-head", [t(afterWent(after) ? "after.board_note_sent" : "after.board_note"), board.memoLine].filter(Boolean).join(" ")),
     ...board.lanes.map(afterLane)]);
 }
 
