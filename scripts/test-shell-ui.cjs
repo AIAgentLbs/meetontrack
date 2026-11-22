@@ -263,7 +263,7 @@ const errors = [];
       time: stops.time, finalTime: stops.finalTime, beforeTime: stops.beforeTime,
       startedAfterStop: ['recording', 'Запись', null],
       startedBeforeStop: ['stopped', `Запись остановлена на ${stops.beforeTime}.`, null],
-      stopping: ['stopped', `Запись остановлена на ${stops.time}. Через 20\u00a0с откроется отчет.`, 'resume'],
+      stopping: ['stopped', `Запись остановлена на ${stops.time}. Через 20\u00a0сек откроется отчет.`, 'resume'],
       final: ['stopped', `Запись остановлена на ${stops.finalTime}.`, null],
       otherLastStop: ['recording', 'Запись', null],
       otherStopping: ['recording', 'Запись', null],

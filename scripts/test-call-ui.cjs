@@ -711,7 +711,7 @@ async function callBar(browser) {
 
   // RU at 400 px: the number and «с» never part.
   page = await callPage(browser, 'stopped', { width: 400, lang: 'ru', data: 'ru' });
-  assert.match(await text(page, '#call-status-text'), /Через \d+\u00a0с откроется отчет\.$/);
+  assert.match(await text(page, '#call-status-text'), /Через \d+\u00a0сек откроется отчет\.$/); // D4
   await page.context().close();
 
   // No capture marker and nobody heard yet: silence is never "not heard".
@@ -887,6 +887,13 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // D5: the ask button says Send, so it never clashes with the hint's Ask; the placeholder keeps its wording.
+  for (const [lang, send, placeholder] of [['en', 'Send', 'Ask about this call'], ['ru', 'Отправить', 'Спросить про звонок']]) {
+    const page = await callPage(browser, 'hint', { lang });
+    assert.equal(await page.locator('#call-send span').textContent(), send, lang);
+    assert.equal(await page.getAttribute('#call-question', 'placeholder'), placeholder, lang);
+    await page.context().close();
+  }
   // D3: a failed automatic analysis shows once, as the feed's pause, never also as the red banner; copilot.error
   // arrives with it from the server. Outside Call the banner still says the AI failed.
   {
