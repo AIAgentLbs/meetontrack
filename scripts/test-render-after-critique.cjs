@@ -38,8 +38,8 @@ assert.deepEqual(shots.map(entry => entry.file), ['refining-1440-light-en.png', 
   'answered_open-1440-light-en.png', 'answered_open-1440-dark-en.png']);
 for (const { file } of shots) assert.ok(fs.statSync(path.join(out, file)).size > 0, file);
 const failed = manifest.filter(entry => entry.failed);
-// 15 states at 3 widths in 2 languages, less the two pages that loaded.
-assert.equal(failed.length, 15 * 3 * 2 - 2, 'every other page is a failure entry');
+// 16 states at 3 widths in 2 languages, less the two pages that loaded.
+assert.equal(failed.length, 16 * 3 * 2 - 2, 'every other page is a failure entry');
 assert.ok(failed.every(entry => entry.failed.includes('injected load failure')));
 const seen = fs.readFileSync(path.join(out, 'seen.txt'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
 assert.ok(seen.filter(entry => entry.fixture === 'answered_open').every(entry => entry.expanded === 'true'), `unfolded: ${JSON.stringify(seen)}`);

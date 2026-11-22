@@ -11,7 +11,7 @@ const path = require('node:path');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const { states, open } = require('./after-fixtures.cjs');
 
-const FIXTURES = ['just_stopped', 'draft', 'refining', 'showing', 'changes', 'held', 'sent', 'edited', 'failed', 'no_channels',
+const FIXTURES = ['just_stopped', 'draft', 'refining', 'showing', 'changes', 'held', 'sending', 'sent', 'edited', 'failed', 'no_channels',
   'no_memo', 'memo_failed', 'removed', 'answered_open', 'transcript_open'];
 const OPENERS = { answered_open: '#after-board button.ql[aria-expanded]', transcript_open: '#after-transcript' };
 const out = process.argv[2];
