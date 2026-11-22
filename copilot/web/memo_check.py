@@ -121,7 +121,7 @@ def parse(text: str, plan: dict, segments: list[dict]) -> dict:
         memo = " ".join(str(entry.get("memo") or "").split()) if hit else ""
         if not hit or not memo or _norm(memo) not in memo_text or len(differs) >= MAX_DIFFERS:
             continue
-        key = "differs:" + hashlib.sha1((memo + hit[0]).encode("utf-8")).hexdigest()[:12]
+        key = "differs:" + hashlib.sha256((memo + hit[0]).encode("utf-8")).hexdigest()[:12]
         differs.setdefault(key, {"key": key, "memo": memo, "quote": hit[0], **where(hit[1])})
     return {"state": "done", "questions": questions, "differs": list(differs.values())}
 
