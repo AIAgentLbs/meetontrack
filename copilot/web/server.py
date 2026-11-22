@@ -48,7 +48,7 @@ from release_updates import RECORDING, ReleaseUpdates, installed_release
 from summary_rewrite import SummaryRewrites
 from question_quality import register_question, useful_question
 from journal_links import URL_RE, LINK_CATEGORIES, call_link, collapse_links
-from recording_health import default_guard
+from recording_health import default_guard, read_json
 from meet_participants import meet_active_speaker, meet_participant_labels
 from teams_participants import teams_one_to_one_name, teams_participant_labels
 from first_run import AIReadiness
@@ -2488,8 +2488,20 @@ TRANSCRIPT = TranscriptState()
 PERMISSIONS = RecorderProbe(RECOGNITION_GUARD.binary)
 SKIPS = SkipRecording(SKIP_RECORDING_FILE)
 # The id the page shows in /api/state (a logical id after a boundary split); annotated_snapshot is defined further down.
+
+
+def recorder_session(meeting_id: str) -> str:
+    """The recorder's own live session for the call the page shows, read now from the file the recorder
+    writes (not from the transcript poll, which can still show the previous call); "" once it ended."""
+    live = read_json(TRANSCRIPT_FILE)
+    physical = str(live.get("meeting_id") or "")
+    if not physical or live.get("status") == "finished" or physical != BOUNDARIES.physical_id(meeting_id):
+        return ""
+    return f"{physical}|{live.get('started_at') or ''}"
+
+
 RECORDING_CONTROL = RecordingControl(RECOGNITION_GUARD.binary, RECORDING_STOP_FILE,
-                                     lambda: annotated_snapshot()["meeting_id"])
+                                     lambda: annotated_snapshot()["meeting_id"], recorder_session)
 # Recognition recovery never runs during a Stop's undo window: only an explicit Resume unpauses.
 RECOGNITION_GUARD.hold = lambda: RECORDING_CONTROL.stopping is not None
 PLANS = CallPlans(PREPARATIONS_FILE, CALL_PLAN_STATE_FILE, ACTIVE_REPOS_FILE,

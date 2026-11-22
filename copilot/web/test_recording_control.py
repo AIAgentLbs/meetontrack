@@ -41,12 +41,15 @@ class RecordingControlTests(unittest.TestCase):
         self.path = Path(self.directory.name) / "state" / "recording-stop.json"
         self.now = [T0]
         self.meeting = ["m1"]
+        # The recorder's own live session per call, as its live file says now ("" once it ended or moved on).
+        self.sessions = {"m1": "m1|t1", "m2": "m2|t2"}
 
     def tearDown(self):
         self.directory.cleanup()
 
     def control(self, run):
         return RecordingControl(Path("/opt/capture"), self.path, lambda: self.meeting[0],
+                                lambda meeting_id: self.sessions.get(meeting_id, ""),
                                 run=run, clock=lambda: self.now[0])
 
     def test_stop_pauses_and_schedules(self):
@@ -58,7 +61,7 @@ class RecordingControlTests(unittest.TestCase):
         self.assertEqual(control.snapshot()["stopping"]["meeting_id"], "m1")
         saved = json.loads(self.path.read_text())
         self.assertEqual(saved["version"], 1)
-        self.assertEqual(saved["stopping"], {"meeting_id": "m1", **result})
+        self.assertEqual(saved["stopping"], {"meeting_id": "m1", "session": "m1|t1", **result})
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
 
     def test_tick_sends_stop_when_due(self):
@@ -260,12 +263,44 @@ class RecordingControlTests(unittest.TestCase):
         run = Recorder()
         control = self.control(run)
         control.stop("m1")
-        self.meeting[0] = "m2"
+        self.meeting[0], self.sessions["m1"] = "m2", ""
         self.now[0] = T0 + 31
         control.tick()
         self.assertEqual(run.calls, [PAUSE])
         self.assertIsNone(control.snapshot()["stopping"])
         self.assertEqual(control.snapshot()["last_stop"]["meeting_id"], "m1")
+
+    def test_new_recording_while_a_stop_is_pending_is_not_muted(self):
+        # The poll still names m1, but the recorder's own live file already holds the next call.
+        run = Recorder()
+        control = self.control(run)
+        control.stop("m1")
+        self.sessions["m1"] = ""
+        with self.assertRaisesRegex(ValueError, "meeting_changed"):
+            control.resume("m1")
+        self.assertIsNone(control.snapshot()["stopping"])
+        self.now[0] = T0 + 31
+        control.tick()
+        self.assertEqual(run.calls, [PAUSE])
+        self.assertEqual(control.snapshot()["last_stop"]["meeting_id"], "m1")
+
+    def test_deferred_stop_skips_a_restarted_session_under_the_same_id(self):
+        run = Recorder()
+        control = self.control(run)
+        control.stop("m1")
+        self.sessions["m1"] = "m1|t9"
+        self.now[0] = T0 + 31
+        control.tick()
+        self.assertEqual(run.calls, [PAUSE])
+        self.assertIsNone(control.snapshot()["stopping"])
+
+    def test_stop_refused_when_the_recorder_moved_on(self):
+        run = Recorder()
+        control = self.control(run)
+        self.sessions["m1"] = ""
+        with self.assertRaisesRegex(ValueError, "meeting_changed"):
+            control.stop("m1")
+        self.assertEqual(run.calls, [])
 
     def test_tick_survives_a_missing_recorder(self):
         def run(argv, **kwargs):
@@ -304,6 +339,22 @@ class FakeControl:
 
     def snapshot(self):
         return {"stopping": None, "last_stop": {"meeting_id": "m1", "stopped_at": "2026-11-21T10:00:00+00:00"}}
+
+
+class RecorderSessionTests(unittest.TestCase):
+    def test_session_comes_from_the_recorders_live_file(self):
+        import server
+        with tempfile.TemporaryDirectory() as directory:
+            live = Path(directory) / "live.json"
+            boundaries = mock.Mock(physical_id=lambda logical: {"m1-part2": "m1"}.get(logical, logical))
+            with mock.patch.object(server, "TRANSCRIPT_FILE", live), mock.patch.object(server, "BOUNDARIES", boundaries):
+                self.assertEqual(server.recorder_session("m1"), "")
+                live.write_text(json.dumps({"meeting_id": "m1", "started_at": "t1", "status": "paused"}))
+                self.assertEqual(server.recorder_session("m1"), "m1|t1")
+                self.assertEqual(server.recorder_session("m1-part2"), "m1|t1")
+                self.assertEqual(server.recorder_session("m2"), "")
+                live.write_text(json.dumps({"meeting_id": "m1", "started_at": "t1", "status": "finished"}))
+                self.assertEqual(server.recorder_session("m1"), "")
 
 
 class RecordingRoutesTests(unittest.TestCase):

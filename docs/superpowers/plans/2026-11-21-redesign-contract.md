@@ -128,6 +128,12 @@ nothing at all while a stop is pending, so only an explicit Resume unpauses
 (fix wave A1). A paused capture publishes `status: "paused"` in the live file
 on both platforms.
 
+- Every command is bound to the recorder's own live session: the live file it
+  writes (`meeting_id` and `started_at`, not finished), read when the command
+  runs. Stop stores that session with the pending stop; Resume and the
+  deferred stop act only while it is still the live one, else they clear the
+  pending stop and act on nothing (Resume answers `meeting_changed`), so a
+  new call that began meanwhile is never muted (fix wave A2).
 - `POST /api/recording/stop` with `{"meeting_id": "..."}` pauses the recorder
   at once (`record pause`) and answers
   `{"ok": true, "stopped_at": ISO, "until": ISO | null}`; the server sends

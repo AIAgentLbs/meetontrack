@@ -23,9 +23,13 @@ def _iso(seconds: float) -> str:
 
 
 class RecordingControl:
+    """`current_meeting()` is the call the page shows. `session(meeting_id)` is the recorder's own live
+    session for that call, read from the file the recorder writes at the moment of asking ("" once it
+    ended or another recording began): pause, resume and the deferred stop act only on that session."""
+
     def __init__(self, binary: Path, path: Path, current_meeting: Callable[[], str],
-                 run=subprocess.run, clock=time.time, grace: float = 30.0):
-        self.binary, self.path, self.current_meeting = binary, path, current_meeting
+                 session: Callable[[str], str], run=subprocess.run, clock=time.time, grace: float = 30.0):
+        self.binary, self.path, self.current_meeting, self.session = binary, path, current_meeting, session
         self.run, self.clock, self.grace = run, clock, grace
         # One lock for every check-and-clear of `stopping`, held across the recorder command,
         # so at the window's edge exactly one of resume and the deferred stop wins.
@@ -54,6 +58,16 @@ class RecordingControl:
         temporary.chmod(0o600)
         os.replace(temporary, self.path)
 
+    def _same(self, pending: dict) -> bool:
+        """Is the recording the pending stop was made for still the recorder's live one?"""
+        expected = pending.get("session")  # a state file from before sessions: the page's id only
+        return self.session(pending["meeting_id"]) == expected if expected else \
+            self.current_meeting() == pending["meeting_id"]
+
+    def _ended(self, pending: dict) -> None:
+        self.stopping = None
+        self.last_stop = {"meeting_id": pending["meeting_id"], "stopped_at": pending["stopped_at"]}
+
     def stop(self, meeting_id: str) -> dict:
         if meeting_id != self.current_meeting():
             raise ValueError("meeting_changed")
@@ -61,10 +75,13 @@ class RecordingControl:
             pending = self.stopping
             if pending and pending.get("meeting_id") == meeting_id:
                 return {"stopped_at": pending["stopped_at"], "until": pending["until"]}
+            session = self.session(meeting_id)
+            if not session:  # the poll still shows this call, the recorder has moved on
+                raise ValueError("meeting_changed")
             stopped_at = _iso(self.clock())
             if self._command("pause"):
                 until = _iso(datetime.fromisoformat(stopped_at).timestamp() + self.grace)
-                self.stopping = {"meeting_id": meeting_id, "stopped_at": stopped_at, "until": until}
+                self.stopping = {"meeting_id": meeting_id, "session": session, "stopped_at": stopped_at, "until": until}
                 try:
                     self._save()
                     return {"stopped_at": stopped_at, "until": until}
@@ -88,6 +105,13 @@ class RecordingControl:
             if (not pending or pending.get("meeting_id") != meeting_id
                     or self.clock() >= datetime.fromisoformat(pending["until"]).timestamp()):
                 raise ValueError("too_late")
+            if not self._same(pending):  # that recording ended and another may run: resume nothing
+                self._ended(pending)
+                try:
+                    self._save()
+                except OSError:
+                    pass
+                raise ValueError("meeting_changed")
             # Cleared on disk before the recorder resumes: a restart must never stop a resumed call.
             self.stopping = None
             try:
@@ -108,9 +132,8 @@ class RecordingControl:
             pending = self.stopping
             if not pending or self.clock() < datetime.fromisoformat(pending["until"]).timestamp():
                 return
-            same_call = self.current_meeting() == pending["meeting_id"]
-            self.stopping = None
-            self.last_stop = {"meeting_id": pending["meeting_id"], "stopped_at": pending["stopped_at"]}
+            same_call = self._same(pending)
+            self._ended(pending)
             if same_call:  # the recording may have ended by itself and the next call begun
                 self._command("stop")  # a failure means it already ended: nothing to undo
             self._save()
