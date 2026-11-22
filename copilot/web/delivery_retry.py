@@ -29,11 +29,12 @@ class DeliveryRetry:
                     return dict(self.job)
                 raise ValueError("delivery_busy")
             self.job = {"state": "sending", "request_id": request, "meeting_id": identity}
-            thread = threading.Thread(target=self._run, args=(identity, request, set(channels), payload.get("confirm") is True), daemon=True)
+            thread = threading.Thread(target=self._run, args=(identity, request, set(channels), payload.get("confirm") is True,
+                                                              payload.get("after") is True), daemon=True)
             thread.start()
             return dict(self.job)
 
-    def _run(self, identity, request, channels, confirm):
+    def _run(self, identity, request, channels, confirm, after=False):
         result = {"state": "failed", "request_id": request, "meeting_id": identity}
         try:
             with self.archive.report_gate(self.archive.report_identity(identity)), self.archive.lock:
@@ -54,6 +55,7 @@ class DeliveryRetry:
                     standalone = self.archive.report_path(identity, "meeting-report.html")
                     if not (pdf or standalone) or not self.archive.report_matches(detail, report):
                         raise ValueError("report_not_ready")
+                    checked = self.archive.after.clock() if after else None  # the text that goes out is this one
                     settings = self.archive.delivery_settings.read()
                     if any(not enabled(settings, c) for c in channels):
                         raise ValueError("channel_disabled")
@@ -89,6 +91,8 @@ class DeliveryRetry:
                     report["last_delivery_result"] = delivery
                     write_json(path, report)
                     result.update(state="complete", report=delivery)
+                    if after:  # After's Send again: an edit made before this check is now sent (MEETONTRACK-163)
+                        self.archive.after.resent(identity, checked)
         except ValueError as error:
             result["error"] = str(error)
         except Exception:

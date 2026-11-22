@@ -254,13 +254,16 @@ when it is found in that line; a question without one is `open`.
  "summary": {"lines": [string], "edited": bool, "final": bool},
  "next_steps": {"lines": [string], "edited": bool, "final": bool},
  "removed": [string],
+ "removed_journal": [{"key": "journal:<id>", "category", "text"}],  // removed journal items, to bring back
  "memo_check": null | {"state": "waiting"} | <memo_check above>,
  "stale": true}   // only when the archive was busy and this is the last payload
 ```
 
 `send.state` is one of `no_channels`, `held`, `sent`, `edited`, `draft`,
 `preparing`, `failed`, `changes`, `showing`, `sending` (order of the rules:
-plan 4, Task 4, with ruling C10). `summary.lines` and `next_steps.lines` come
+plan 4, Task 4, with ruling C10). For `sent` and `edited` a CRM row in
+`needs_choice` counts as done (it is never sent on its own); at least one row
+must be `sent`. `summary.lines` and `next_steps.lines` come
 from the same functions the report uses, so what is on screen is what leaves.
 The archive lock is awaited at most 1 s; then the last payload is answered with
 `stale: true`, or 503 `{"ok": false, "error": "busy"}` when there is none.
@@ -270,6 +273,9 @@ An unknown meeting is 404; a `meeting_id` over 1024 chars is 400.
 
 Each takes `{"meeting_id"}` plus the fields below, resolves the report
 identity (unknown meeting: 404) and answers `{"ok": true}` unless stated.
+None waits for a send: after 1 s on the archive lock the control acts on the
+report of the last `GET /api/after` for that meeting, or answers 503
+`{"ok": false, "error": "busy"}` when there was none.
 
 | Route | Body adds | Effect |
 |---|---|---|
@@ -277,7 +283,7 @@ identity (unknown meeting: 404) and answers `{"ok": true}` unless stated.
 | `/api/after/send` | | Send now: `held` false, `send_now_at` now; wakes the delivery loop |
 | `/api/after/edit` | `"field": "summary" \| "next_steps"`, `"text"` | text over 4000 chars is 400; answers `{"ok": true, "send_at": ISO}` |
 | `/api/after/remove` | `"key"`, `"removed": bool` | a bad key is 400 `bad_key`; a 501st key is 400 `too_many` |
-| `/api/after/send-again` | optional `"channels"` | resends e-mail, Telegram and Drive (the enabled ones, or the listed subset: Retry sends only the failed ones, ruling C9) with `confirm: true`, then sets `resent_at`; answers `{"ok": true, "job": ...}`; the CRM note is not updated |
+| `/api/after/send-again` | optional `"channels"` | resends e-mail, Telegram and Drive (the enabled ones, or the listed subset: Retry sends only the failed ones, ruling C9) with `confirm: true`; the job sets `resent_at` only once it has sent, to the time it checked the report's text; answers `{"ok": true, "job": ...}`; the CRM note is not updated |
 
 ### Deferred
 

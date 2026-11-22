@@ -77,8 +77,9 @@ class AfterState:
     def send_now(self, identity: str) -> None:
         self._change(identity, lambda s: s.update(held=False, send_now_at=self.clock()))
 
-    def resent(self, identity: str) -> None:
-        self._change(identity, lambda s: s.update(resent_at=self.clock()))
+    def resent(self, identity: str, at: float | None = None) -> None:
+        """Send again went out with the text current at ``at`` (default now)."""
+        self._change(identity, lambda s: s.update(resent_at=self.clock() if at is None else at))
 
     def edit(self, identity: str, field: str, text: str) -> float:
         if field not in FIELDS:
@@ -184,7 +185,9 @@ def after_payload(archive, meeting_id: str, settings: dict, now: float) -> dict 
             row["to"] = str(target.get("name") or "") if isinstance(target, dict) else ""
         channels.append(row)
 
-    sent = bool(channels) and all(row["status"] == "sent" for row in channels)
+    # A CRM record the person must choose never goes on its own, so it does not hold "sent" back.
+    sent = any(row["status"] == "sent" for row in channels) \
+        and all(row["status"] in {"sent", "needs_choice"} for row in channels)
     changed, resent = after["changed_at"], after["resent_at"]
     started = _date(str(report.get("delivery_started_at") or ""))
     edited = changed is not None and (not started or changed > started.timestamp()) \
@@ -223,5 +226,8 @@ def after_payload(archive, meeting_id: str, settings: dict, now: float) -> dict 
         "next_steps": {"lines": archive.report_next_steps(detail), "edited": after["next_steps"] is not None,
                        "final": ready},
         "removed": list(after["removed"]),
+        # report_detail leaves these out; a past meeting's After still shows them to bring back.
+        "removed_journal": [{"key": f"journal:{item.get('id')}", "category": str(item.get("category") or ""),
+                             "text": str(item.get("text") or "")} for item in detail.get("removed_journal", [])],
         "memo_check": memo,
     }

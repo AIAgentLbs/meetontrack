@@ -3049,13 +3049,24 @@ AFTER_ROUTES = {"/api/after/hold", "/api/after/send", "/api/after/edit", "/api/a
                 "/api/after/send-again"}
 
 
-def after_identity(meeting_id) -> str | None:
-    """The report an After control acts on; None when there is no such meeting."""
+def after_post(path: str, payload: dict) -> tuple[dict, int]:
+    """One After control. It never waits for a whole send (SMTP, Telegram, Drive hold the archive)."""
+    meeting_id = payload.get("meeting_id")
     if not isinstance(meeting_id, str) or not 0 < len(meeting_id) <= 1024:
         raise ValueError("bad_meeting_id")
-    if ARCHIVE.detail(meeting_id) is None:
-        return None
-    return ARCHIVE.report_identity(meeting_id)
+    if not ARCHIVE.lock.acquire(timeout=1):
+        # Act on the report the page last showed; its after.json needs only AfterState's lock,
+        # and every send re-checks the gate under the archive lock first.
+        cached = AFTER_CACHE.get(meeting_id)
+        if cached is None:
+            return {"ok": False, "error": "busy"}, HTTPStatus.SERVICE_UNAVAILABLE
+        return {"ok": True, **after_action(path, cached["meeting_id"], payload)}, HTTPStatus.OK
+    try:  # written while holding the archive, so no send slips in between
+        if ARCHIVE.detail(meeting_id) is None:
+            return {"ok": False, "error": "not_found"}, HTTPStatus.NOT_FOUND
+        return {"ok": True, **after_action(path, ARCHIVE.report_identity(meeting_id), payload)}, HTTPStatus.OK
+    finally:
+        ARCHIVE.lock.release()
 
 
 def after_action(path: str, identity: str, payload: dict) -> dict:
@@ -3084,10 +3095,9 @@ def after_action(path: str, identity: str, payload: dict) -> dict:
             if not isinstance(asked, list) or any(name not in channels for name in asked):
                 raise ValueError("invalid_retry_channels")
             channels = [name for name in channels if name in asked]
-        job = DELIVERY_RETRY.submit({"meeting_id": identity, "request_id": uuid.uuid4().hex,
-                                     "channels": channels, "confirm": True})
-        ARCHIVE.after.resent(identity)
-        return {"job": job}
+        # The job records resent_at itself, only once the report went out.
+        return {"job": DELIVERY_RETRY.submit({"meeting_id": identity, "request_id": uuid.uuid4().hex,
+                                              "channels": channels, "confirm": True, "after": True})}
     return {}
 
 
@@ -3586,11 +3596,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/delivery/smtp/check":
                 self._json({"ok": True, "account": ARCHIVE.delivery_settings.smtp_check(payload)})
             elif path in AFTER_ROUTES:
-                identity = after_identity(payload.get("meeting_id"))
-                if identity is None:
-                    self._json({"ok": False, "error": "not_found"}, HTTPStatus.NOT_FOUND)
-                else:
-                    self._json({"ok": True, **after_action(path, identity, payload)})
+                self._json(*after_post(path, payload))
             elif path == "/api/delivery/retry":
                 self._json({"ok": True, "job": DELIVERY_RETRY.submit(payload)})
             elif path == "/api/google-context/settings":

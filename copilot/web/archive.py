@@ -1044,6 +1044,8 @@ class MeetingArchive:
         # The person's edits after the call: what the screen shows is what is sent (MEETONTRACK-163).
         after = self.after.read(canonical["meeting_id"])
         removed = set(after["removed"])
+        canonical["removed_journal"] = [item for item in canonical["journal"]
+                                        if f"journal:{item.get('id')}" in removed]
         canonical["journal"] = [item for item in canonical["journal"] if f"journal:{item.get('id')}" not in removed]
         canonical["fact_checks"] = [item for item in canonical["fact_checks"] if f"fact:{item.get('id')}" not in removed]
         canonical["after_edits"] = {key: after[key] for key in ("summary", "next_steps", "removed") if after[key]}

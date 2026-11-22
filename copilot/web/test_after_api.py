@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import server
 from after_state import after_payload
+from delivery_retry import DeliveryRetry
 from archive import MeetingArchive
 
 SETTINGS = {"email_enabled": True, "email_to": "owner@example.org",
@@ -136,6 +137,14 @@ class AfterAPITests(unittest.TestCase):
         self.assertEqual(payload["send"]["state"], "sent")
         self.assertEqual({c["at"] for c in payload["send"]["channels"]}, {started})
 
+        # A CRM record the person must choose is never sent on its own: it does not hold "sent".
+        self.write_report(**{**sent, "twenty_status": "needs_choice"})
+        self.assertEqual(self.state(), "sent")
+        self.write_report(**{**sent, "mail_status": "needs_choice", "telegram_status": "needs_choice",
+                             "twenty_status": "needs_choice"})
+        self.assertNotEqual(self.state(), "sent")  # nothing went at all
+        self.write_report(**sent)
+
         self.archive.after.edit("m1", "summary", "Pilot starts in March.")
         self.assertEqual(self.state(), "preparing")  # until the report is made again (C10)
         self.write_report(**sent)
@@ -192,9 +201,9 @@ class AfterAPITests(unittest.TestCase):
     # -- routes -------------------------------------------------------------
 
     def serve(self):
-        patcher = patch.object(server, "ARCHIVE", self.archive)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for patcher in (patch.object(server, "ARCHIVE", self.archive), patch.dict(server.AFTER_CACHE, clear=True)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         worker = threading.Thread(target=httpd.serve_forever, daemon=True)
         worker.start()
@@ -256,6 +265,8 @@ class AfterAPITests(unittest.TestCase):
         self.assertNotIn("j1", [item["id"] for item in self.archive.report_detail("m1")["journal"]])
         status, body = self.request("GET", "/api/after?meeting_id=m1")
         self.assertEqual((status, body["removed"]), (200, ["journal:j1"]))
+        self.assertEqual(body["removed_journal"], [{"key": "journal:j1", "category": "RISK",
+                                                    "text": "Legal review may delay the pilot."}])
         self.assertTrue(body["ok"])
 
         for path in ("/api/after/hold", "/api/after/send", "/api/after/send-again"):
@@ -284,7 +295,8 @@ class AfterAPITests(unittest.TestCase):
             self.assertIs(calls[0]["confirm"], True)
             self.assertEqual(calls[0]["meeting_id"], "m1")
             self.assertRegex(calls[0]["request_id"], r"^[0-9a-f]{32}$")
-            self.assertEqual(self.stored()["resent_at"], self.now)
+            self.assertIs(calls[0]["after"], True)
+            self.assertIsNone(self.stored()["resent_at"])  # only the finished job records it
 
             # Retry sends only what failed (C9).
             self.request("POST", "/api/after/send-again", {"meeting_id": "m1", "channels": ["telegram"]})
@@ -294,11 +306,85 @@ class AfterAPITests(unittest.TestCase):
                                               {"meeting_id": "m1", "channels": wrong})[0], 400)
             self.assertEqual(len(calls), 2)
 
-        self.now += 60
         with patch.object(server.DELIVERY_RETRY, "submit", side_effect=ValueError("delivery_busy")):
             self.assertEqual(self.request("POST", "/api/after/send-again", {"meeting_id": "m1"}),
                              (400, {"ok": False, "error": "delivery_busy"}))
-        self.assertEqual(self.stored()["resent_at"], self.now - 60)
+        self.assertIsNone(self.stored()["resent_at"])
+
+    def test_send_again_marks_resent_only_when_it_went(self):
+        """An edit made after the send: a Send again that fails leaves the headline on "edited" (I1)."""
+        self.serve()
+        retry = DeliveryRetry(self.archive)
+        patcher = patch.object(server, "DELIVERY_RETRY", retry)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        sent = []
+        patcher = patch.object(self.archive, "deliver", side_effect=lambda detail, meta, **kw: (
+            sent.append(kw.get("channels")) or {"mail_status": "sent", "telegram_status": "sent"}))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        (self.reports / "m1").mkdir(parents=True)
+        (self.reports / "m1" / "meeting-report.pdf").write_bytes(b"%PDF synthetic")
+        delivered = {"ready_at": local(self.now - 120), "mail_status": "sent", "telegram_status": "sent",
+                     "twenty_status": "sent", "delivery_started_at": local(self.now - 60),
+                     "delivery_checked_at": local(self.now - 60)}
+        self.write_report(**delivered)
+        self.archive.after.edit("m1", "summary", "Pilot starts in March.")
+
+        def send_again() -> dict:
+            self.assertEqual(self.request("POST", "/api/after/send-again", {"meeting_id": "m1"})[0], 200)
+            deadline = time.monotonic() + 5
+            while retry.snapshot()["state"] == "sending" and time.monotonic() < deadline:
+                time.sleep(0.02)
+            return retry.snapshot()
+
+        # Pressed before the report was made again from the edit: nothing goes.
+        self.assertEqual(send_again()["error"], "report_not_ready")
+        self.assertEqual((sent, self.stored()["resent_at"]), ([], None))
+        self.write_report(**delivered)  # the history pass makes it again
+        self.assertEqual(self.state(), "edited")
+
+        self.now += 5
+        self.assertEqual(send_again()["state"], "complete")
+        self.assertEqual(sent, [{"email", "telegram"}])
+        self.assertEqual(self.stored()["resent_at"], self.now)
+        self.assertEqual(self.state(), "sent")
+
+    def test_controls_answer_while_a_send_holds_the_archive(self):
+        """Hold is stored within 1 s while a send holds the archive, and the queued report keeps it (I2)."""
+        self.serve()
+        (self.reports / "m1").mkdir(parents=True)
+        (self.reports / "m1" / "meeting-report.pdf").write_bytes(b"%PDF synthetic")
+        self.write_report(ready_at=local(self.now - 60), pdf_path=str(self.reports / "m1" / "meeting-report.pdf"),
+                          generated_at=local(self.now - 60))
+        self.assertEqual(self.request("GET", "/api/after?meeting_id=m1")[0], 200)  # the page has shown it
+        held, release = threading.Event(), threading.Event()
+
+        def sending():
+            with self.archive.lock:  # another report's SMTP and Drive
+                held.set()
+                release.wait(10)
+        holder = threading.Thread(target=sending)
+        holder.start()
+        try:
+            held.wait(5)
+            began = time.monotonic()
+            self.assertEqual(self.request("POST", "/api/after/hold", {"meeting_id": "m1"}), (200, {"ok": True}))
+            self.assertLess(time.monotonic() - began, 2)
+            self.assertTrue(self.stored()["held"])
+            # Nothing shown yet for this meeting: a fixed retryable answer, not a hang.
+            server.AFTER_CACHE.clear()
+            began = time.monotonic()
+            self.assertEqual(self.request("POST", "/api/after/send", {"meeting_id": "m1"}),
+                             (503, {"ok": False, "error": "busy"}))
+            self.assertLess(time.monotonic() - began, 2)
+        finally:
+            release.set()
+            holder.join(5)
+        sent = []
+        with patch.object(self.archive, "deliver", side_effect=lambda *a, **k: sent.append(1) or {}):
+            self.archive.retry_pending_deliveries()  # the scan that was queued behind the send
+        self.assertEqual(sent, [])
 
     def test_busy_archive_returns_last_payload(self):
         self.serve()
