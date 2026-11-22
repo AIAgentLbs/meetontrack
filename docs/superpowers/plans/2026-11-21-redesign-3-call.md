@@ -275,3 +275,32 @@ Reason, one line in the contract: `record resume` only restarts live recognition
 - **Audio level per channel** for a truer heartbeat: the spec puts it under "Later"; it needs the recorders to export levels.
 - **Resume recording from the After view while the report has not gone** (critique 8, alternative fix): After is plan 4's; the 30 s window covers the mid-call slip.
 - **A faster first hint in general**: only a heard question shortens the 90 s analysis gap; changing the cadence for every call is a cost decision outside this view.
+
+## Rulings made during execution
+
+Copied from the execution ledger on 2026-11-22, before the scratch workspace was deleted. Each ruling reads: what was decided, why, and what it costs if wrong.
+
+- Task 5: review approved (4 Minor); Ruling: resolved CONTRADICTION never takes the hint slot — brief omitted the filter by oversight — cost if wrong: one-word revert. Fix round 1/5 3886b3a; scoped re-review p3-rev5.
+- Ruling: hide 'Прошлые подсказки' while the count is 0 — owner bar is a very clean screen and an empty counter is noise; plan text mandated call.earlier_empty — cost if wrong: one-line revert.
+- Ruling: stage-visible Minors 2 (past retry time), 5 (truncated hint unreachable), 6 (three names for the transcript panel), 7 (label repeats the verb) and the long_hint 'Скажите' label go into fix round 1 — they show on stage; cheap.
+- Ruling: RU countdown uses a non-breaking space between the number and «с» — wrap mid-unit looks broken at 400 px; brief string differs only in whitespace — cost if wrong: none.
+- Ruling: #call-live (beats, clock, heard sides) shows only when the bar kind is 'recording' — 'Not recording' beside 'You: heard' with moving bars contradicts itself; narrows the brief's 'live and not stopped' — cost if wrong: one-line revert; F19 single-stalled keeps its beat.
+- Ruling: drop Stop from More (#call-more-stop) — duplicates the bar's Stop, adds no reach, and ArrowUp+Enter from the menu stops the recording with no dialog; overrides the brief — cost if wrong: re-add one menu item.
+- Ruling: Task 9 (a render script, no product code) is reviewed inside the final whole-branch review instead of its own task review — mechanical, exit 0 with 172/172 and test-call-ui green — cost if wrong: a script defect found at the critique.
+- Ruling: one fix wave covers final I1-I5, all Codex findings, critique P1/P2 and two pre-demo minors — list in fix-wave.md — cost if wrong: a large wave; mitigated by a scoped re-review and critique 2.
+- Ruling: never cut a hint; show the AI's first line whole (wrap, one smaller type step) — a fragment can't be said aloud — cost if wrong: longer hint lines.
+- Ruling: in Call, a panel shows only what it was opened for (Board = four columns, Transcript = one heading); Chat/Notes via Menu; scoped to Call — old UI inside the new screen cost the critique a P1 — cost if wrong: Chat/Notes one click further.
+- Ruling: every time in Call is elapsed call time, the top-bar clock — two clocks in one format confused the critic — cost if wrong: clock time lost on hints.
+- Ruling: during the undo window and after the final stop the hint slot hides and the feed says the recording is stopped; ask stays — the feed contradicted the bar — cost if wrong: a hint hidden 30 s early.
+- Ruling: the ask button reads 'Отправить'/'Send' — 'Спросите' (to the client) beside 'Спросить' (to the AI) confused the critic — cost if wrong: one label.
+- Ruling: RU countdown 'Через 20 сек' — 'с' reads as a preposition — cost if wrong: none.
+- Ruling: Earlier shows 'Анна Петрова спросила: «…»' with our answer under 'Ответ' — the answer read as hers — cost if wrong: one label.
+- Critique 2: 29/40, 1 P1 (critique-call-2.md). Ruling: one clock per job in Call (bar elapsed, feed ages, loss as duration, transcript elapsed) — three clocks cost the P1 twice — cost if wrong: clock time lost in Call. Ruling: stopped_final gets one button to the existing meeting results view, no plan-4 work — dead end flagged — cost if wrong: one link. Section G sent to p3-fixwave.
+- Critique 3: 29/40, 1 P1 (critique-call-3.md). Ruling: stopping bar 'Запись остановлена. Продолжить можно еще N сек', feed 'Запись остановлена.' — P1 read as still recording — cost if wrong: copy only. Ruling: hint labels are verbs (Спросите/Скажите/Ответьте), own-question reply 'Ответ на ваш вопрос' — mixed labels — cost if wrong: labels. Ruling: hint and answer share a clamp() size up to ~36px — stage readability — cost if wrong: one token. Section H sent to p3-fixwave.
+- Ruling: keep B1 (a hint is never cut) against the spec's 'first clause' — critique 1 scored a clause-cut fragment as unspeakable P1, critique 3 scores a whole long hint as P2; the P2 is cheaper on stage — cost if wrong: a long hint takes two lines.
+- Critique 4: 30/40 but 1 P1 (board at 400 shows 2 of 4 columns). Ruling: current hint never older than Earlier; slot priority only within the latest analysis — feed read inverted — cost if wrong: an older answer drops to Earlier sooner. Sections K+L sent.
+- Codex 2: 1 P1 (Windows session check outside the semaphore), 3 P2, 2 P3 -> section M. Ruling: on 'unknown verb' from an old recorder, retry the bare verb once — upgrade window — cost if wrong: an old recorder acts unscoped (pre-change behaviour).
+- Critique 5: 30/40, 1 P1 (no single source component). Ruling: one 'Откуда это' disclosure on every slot item, unsourced items say 'Без источника - проверьте, прежде чем обещать' — cost if wrong: one muted line. Ruling: stopping has one countdown in the feed; bar shows frozen timer + Resume in Stop's place. Section N sent.
+- Ruling: Earlier list items keep their inline source line (N1 covers the current-hint slot only) — Earlier is a compact read-back list, a disclosure per item adds clicks — cost if wrong: add the disclosure to Earlier items. Flaky: test-home-ui failed once under the parallel run, not reproduced in 4 solo runs — watch.
+- Critique 6: 31/40, 0 P0/P1 — Call view PASSES the gate. Ruling: three cheap P2s (O1-O3) before merge; the rest of critique 6 P2/P3 deferred — cost if wrong: polish later.
+- Codex final3: 1 P1 (Stop shortcut/double-click can resume), 5 P2, 1 P3 -> section P. Ruling: drop the M2 bare-verb retry; an old recorder gets 'Обновите программу записи' and the stop stays pending — Codex P2 showed the retry can hit a new call — cost if wrong: mixed-version installs can't stop from the page until the recorder updates.
