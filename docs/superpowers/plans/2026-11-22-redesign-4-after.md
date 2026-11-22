@@ -1,0 +1,255 @@
+# Redesign 4: the After view and the memo check Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** After a call the app shows what was agreed and who gets the report before it leaves: the send state with its recipients, an editable summary and next steps, and the board checked against the memo, replacing today's two panes for a finished call (MEETONTRACK-163).
+
+**Architecture:** A new `after_state.py` keeps the person's choices for one report (hold, send now, edits, removed board items) in `after.json` beside `report.json`, and owns the send gate: held, 30 s after a change, 30 s after the refreshed report first appears. `MeetingArchive` applies the edits to the report it builds, asks the gate before every automatic send, and runs one memo check per meeting through a new AI purpose `memo_check` while the report is created. `GET /api/after` gives the page the send state, recipients, summary and memo check; `after.js` renders `#after` from it and from the existing `/api/state` poll (journal, plan, fact checks).
+
+**Tech Stack:** plain JS (no build), CSS, Python 3 stdlib (`unittest`, `http.server`), Playwright `.cjs` checks run with `node`.
+
+**Spec:** `docs/superpowers/specs/2026-11-20-call-flow-redesign-design.md` (section "After (MEETONTRACK-163)", the After lines of "Carried into the build from the eighth critique", Acceptance). **Contract (binding):** `docs/superpowers/plans/2026-11-21-redesign-contract.md`, edited by Task 1. **Look:** `/Users/m/Documents/ai-jam-2026-11-26/mockup/screens.html` `#s3` (classes `.send`, `.to`, `.to-links`, `.row-act`, `.chan`, `.ch`, `.edit`, `.two`, `.after-note`, `.board`, `.board-head`, `.bcol`, `.bsub`, `.bitem`, `.bitem.removed`, `.tag` with `ok`, `open`, `no`, `diff`, `kind`); outside the repo, port its CSS, never its text, names or data. **Critique findings to meet:** `/Users/m/Documents/ai-jam-2026-11-26/mockup/critique8.md`, section 3.
+
+## Global Constraints
+
+- Every rule of the contract's "Global rules" applies: invented fixture data only ("Anna Petrova" / "Анна Петрова", "Example LLC" / "ООО Пример", "Pilot review" / "Обзор пилота", `example.com` for the other side, `owner@example.org` for the user); no AI or speech provider, model, effort or mode in code (prompt text stays provider-neutral); one settings store; no new dependency; no confirmation dialog on send, hold, send again or remove.
+- The memo check runs only through `AIService.run("memo_check", ..., web=False)`: the transcript and the memo never reach a web-enabled call (rule of MEETONTRACK-128).
+- MEETONTRACK-94 stays: nothing is sent from live text. Every send path, Send now included, still requires `_ready_for_delivery`.
+- Every UI string exists in `translations.ru` and `translations.en` in `app.js`, with no "ё", no em-dash and no exclamation mark. No inline styles or scripts (page CSP). The report HTML stays Russian, as today.
+- Vocabulary carried from plan 3: "расшифровка" (never "стенограмма") in strings the Call and After views share; "Recording stopped" / "Запись остановлена"; "How to fix" is the `.ql` look. Times of things said on the call are elapsed call time (`callClock`, `MM:SS` or `H:MM:SS`); delivery and retry times are wall clock `HH:MM`, always after "at" / "в".
+- This screen has no primary button: Send now is secondary in every state before sending, Do not send is `.ql` (spec).
+- `screens.css` reuses the tokens of `styles.css` and plan 1 (`--on-accent`, `--danger-soft`); no new colour token; no side stripes; board rows are list rows with hairlines, not cards.
+- Suite stays green: `python3.14 -m unittest discover -s copilot/web -p 'test_*.py'`; every `scripts/*.cjs` check stays green, run as `PLAYWRIGHT_MODULE=/Users/m/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright node scripts/<x>.cjs`.
+- Commits in English, reference MEETONTRACK-163, end with the trailer lines of the session that does the work. Do not touch `memo_writer.py`, `recording_control.py` or `home.js` beyond what a task names.
+- Build budget: about one day (deadline 2026-11-24, rehearsal 2026-11-25, demo 2026-11-26). Anything not below is in "Deferred".
+
+## Review Focus
+
+1. **A slow Drive upload holds the archive lock while the After view polls.** The page must not hang: `/api/after` waits at most 1 s for the lock, then answers the last payload with `stale: true` (Task 4 `test_busy_archive_returns_last_payload`).
+2. **The server restarts while a report is held or inside its 30 s pause.** Held stays held and no retry sends it; a pause resumes from the stored times (Task 1 `test_choices_survive_reload`, Task 2 `test_held_report_never_goes`).
+3. **The person is typing in the summary when the poll brings the refined one.** The field keeps their text, focus and caret; the refined text never replaces it (Task 6 `refining` typing check).
+4. **The AI quotes words nobody said, or names a question the memo does not have.** The quote is dropped and the question stays "No answer"; nothing on the board claims an answer without a quote found in the transcript (Task 3 `test_invented_quote_is_dropped`).
+5. **After opened from Call in the 30 s after the final stop, then the recorder goes inactive with a status other than `finished`.** The view stays After, no Home flash (Task 5 `viewFor` cases).
+
+---
+
+## File Structure
+
+New: `copilot/web/after_state.py` (choices of one report, the send gate, the `/api/after` payload), `copilot/web/memo_check.py` (prompt, answer validation, outcome), `copilot/web/after.js` (the After view), tests `copilot/web/test_after_state.py`, `copilot/web/test_after_archive.py`, `copilot/web/test_memo_check.py`, `copilot/web/test_after_api.py`, browser files `scripts/after-fixtures.cjs`, `scripts/test-after-ui.cjs`, `scripts/render-after-critique.cjs`.
+Edited: the contract, `archive.py`, `server.py`, `ai_providers.py`, `docs/config.schema.json`, `test_first_run.py`, `app.js` (translations), `shell.js` (`viewFor`, `renderShell`), `call.js` (`openCallPanel` in After), `index.html`, `screens.css`, `test_home_api.py::StaticFilesTests`.
+
+### Task 1: Contract and the choices of one report
+
+**Files:**
+- Modify: `docs/superpowers/plans/2026-11-21-redesign-contract.md` (new section "After (plan 4)"; the plan 4 table row gains "participants deferred")
+- Create: `copilot/web/after_state.py`, `copilot/web/test_after_state.py`
+
+**Interfaces:**
+- Produces:
+  - `class AfterState(root: Path, clock=time.time, pause: float = 30.0)`. One file per report folder, `root / _safe(identity) / "after.json"`: `{"version": 1, "held": bool, "send_now_at": float|null, "changed_at": float|null, "summary": str|null, "next_steps": str|null, "removed": [str], "resent_at": float|null}`, written with `private_dir` and `archive._atomic_json` (mode 0600) under one `threading.Lock`. A missing or unreadable file reads as the defaults.
+  - `read(identity) -> dict`; `hold(identity)` (`held` true, `send_now_at` null); `send_now(identity)` (`held` false, `send_now_at` now); `edit(identity, field: "summary"|"next_steps", text: str) -> float` (text stripped and cut at 4000 chars; empty stores null, which means "not edited"; sets `changed_at`; returns `changed_at + pause`); `remove(identity, key: str, removed: bool) -> float` (key must match `^(journal|fact|memo|differs):[A-Za-z0-9_-]{1,80}$`, else `ValueError("bad_key")`; at most 500 keys; sets `changed_at`); `resent(identity)` (`resent_at` now).
+  - `gate(identity, ready_at: float|None) -> {"open": bool, "reason": "held"|"changes"|"showing"|"", "send_at": float|None}`, first rule that matches: held → closed `held`; `send_now_at` set and no change after it → open; `now < changed_at + pause` → closed `changes`; `ready_at` and `now < ready_at + pause` → closed `showing`; else open.
+  - `blocked(identity)` remembers a report a closed gate stopped; `due() -> set[str]` returns and forgets the remembered ones whose gate is open now (memory only; the 60 s full retry scan covers a restart).
+- Contract section "After (plan 4)": `after.json` above; `GET /api/after` and the four POST routes of Task 4 with their shapes; report.json gains `ready_at` (ISO, first time the report was made from the final transcript) and `memo_check` (Task 3 shape); purpose `memo_check`; `participants.json` writing and the 90-day backfill are deferred.
+
+- [ ] **Step 1: Write the failing tests** (`test_after_state.py`, fake clock):
+  - `test_defaults_and_bad_file`: no file and a file holding `[` both read as `held False`, `removed []`, everything else null.
+  - `test_gate_order`: fresh → open; `hold` → `held`, still `held` at +1 h; `send_now` → open; `edit` at t → `changes` with `send_at` t+30, open at t+31; `ready_at` = t → `showing` until t+30; `send_now` then `edit` → `changes` (a change after Send now pauses again).
+  - `test_edit_rules`: 5000-char text stored as 4000; `"   "` stores null; returns `changed_at + 30`.
+  - `test_remove_keys`: `"journal:6f1c-a"` accepted, `"journal:../x"` and `"other:1"` raise `ValueError("bad_key")`; remove then bring back leaves `removed == []`.
+  - `test_choices_survive_reload`: `hold` and an edit, a new `AfterState` on the same root reads both; file mode is 0600.
+  - `test_due_returns_opened_once`: `blocked("m1")` during `showing`; `due()` empty at +10 s, `{"m1"}` at +31 s, empty on the next call.
+- [ ] **Step 2: Run** `python3.14 -m unittest copilot/web/test_after_state.py`, expect FAIL (`ModuleNotFoundError`).
+- [ ] **Step 3: Implement** `after_state.py` (the class only; the payload function arrives in Task 4) and the contract section.
+- [ ] **Step 4: Run** the file and the whole suite, expect PASS.
+- [ ] **Step 5: Commit** `MEETONTRACK-163: contract for After, and the per-report hold, edits and send gate`.
+
+### Task 2: The archive sends what the screen shows, when the gate opens
+
+**Files:**
+- Modify: `copilot/web/archive.py` (`__init__` :167, `report_detail` :981, `finalize_history` :554, `_generate_report` :1174 and its `ready`/`sending` lines :1239-1241, `_report_meta` :1292, `retry_pending_deliveries` :1329, `source_signature` :1680, `_report_html` :2468-2481), `copilot/web/server.py` (`delivery_loop` :3026)
+- Create: `copilot/web/test_after_archive.py`
+
+**Interfaces:**
+- Consumes: `AfterState` (Task 1).
+- Produces (`archive.py`):
+  - `MeetingArchive.after = AfterState(self.reports_root)`, created in `__init__`.
+  - `report_summary(detail) -> list[str]` and `report_next_steps(detail) -> list[str]`: the `brief[:3]` and `followups[:5]` computations moved out of `_report_html` unchanged, which now calls them. When `detail["after_edits"]` has `summary` (or `next_steps`), its non-empty lines (at most 10) are returned instead. The screen (Task 4) and the report use these two functions only, so what is on screen is what leaves.
+  - `report_detail` ends by reading `self.after.read(canonical["meeting_id"])`: journal items whose `journal:<id>` and fact checks whose `fact:<id>` are in `removed` are dropped; `canonical["after_edits"] = {k: v for k in ("summary", "next_steps", "removed") if v}`.
+  - `source_signature`: `material["after"] = detail["after_edits"]` only when it is non-empty (old reports keep their signature).
+  - `finalize_history`: the per-meeting `version` tuple also holds `_mtime(self.reports_root / meeting_id / "after.json")`, so an edit is seen by the next history pass.
+  - `_report_meta` keeps `ready_at` and `memo_check` from the previous report. In `_generate_report`, right after `ready = ...`: `ready and not meta.get("ready_at")` sets `meta["ready_at"]` to now (ISO); `gate = self.after.gate(identity, ready_at as epoch)`; `sending = deliver and not meta.get("delivery_on_request") and ready and gate["open"]`; when `ready` and the gate is closed, `self.after.blocked(identity)`.
+  - `retry_pending_deliveries`: after the `delivery_on_request` skip, a closed gate (`ready_at` from the meta) calls `blocked` and skips the report. A send that sets no `delivery_started_at` yet sets it (Task 4 reads it to tell an edit after sending).
+- Produces (`server.py`): `DELIVERY_WAKE = threading.Event()`. `delivery_loop` every 5 s (`DELIVERY_WAKE.wait(5)`, then `clear()`) calls `ARCHIVE.retry_pending_deliveries(meeting_ids=due)` when `due = ARCHIVE.after.due()` is non-empty, and the full scan once 60 s have passed since the last one, as today.
+
+- [ ] **Step 1: Write the failing tests** (`test_after_archive.py`, archive set up as `test_delivery.py:16-41`, `_print_pdf` patched to write a file, `deliver` patched to a counting fake returning `{"mail_status": "sent"}`, `_ready_for_delivery` patched to a switch, `archive.after.clock` a fake clock; a finished meeting `m1` with transcript lines and journal items FACT "Budget approved for one quarter.", COMMITMENT "We send the proposal on Friday.", RISK `id` `j1`):
+  - `test_first_ready_report_waits_while_shown`: `generate_report("m1")` → `deliver` not called, report.json has `ready_at`; `retry_pending_deliveries(meeting_ids=archive.after.due())` at +10 s → not called; at +31 s → called once.
+  - `test_held_report_never_goes`: `hold("m1")`; generation and a full `retry_pending_deliveries()` at +2 h → not called; `send_now("m1")` → the next retry calls it once.
+  - `test_send_now_waits_for_final_transcript`: not ready, `send_now` → generation and retry send nothing; ready → `generate_report` calls `deliver` at once (no 30 s wait).
+  - `test_edit_goes_into_report_and_pauses`: `edit("m1", "summary", "Budget approved for one quarter.\nPilot starts in March.")` → `report_summary(report_detail("m1"))` equals both lines; the signature changed; the regenerated `index.html` contains "Pilot starts in March."; a retry at +20 s after the edit does not send, at +31 s it does.
+  - `test_removed_item_left_out`: `remove("m1", "journal:j1", True)` → `j1` absent from `report_detail` and from `index.html`; `remove(..., False)` → back.
+  - `test_history_pass_sees_edits`: with `create_due_report` patched to count, `finalize_history()` twice counts the meeting once; after an edit a third pass counts it again.
+  - `test_unedited_summary_is_unchanged`: for a meeting with no `after.json`, `report_summary` and `report_next_steps` equal the lines `_report_html` produced before this task (the existing `test_report_brief.py` stays green too).
+- [ ] **Step 2: Run** `python3.14 -m unittest copilot/web/test_after_archive.py`, expect FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the file, `test_delivery.py`, `test_report_brief.py` and the whole suite, expect PASS.
+- [ ] **Step 5: Commit** `MEETONTRACK-163: reports carry the person's edits and wait for the send gate`.
+
+### Task 3: The memo check
+
+**Files:**
+- Create: `copilot/web/memo_check.py`, `copilot/web/test_memo_check.py`
+- Modify: `copilot/web/ai_providers.py:41` (`PURPOSES` gains `"memo_check"`), `docs/config.schema.json:51-52` (enum and one description sentence: "memo_check compares a finished call with its memo, offline"), `copilot/web/test_first_run.py:94`, `copilot/web/archive.py` (`memo_checker` attribute, `_generate_report`, `_report_meta` keep, `_memo_check_html` beside `_fact_checks_html` :2382, `_report_html` placement), `copilot/web/server.py` (sets `ARCHIVE.memo_checker` after `PLANS` and `AI` exist)
+
+**Interfaces:**
+- Produces (`memo_check.py`):
+  - `TIMEOUT = 90`; `MAX_PROMPT = 200_000`.
+  - `memo_questions(plan: dict|None) -> list[dict]`: `plan["items"]` of kind `question` with an `id` and text.
+  - `prompt(plan: dict, segments: list[dict]) -> str`: provider-neutral English instructions; the memo questions as `id: text`; the memo text (`memo_markdown`, cut at 6000 chars); the transcript as numbered lines `[index] speaker: text`. Asks for one JSON object `{"questions": [{"id", "status": "answered"|"open", "segment": int, "quote": str}], "differs": [{"memo": str, "segment": int, "quote": str}]}`: a quote copied word for word from that one line, a `memo` statement copied word for word from the memo, `differs` only for a statement on the call that contradicts one in the memo. Raises `ValueError("too_long")` above `MAX_PROMPT` characters.
+  - `parse(text: str, plan: dict, segments: list[dict]) -> dict`: the first `{` to the last `}` as JSON, else `ValueError("ai_no_answer")`. Every memo question appears once, in memo order; an unknown `id` is dropped; a missing one is `open`. `answered` holds only when `segment` is in range and the casefolded, whitespace-collapsed `quote` is inside that line's text; otherwise the question is `open` with no quote. A `differs` entry needs the same quote check and its `memo` inside the memo text (same normalising), else it is dropped; at most 10. Result: `{"state": "done", "questions": [{"id", "status", "quote", "speaker", "at"}], "differs": [{"key": "differs:" + sha1(memo + quote)[:12], "memo", "quote", "speaker", "at"}]}`, `speaker` and `at` (ISO timestamp) from the segment.
+  - `check(detail: dict, plan: dict|None, run: Callable[[str], str]) -> dict|None`: None without memo questions (no AI call). `AIChoiceError` → `{"state": "unavailable", "reason": "ai_needs_choice"}`; `TimeoutError` → `{"state": "failed", "reason": "timeout"}`; `ValueError(r)` → `{"state": "failed", "reason": r}`; any other exception → `{"state": "failed", "reason": "error"}`. Logs carry the meeting id and the state only.
+- Produces (`archive.py`): `MeetingArchive.memo_plan: Callable[[dict], dict|None] = lambda detail: None` and `MeetingArchive.memo_checker: Callable[[dict], dict|None] | None = None`. At the start of `_generate_report`, under the lock: when `memo_checker` is set, the report.json on disk has no `memo_check` and `_ready_for_delivery(detail)`, the check runs outside the lock and its non-None result is merged into report.json at once (so `_report_meta` keeps it). One run per meeting: any stored outcome, failed included, is never run again. `_memo_check_html(memo_check, removed, esc) -> str`: section `<section id="memo-check"><h2>Сверка с мемо</h2>` with answered questions (quote, speaker, call time), open ones, differing statements, leaving out `memo:<id>` and `differs:<key>` in `removed`; a failed or unavailable check gives one line "Сверки с мемо нет: <reason in Russian>". Placed right after the summary section.
+- Produces (`server.py`): `ARCHIVE.memo_plan = lambda detail: PLANS.snapshot({<the five keys the /api/archive route passes, server.py:3291-3297>})` and `ARCHIVE.memo_checker = lambda detail: memo_check.check(detail, ARCHIVE.memo_plan(detail), lambda prompt: AI.run("memo_check", prompt, web=False, timeout=memo_check.TIMEOUT).text)`.
+
+- [ ] **Step 1: Write the failing tests** (`test_memo_check.py`; plan with `q1` "What budget is set for the pilot this year?", `q2` "Who signs off the purchase?" and `memo_markdown` "Anna Petrova said in October that the start is in April."; segments from "Anna Petrova" incl. "The budget is approved for one quarter." and "We plan to start in March."):
+  - `test_purpose_is_listed`: `"memo_check" in PURPOSES` and in the schema enum.
+  - `test_prompt_numbers_lines`: contains `q1: What budget`, `[0] Anna Petrova: ` and no provider or model name from `ai_providers.ADAPTERS` keys; a 250 000-char transcript raises `ValueError("too_long")`.
+  - `test_answered_needs_quote_from_its_line`: `q1` answered on segment 0 with "budget is approved" → `answered`, `speaker` "Anna Petrova", `at` = that timestamp.
+  - `test_invented_quote_is_dropped`: `q1` answered with "budget is unlimited" → `open`, no quote; quote from the right words but another segment index → `open`.
+  - `test_unknown_and_missing_ids`: answer only names `q9` → both `q1`, `q2` `open`, in memo order.
+  - `test_differs_needs_memo_words`: memo "the start is in April" with quote "start in March" → one `differs` with a `differs:` key; memo "the start is in May" → dropped.
+  - `test_outcomes`: `run` returning "no json" → `failed`/`ai_no_answer`; raising `TimeoutError` → `failed`/`timeout`; raising `AIChoiceError("needs_choice", "")` → `unavailable`/`ai_needs_choice`; a plan without questions → None and `run` never called.
+  - `test_report_runs_check_once` (archive as in Task 2, `memo_checker` a counting fake returning a `done` result with `q1` answered): two ready generations → one call, report.json `memo_check` kept after the second; `index.html` has `Сверка с мемо` and the quote; `remove("m1", "memo:q1", True)` and regenerate → the quote is gone; not ready → no call.
+  - `test_failed_check_does_not_hold_report`: the fake returns `failed`/`timeout` → the report is still generated, `index.html` says "Сверки с мемо нет", and the next generation does not call the fake again.
+- [ ] **Step 2: Run** `python3.14 -m unittest copilot/web/test_memo_check.py`, expect FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the file, `test_first_run.py`, `test_ai_providers.py` and the whole suite, expect PASS.
+- [ ] **Step 5: Commit** `MEETONTRACK-163: one memo check per meeting, in the report and on record`.
+
+### Task 4: `GET /api/after` and its controls
+
+**Files:**
+- Modify: `copilot/web/after_state.py` (payload), `copilot/web/server.py` (`do_GET` beside `/api/agenda` :3245, `do_POST` routes)
+- Create: `copilot/web/test_after_api.py`
+
+**Interfaces:**
+- Produces (`after_state.py`): `after_payload(archive, meeting_id: str, settings: dict, now: float) -> dict|None` (None for an unknown meeting):
+  ```
+  {"ok": true, "meeting_id": <report identity>, "title", "started_at", "ended_at", "duration_seconds",
+   "send": {"state", "send_at": ISO|null, "send_now": bool,
+            "channels": [{"channel": "email"|"telegram"|"twenty"|"drive", "to": str,
+                          "status": "waiting"|"held"|"sent"|"failed"|"needs_choice", "at": ISO|null, "retry_at": ISO|null}]},
+   "summary": {"lines": [str], "edited": bool, "final": bool},
+   "next_steps": {"lines": [str], "edited": bool, "final": bool},
+   "removed": [str],
+   "memo_check": null | {"state": "waiting"} | <Task 3 result>}
+  ```
+  - `send.state`, first rule that matches: no channel enabled (`delivery_settings.enabled`) → `no_channels`; held and not every channel sent → `held`; every enabled channel sent → `edited` when `changed_at` is later than `delivery_started_at` and `resent_at`, else `sent`; not `_ready_for_delivery` → `draft`; no report or `report_matches` false → `preparing`; a channel `failed` → `failed`; gate `changes` / `showing` → that reason; else `sending`.
+  - Channel status from report.json: `sent`/`uploaded` → `sent` with `at` = `delivery_checked_at`; missing, `pending`, `waiting_for_end` → `waiting` (or `held`); `needs_choice` → `needs_choice`; `not_configured` → the channel is left out; anything else → `failed` with `retry_at` = `delivery_retry_at`. `to`: email `email_to`; telegram `telegram_target` with `"me"` as `""`; twenty `twenty_target.name` or `""`; drive `""`.
+  - `summary` / `next_steps`: `report_summary` / `report_next_steps` of `report_detail`; `edited` when `after.json` holds that field; `final` = `_ready_for_delivery`.
+  - `memo_check`: report.json's, else `{"state": "waiting"}` when `memo_check.memo_questions(archive.memo_plan(detail))` is non-empty, else null.
+- Produces (`server.py`):
+  - `GET /api/after?meeting_id=<id>` (`meeting_id` at most 1024 chars, else 400): takes `ARCHIVE.lock` with `acquire(timeout=1)`; on success answers `after_payload(...)` and caches it per meeting; on timeout answers the cached payload with `"stale": true`, or 503 `{"ok": false, "error": "busy"}` when none is cached; None → 404.
+  - `POST /api/after/hold {"meeting_id"}`, `/api/after/send {"meeting_id"}` (send now, then `DELIVERY_WAKE.set()`), `/api/after/edit {"meeting_id", "field", "text"}` (text over 4000 chars → 400; answers `{"ok": true, "send_at": ISO}`), `/api/after/remove {"meeting_id", "key", "removed": bool}` (`bad_key` → 400). Each resolves `ARCHIVE.report_identity(meeting_id)`; an unknown meeting → 404. Answers `{"ok": true}`.
+  - `POST /api/after/send-again {"meeting_id"}`: `DELIVERY_RETRY.submit({"meeting_id": identity, "request_id": uuid4().hex, "channels": <enabled among email, telegram, drive>, "confirm": true})`, then `ARCHIVE.after.resent(identity)`; answers `{"ok": true, "job": ...}`. The CRM channel is not resent (see Deferred).
+
+- [ ] **Step 1: Write the failing tests** (`test_after_api.py`; a temp `MeetingArchive` patched in as `server.ARCHIVE`, server pattern of `test_context_sources_api.py:20-34`, `delivery.json` with `email_to` `owner@example.org`, `telegram_account`, `telegram_config`, `telegram_target` `"me"`, Twenty on):
+  - `test_send_states`: one meeting driven through ten set-ups → `no_channels`, `draft`, `preparing`, `showing`, `changes`, `held`, `sending`, `failed` (mail `failed` with `delivery_retry_at`), `sent`, `edited` (edit after `delivery_started_at`).
+  - `test_recipients`: channels in order email, telegram, twenty with `to` `owner@example.org`, `""`, and the `twenty_target.name` once report.json has it; a `not_configured` drive is absent.
+  - `test_summary_matches_report`: `summary.lines == archive.report_summary(archive.report_detail(id))`; after an edit `edited` is true and the lines are the edited ones; `final` follows `_ready_for_delivery`.
+  - `test_memo_check_field`: none without memo questions; `{"state": "waiting"}` with them and no stored check; the stored result once report.json has one.
+  - `test_routes`: hold, send, edit, remove each 200 and change `after.json`; send sets `DELIVERY_WAKE`; an unknown meeting → 404; a key `"x:1"` → 400; 4001-char text → 400; a foreign `Origin` → 403.
+  - `test_send_again`: `server.DELIVERY_RETRY.submit` patched: called with `channels` `["email", "telegram"]` (drive off), `confirm` true, no `twenty`; `resent_at` set.
+  - `test_busy_archive_returns_last_payload`: one GET, then another thread holds `ARCHIVE.lock`; the next GET answers within 2 s, 200, with `stale: true` and the same `send`.
+- [ ] **Step 2: Run** `python3.14 -m unittest copilot/web/test_after_api.py`, expect FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the file and the whole suite, expect PASS.
+- [ ] **Step 5: Commit** `MEETONTRACK-163: the After payload, hold, send now, edits and send again`.
+
+### Task 5: After fixtures, the pure functions of `after.js`, and the view rule
+
+**Files:**
+- Create: `copilot/web/after.js`, `scripts/after-fixtures.cjs`, `scripts/test-after-ui.cjs`
+- Modify: `copilot/web/index.html` (`<script src="/after.js" defer>` after `/call.js`, before `/shell.js`), `copilot/web/server.py` (static route for `/after.js`, as for `/call.js`), `copilot/web/test_home_api.py::StaticFilesTests` (add `/after.js`), `copilot/web/shell.js` (`viewFor` :41), `scripts/test-shell-ui.cjs`
+
+**Interfaces:**
+- Produces (`shell.js`): `viewFor` gains one rule before the `finished` one: not live and `state.recording_control.last_stop.meeting_id === transcript.meeting_id` with `stopped_at` within `AFTER_WINDOW_MS` → `after`, whatever `transcript.status` says.
+- Produces (`after.js`, globals):
+  - `afterTime(atIso: string, startIso: string) -> string`: `callClock(startIso, Date.parse(atIso))`; `""` when either is missing.
+  - `afterBoard(state, after) -> {lanes: Lane[], memoLine: string}` with `Lane = {lane: "ask"|"asked"|"risks"|"facts", rows: Row[], folded: Row[]}` and `Row = {key, text, tag: "no_answer"|"answered"|"differs"|"risk"|"objection"|"confirmed", memo: boolean, quote, speaker, at, other: string, removed: boolean}`:
+    - `ask`: each `call_plan.items` question (`key` `memo:<id>`, `memo: true`); status from `after.memo_check.questions` when `done`, else `answered` when the plan item is `resolved`; `answered` rows go to `folded`. Plus journal `ASK` not `resolved` (`journal:<id>`), dropped when `callSame(callLine(a).rest, callLine(b).rest)` (call.js, the board's own de-duplication) matches a memo question.
+    - `asked`: journal `INCOMING_QUESTION`, `OPEN_QUESTION`; `resolved` → `answered` in `folded`, else `no_answer` (the same tag as an open memo question, critique P3).
+    - `risks`: journal `RISK` (`risk`), `OBJECTION` (`objection`).
+    - `facts`: `fact_checks.items` `refuted` (`fact:<id>`, `differs`, `other` = its `fact`), journal `CONTRADICTION` (`differs`), `memo_check.differs` (`differs`, `other` = the memo statement with `call_plan.source_label`); `confirmed` checks in `folded`.
+    - `text` = `callLine(item.text).rest` (the whole first line, never cut); `at` by `afterTime` from the item's time and `recording_health.capture.started_at || transcript.started_at`; `removed` when `key` is in `after.removed`.
+    - `memoLine`: `after.memo_checked` (done), `after.memo_waiting` (waiting), `after.memo_failed` with `after.memo_reason.<reason>` (failed, unavailable), `""` (null).
+  - `afterSend(after, now) -> {state, headline: string, rules: string[], recipients: string, actions: ("send_now"|"hold"|"send_again"|"retry")[], channels: string[]}`: `headline` `after.send.<state>`, except `draft` with `send_now` true → `after.send.send_now_pending`; `rules` = [`after.rule.changes`, `after.rule.keep`] in `draft`, `preparing`, `showing`, `changes`, else []; `actions`: `draft`/`preparing`/`showing`/`changes`/`sending` → `send_now`, `hold`; `held` → `send_now`; `edited` → `send_again`; `failed` → `retry`; otherwise none. `recipients` = `after.to` with the joined `after.to.<channel>` parts (`after.to.telegram_me` for an empty telegram `to`, `after.to.twenty_named` when named); `""` for `no_channels`. `channels` (only in `sent`, `edited`, `failed`, `held`): `after.ch.<status>` per channel with its wall-clock `HH:MM`.
+  - `renderAfter(state)` is an empty stub in this task.
+- Produces (`scripts/after-fixtures.cjs`): `states` (name → `{state, after, agenda, permissions}`) and `open(browser, {fixture, width, scheme, lang, data}) -> page`, reusing `route` from `home-fixtures.cjs` and answering `GET /api/after` and the POST routes itself (`page.api` records posts). The meeting is `m1` "Pilot review" / "Обзор пилота" with "Anna Petrova" / "Анна Петрова" of "Example LLC" / "ООО Пример", 42 min, finished; the user is `owner@example.org`. Fixtures: `just_stopped` (live, `last_stop` for `m1`, opened by hand, `/api/after` 404 then `draft`), `draft`, `refining` (as `draft`, with a summary that changes on the second poll), `showing`, `changes`, `held`, `sending`, `sent`, `edited`, `failed`, `no_channels`, `no_memo`, `memo_failed`, `removed`, `answered_open`, `transcript_open`. Board data in every fixture but `no_memo`: plan questions `q1` answered with a quote, `q2`, `q3` open, one `INCOMING_QUESTION` open, one `RISK`, one `OBJECTION`, one `refuted` fact check, one memo `differs`.
+
+- [ ] **Step 1: Write the failing tests** (`test-after-ui.cjs` through `page.evaluate` on the `draft` page; `test-shell-ui.cjs` for `viewFor`):
+  - `viewFor`: manual `after` while `m1` is live with `last_stop` → `after`; the recorder then inactive with `transcript.status` `"stopped"` → `after`; `last_stop.stopped_at` 3 h ago and not live → `home`; a new live call → `call`.
+  - `afterBoard`: `ask` rows are `q2`, `q3` tagged `no_answer` with `memo: true`, `folded` holds `q1` with its quote and an `at` matching `/^\d\d:\d\d$/`; a journal `ASK` with `q2`'s words is not a second row; `asked` row tagged `no_answer`; `risks` has one `risk` and one `objection`; `facts` has the refuted check and the memo `differs` with `other` set; `after.removed = ["memo:q2"]` marks that row `removed`; without `memo_check`, a `resolved` plan item is in `folded` with no quote; `memoLine` reads "What was said on the call, checked against the memo." (EN).
+  - `afterSend`: `draft` → actions `["send_now", "hold"]`, two rules; `held` → `["send_now"]`, no rules; `sent` → no actions, channel lines `/E-mail: sent at \d\d:\d\d/`; `edited` → `["send_again"]`; `failed` → `["retry"]`; `draft` with `send_now` → "The report goes as soon as the final transcript is ready."; recipients for email + telegram `""` + twenty named "Example LLC" read "You receive it: e-mail owner@example.org, Telegram (Saved messages), a note in your CRM, record Example LLC. The other side does not receive the report."
+- [ ] **Step 2: Run** `node scripts/test-after-ui.cjs` and `node scripts/test-shell-ui.cjs`, expect FAIL (`afterBoard is not defined`).
+- [ ] **Step 3: Implement** the functions, the fixtures and the `viewFor` rule; translations for the keys the functions use (listed in Task 6) land here.
+- [ ] **Step 4: Run** both scripts, the Python suite and `scripts/test-call-ui.cjs`, expect PASS.
+- [ ] **Step 5: Commit** `MEETONTRACK-163: board, send state and view rule for After`.
+
+### Task 6: The After view
+
+**Files:**
+- Modify: `copilot/web/index.html` (`<section id="after" class="after" aria-labelledby="after-title" hidden>` after `#call`), `copilot/web/after.js`, `copilot/web/shell.js` (`renderShell` :330-355), `copilot/web/call.js` (`openCallPanel` :554), `copilot/web/screens.css`, `copilot/web/app.js` (translations), `scripts/after-fixtures.cjs`, `scripts/test-after-ui.cjs`, existing checks that assert the changed RU strings
+
+**Interfaces:**
+- DOM in `#after > .col`: `header.after-head` (`h2#after-title`, `p#after-meta`, `.to-links` with `button.ql#after-transcript` and `button.ql#after-chat`); `section#after-send.send` (`aria-live="polite"`: `p.after-headline`, `ul.chan` of channel lines, `p.after-rule` per rule, `p.to#after-to` with `button.ql#after-change`, `.row-act` with the action buttons); `.two` with two `label` + `textarea.edit` (`#after-summary`, `#after-next`, `maxlength="4000"`) and one `p.after-note`; `section#after-board.board` (`h3` `after.board`, `p.board-head` with `after.board_note` and `memoLine`, `.bcol` per lane with its `h4`, `ul` of `li.bitem`, the folded line as `button.ql` with `aria-expanded`).
+- Produces (`after.js`):
+  - `renderAfter(state)`: title `transcript.display_meeting || transcript.meeting`; `#after-meta` `after.meta` with the start date and time and `after.stopped` with the elapsed clock at the stop (`last_stop.stopped_at`, else `ended_at`), the clock of Call's `status.stopped`. Send block from `afterSend`: buttons `send_now` (secondary, POST `/api/after/send`, no `<kbd>`), `hold` (`.ql`, POST `/api/after/hold`), `send_again` (secondary, POST `/api/after/send-again`, with the `after.send_again_note` line above it), `retry` (secondary, same POST as send again) plus `.ql` `after.channel_settings` → `openDeliverySettings()`; `#after-change` → `openDeliverySettings()`. Every post sends `meeting_id: state.transcript.meeting_id`, then refreshes `/api/after`.
+  - Fields: label `after.summary` / `after.next_steps`, plus ` · ` `after.draft` when not `final`; `after.refining` as `.after-note` while not final, `after.fields_note` when final; `after.updated` beside the summary label in `showing`. `input` saves through POST `/api/after/edit` 1000 ms after the last keystroke. A poll never writes a field that has focus or an unsaved change.
+  - Board rows: tag, text, `from_memo` mark for memo rows, a quote line `after.quote` (quote, speaker, `at`) for answered and differing rows, `after.differs_call` and `after.differs_memo` for differs, and `button.ql` `after.remove` (POST `/api/after/remove {key, removed: true}`). A removed row shows `after.removed` and `after.bring_back` (POST with `removed: false`) in its place. Folded rows open under their line (`after.answered_n` / `after.confirmed_n` with the count). An empty lane says `after.empty`.
+  - Polling: while the view is `after`, GET `/api/after?meeting_id=` every 3 s into `window.afterData` and re-render; a 404 keeps `{send: {state: "draft"}}` and hides `#after-to`. Re-renders only when the signature (language, payload, board) changes.
+  - `#after-transcript` → `openCallPanel("transcript")`, `#after-chat` → `openCallPanel("chat")`.
+- Produces (`shell.js`, `call.js`, `screens.css`): `renderShell` shows `#after` in the After view and keeps `dataset.callPanel` in `call` and `after`; `#after` is hidden while a panel is open; every `body[data-view="call"]` panel rule of `screens.css` (:312-341) also applies to `after`; `body[data-view="after"]:not([data-call-panel]) .workspace { display: none }`. `openCallPanel` returns to `#after` on Escape and `#call-back` in After. Layout: header and send block side by side above 1100 px, the two fields in two columns, four lanes in a row; one column under 700 px; nothing clipped at 400 px.
+- Strings changed (RU only, the plan 3 decision): `speakers.saved`, `message.thinking`, `board.empty.incoming`, `transcript.empty_title` (and `index.html:282`), `transcript.failed` use "расшифровка" in place of "стенограмма"; `call.board_mine` becomes "Спросить у собеседника" / "Ask the other side" (spec column name, one board in both views).
+- i18n keys (RU / EN): `after.meta` "{day}, {time}." / "{day}, {time}."; `after.stopped` "Запись остановлена на {time}." / "Recording stopped at {time}."; `after.send.draft` "Отчет уйдет сам, когда будет готова итоговая расшифровка, обычно через 2-3 минуты." / "The report goes by itself once the final transcript is ready, usually in 2-3 minutes."; `after.send.send_now_pending` "Отчет уйдет, как только будет готова итоговая расшифровка." / "The report goes as soon as the final transcript is ready."; `after.send.preparing` "Отчет готовится." / "The report is being prepared."; `after.send.showing` "Итог уточнен по итоговой расшифровке. Отчет уйдет через 30 секунд." / "The summary is refined from the final transcript. The report goes in 30 seconds."; `after.send.changes` "Отчет ждет ваших правок и уйдет через 30 секунд после последней." / "The report waits for your changes and goes 30 seconds after the last one."; `after.send.sending` "Отчет отправляется." / "The report is being sent."; `after.send.held` "Отчет не уйдет сам. Он уйдет, только когда вы нажмете «Отправить сейчас»." / "The report will not go by itself. It goes only when you press Send now."; `after.send.sent` "Отчет отправлен." / "The report is sent."; `after.send.edited` "Вы изменили отчет после отправки." / "You changed the report after it was sent."; `after.send.failed` "Отчет дошел не везде." / "The report did not reach every channel."; `after.send.no_channels` "Отправка отчетов не настроена. Отчет сохранен на этом компьютере." / "Report delivery is not set up. The report is saved on this computer."; `after.rule.changes` "Правки итога, шагов или доски задерживают отправку на 30 секунд." / "Changes to the summary, the next steps or the board hold the report for 30 seconds."; `after.rule.keep` "Ваш текст уточненный итог не заменяет." / "The refined summary never replaces your text."; `after.to` "Получите вы: {list}. Собеседнику отчет не уходит." / "You receive it: {list}. The other side does not receive the report."; `after.to.email` "почта {to}" / "e-mail {to}"; `after.to.telegram` "Telegram ({to})"; `after.to.telegram_me` "Telegram (Избранное)" / "Telegram (Saved messages)"; `after.to.twenty` "заметка в CRM" / "a note in your CRM"; `after.to.twenty_named` "заметка в CRM, карточка {to}" / "a note in your CRM, record {to}"; `after.to.drive` "копия в Google Drive" / "a copy in Google Drive"; `after.change` "Изменить получателей" / "Change recipients"; `after.send_now` "Отправить сейчас" / "Send now"; `after.hold` "Не отправлять" / "Do not send"; `after.send_again` "Отправить еще раз" / "Send again"; `after.send_again_note` "Письмо и сообщение в Telegram придут повторно, заметка в CRM останется прежней." / "The e-mail and the Telegram message arrive a second time, the CRM note stays as it was."; `after.retry` "Повторить" / "Retry"; `after.channel_settings` "Проверить настройки отправки" / "Check the delivery settings"; `after.channel.email` "Почта" / "E-mail", `.telegram` "Telegram", `.twenty` "CRM", `.drive` "Google Drive"; `after.ch.sent` "{channel}: отправлено в {time}" / "{channel}: sent at {time}"; `after.ch.waiting` "{channel}: ждет" / "{channel}: waiting"; `after.ch.held` "{channel}: не отправляется" / "{channel}: not sending"; `after.ch.failed` "{channel}: не доставлено, следующая попытка в {time}" / "{channel}: not delivered, next try at {time}"; `after.ch.needs_choice` "{channel}: выберите карточку" / "{channel}: choose the record"; `after.summary` "Итог" / "Summary"; `after.next_steps` "Следующие шаги" / "Next steps"; `after.draft` "черновик" / "draft"; `after.updated` "обновлен по итоговой расшифровке" / "updated from the final transcript"; `after.refining` "Итог уточняется по итоговой расшифровке. Если начнете править, уточненная версия не заменит ваш текст." / "The summary is being refined from the final transcript. If you edit it, the refined version will not replace your text."; `after.fields_note` "Уйдет в отчет как написано." / "Goes into the report as written."; `after.board` "Доска" / "Board"; `after.board_note` "Уйдет в отчет, лишнее можно убрать." / "Goes into the report, remove what does not belong."; `after.memo_checked` "Что прозвучало на звонке, сверено с мемо." / "What was said on the call, checked against the memo."; `after.memo_waiting` "Сверка с мемо будет готова вместе с итоговой расшифровкой." / "The check against the memo comes with the final transcript."; `after.memo_failed` "Сверки с мемо нет: {reason}. Отчет уйдет без нее." / "No check against the memo: {reason}. The report goes without it."; `after.memo_reason.timeout` "ИИ не ответил вовремя" / "the AI did not answer in time", `.ai_no_answer` "ИИ не дал ответа" / "the AI gave no answer", `.ai_needs_choice` "ИИ не выбран в настройках" / "no AI is chosen in settings", `.too_long` "звонок слишком длинный для сверки" / "the call is too long to check", `.error` "сверка не удалась" / "the check failed"; `after.col_risks` "Риски и возражения" / "Risks and objections"; `after.col_facts` "Проверка фактов" / "Fact check"; `after.tag.no_answer` "Без ответа" / "No answer"; `.answered` "Отвечено" / "Answered"; `.differs` "Расходится" / "Differs"; `.risk` "Риск" / "Risk"; `.objection` "Возражение" / "Objection"; `.confirmed` "Подтверждено" / "Confirmed"; `after.from_memo` "Из мемо" / "From the memo"; `after.answered_n` "Отвечено: {n}" / "Answered: {n}"; `after.confirmed_n` "Подтверждено: {n}" / "Confirmed: {n}"; `after.quote` "«{quote}», {speaker}, {time}" / "“{quote}”, {speaker}, {time}"; `after.differs_call` "{speaker}, на этом звонке, {time}: {quote}" / "{speaker}, on this call, {time}: {quote}"; `after.differs_memo` "{source}, мемо: {memo}" / "{source}, memo: {memo}"; `after.remove` "Убрать" / "Remove"; `after.removed` "Убрано из отчета." / "Removed from the report."; `after.bring_back` "Вернуть" / "Bring back"; `after.empty` "Пусто" / "Nothing here"; `after.open_transcript` "Открыть расшифровку" / "Open the transcript"; `after.chat` reuses `call.ask_placeholder`.
+
+- [ ] **Step 1: Write the failing tests** (`test-after-ui.cjs`). Generic checks on every fixture at 1440 and 400 px, light and dark, RU and EN: no horizontal scroll; no `[ёЁ]` in RU text, no `—`, no `!` and no `стенограм` in the visible text of `#after` and `.topbar`; no `pageerror`; `dialog[open]` count stays 0 after every action below; `.workspace` hidden unless a panel is open; no `button.primary` in `#after`; no `kbd` in `#after-send`. Interaction checks at 1440 px: `draft` (headline and both rules, `#after-to` names `owner@example.org` and says the other side does not receive it, Send now posts `/api/after/send {meeting_id: "m1"}`, Do not send posts `/api/after/hold`); `held` (only Send now); `refining` (typing "Pilot starts in March." in `#after-summary` posts `/api/after/edit {field: "summary"}` after `page.clock.runFor(1100)`, the second poll's different summary does not replace it, focus and caret stay); `showing` (summary label carries `after.updated`); `sent` (one line per channel with `\d\d:\d\d`, no actions); `edited` (Send again with its note, posts `/api/after/send-again`); `failed` (Retry and Check the delivery settings, which opens `#delivery-settings`); `removed` (the row reads "Removed from the report." with Bring back, which posts `{removed: false}`); `answered_open` (the folded line has `aria-expanded="false"`, a click shows `q1` with its quote and a `MM:SS` time, `aria-expanded="true"`); `no_memo` (no memo line, `ask` lane has only live asks); `memo_failed` (memo line names the reason); `no_channels` (headline and no actions); `just_stopped` (the view stays After through the 404 and then shows `draft`; meta reads "Recording stopped at 42:10."); `transcript_open` (`#after-transcript` shows `.transcript-pane`, `#after` hidden, Escape returns with focus on `#after-transcript`). At 400 px for `draft`, `sent`, `answered_open`: one column, the send block before the fields, every button inside the viewport. RU strings: `translations.ru["speakers.saved"]` and `translations.ru["message.thinking"]` contain "расшифровк".
+- [ ] **Step 2: Run** `node scripts/test-after-ui.cjs`, expect FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Update the existing checks**: run every `scripts/*.cjs`; a check that fails only on the changed RU strings or the renamed column gets the new text, nothing else. Run all scripts and the Python suite, expect PASS.
+- [ ] **Step 5: Commit** `MEETONTRACK-163: the After view`.
+
+### Task 7: Render for critique
+
+**Files:**
+- Create: `scripts/render-after-critique.cjs`
+
+**Interfaces:**
+- Consumes: `states`, `open` from `scripts/after-fixtures.cjs`.
+- Produces: `node scripts/render-after-critique.cjs <out-dir>` writes `<state>-<width>-<scheme>-<lang>.png` for `just_stopped`, `draft`, `refining`, `showing`, `changes`, `held`, `sent`, `edited`, `failed`, `no_channels`, `no_memo`, `memo_failed`, `removed`, `answered_open`, `transcript_open` at 1440, 1024 and 400 px, light and dark, RU and EN (fixture data in the page's language), full page, plus `index.html` and `manifest.json`, the shape of `scripts/render-call-critique.cjs`: a page per width, opened states opened before the shot (`answered_open` clicks the folded line, `transcript_open` clicks `#after-transcript`), reduced motion, a page that fails to load is a manifest entry with `failed`, exit 1 at the end on a failure, a page error or a horizontal scroll. It does not run the critique.
+
+- [ ] **Step 1:** Run it into a scratch dir; expect 180 PNG files (15 fixtures x 12) and a manifest of 180 entries, exit 0.
+- [ ] **Step 2: Commit** `MEETONTRACK-163: render the After view for critique`.
+- [ ] **Step 3:** The orchestrator hands `index.html` of that run to an independent Impeccable critique; the view passes at 30/40 or more with no P0 or P1. Findings go back as fix tasks against this plan.
+
+---
+
+## Decisions and spec conflicts resolved here
+
+- **Send now before the final transcript.** The spec offers Send now in every state before sending; MEETONTRACK-94 forbids sending live text. Send now skips the 30 s pauses and the hold, and still waits for the final transcript; the send block says so (`after.send.send_now_pending`).
+- **"Send again updates the existing CRM note".** `twenty_crm` can only create notes. Send again resends e-mail and Telegram (Drive already replaces its copy) and leaves the CRM note as it was; the note under the button says exactly that. Updating the note is deferred.
+- **One word for unanswered.** The spec mockup has "Open" in one column and "No answer" in the other; both columns tag "No answer" (critique P3).
+- **Column names.** Call's "Спросить у клиента" becomes the spec's generic "Спросить у собеседника" / "Ask the other side" in both views; "Asked of you" keeps Call's key.
+- **Times.** Things said on the call carry elapsed call time, like every time in Call (plan 3); the stop is "Recording stopped at 42:10", the clock Call's bar showed. Delivery and retry times are wall clock and always follow "at".
+- **"The refreshed summary stays visible for 30 s".** The server holds the first send 30 s after the report is first made from the final transcript (`ready_at`); the page marks the summary as updated during that time. No countdown is shown (spec: a plain state, not a timer).
+- **"The board goes into the report as shown".** The report keeps its own sections (journal by category, fact checks, the new memo check); a removed item is absent from all of them. The heading says the board goes into the report, not "as shown", because the report is not laid out as four columns; a board-shaped report section is deferred.
+- **Edits are text.** The summary and next steps are edited as plain lines; each non-empty line becomes one item of the report's list. Clearing a field returns it to the app's text.
+
+## Deferred
+
+- **`participants.json` from calendar attendees and the 90-day backfill** (spec After, Acceptance): names in the report and the CRM note, invisible in the demo; one task each, next after the demo. Plan 2's past-report matching keeps falling back to title words until then.
+- **"How recipients will see it"** (the rendered e-mail and Telegram message): needs a renderer for each channel's message.
+- **CRM note updated on Send again**: needs an update call in `twenty_crm` (see above).
+- **A failed channel retried after one minute**: the existing retry runs 15 minutes after a failed send; the row shows the real next try.
+- **A board-shaped section in the report**, laid out like the four columns on screen.
+- **A key for Send now**, "Copy the summary" and Resume recording from After (critique 8 alternative, plan 3 deferred).
