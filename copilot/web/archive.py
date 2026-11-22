@@ -35,6 +35,7 @@ from private_dirs import private_dir
 from canonical_transcript import canonical_segments
 from meeting_boundaries import interval_contains
 from live_translation import echoes
+from after_state import AfterState
 
 
 def _json(path: Path, fallback: Any) -> Any:
@@ -188,6 +189,8 @@ class MeetingArchive:
         self.delivery_settings = DeliverySettings(config_root, self.lock)
         self._index_state = threading.local()
         self.speaker_edits = SpeakerEdits(archive_root)
+        # The person's hold, send now, edits and removals per report (MEETONTRACK-163).
+        self.after = AfterState(reports_root)
         self.delivery_monitor = DeliveryHealth(
             reports_root, config_root / "delivery-health.json", self.delivery_retry_days, archive_root
         )
@@ -552,7 +555,7 @@ class MeetingArchive:
             try:
                 # A finished analysis rebuild changes no file of the meeting, yet its report may go now.
                 version = (path.stat().st_mtime_ns, _mtime(self.reports_root / meeting_id / "report.json"),
-                           self.analysis_pending(meeting_id))
+                           self.analysis_pending(meeting_id), _mtime(self.reports_root / meeting_id / "after.json"))
                 if self._history_checked.get(meeting_id) == version:
                     continue
                 # Remember "nothing to do" only once the 2-minute settling time is long over.
@@ -1032,6 +1035,12 @@ class MeetingArchive:
         if canonical.get("explicit_boundary"):
             canonical["audio_file"] = ""
             canonical["audio_note"] = "Original continuous recording is local only; this meeting uses the indicated audio range."
+        # The person's edits after the call: what the screen shows is what is sent (MEETONTRACK-163).
+        after = self.after.read(canonical["meeting_id"])
+        removed = set(after["removed"])
+        canonical["journal"] = [item for item in canonical["journal"] if f"journal:{item.get('id')}" not in removed]
+        canonical["fact_checks"] = [item for item in canonical["fact_checks"] if f"fact:{item.get('id')}" not in removed]
+        canonical["after_edits"] = {key: after[key] for key in ("summary", "next_steps", "removed") if after[key]}
         return canonical
 
     @staticmethod
@@ -1229,7 +1238,16 @@ class MeetingArchive:
                                                             deliver=deliver, on_request=on_request,
                                                             pdf_error=str(pdf_error or ""))
                 ready = self._ready_for_delivery(detail)
-                sending = deliver and not meta.get("delivery_on_request") and ready
+                identity = detail["meeting_id"]
+                if ready and not meta.get("ready_at"):
+                    # One time source with the gate: AfterState's clock (MEETONTRACK-163).
+                    meta["ready_at"] = datetime.fromtimestamp(self.after.clock()).astimezone().isoformat()
+                ready_at = _date(str(meta.get("ready_at") or ""))
+                ready_epoch = ready_at.timestamp() if ready_at else None
+                gate = self.after.gate(identity, ready_epoch)
+                sending = deliver and not meta.get("delivery_on_request") and ready and gate["open"]
+                if ready and not gate["open"]:
+                    self.after.blocked(identity, ready_epoch)
                 # ponytail: sending holds the archive lock (settings and the Google
                 # profile must not change mid-send); a slow Drive upload still blocks it.
                 if sending:
@@ -1302,7 +1320,8 @@ class MeetingArchive:
             # delivered email or Telegram message must never be resent.
             previous_delivery["drive_status"] = "pending"
         meta = {
-            **{key: previous_report[key] for key in ("last_delivery_request", "last_delivery_result", "mail_error") if key in previous_report},
+            **{key: previous_report[key] for key in ("last_delivery_request", "last_delivery_result", "mail_error",
+                                                     "ready_at", "memo_check") if key in previous_report},
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "html": f"/api/archive/report/{detail['meeting_id']}/index.html",
             "pdf": f"/api/archive/report/{detail['meeting_id']}/meeting-report.pdf" if pdf_path else "",
@@ -1369,6 +1388,11 @@ class MeetingArchive:
             )
             if not pending:
                 continue
+            ready_at = _date(str(meta.get("ready_at") or ""))
+            ready_epoch = ready_at.timestamp() if ready_at else None
+            if not self.after.gate(path.parent.name, ready_epoch)["open"]:
+                self.after.blocked(path.parent.name, ready_epoch)  # The delivery loop wakes it when it opens.
+                continue
             detail = self.report_detail(path.parent.name)
             if detail and not self.report_matches(detail, meta):
                 # Made from older text (live text, or before a late fact check): the next
@@ -1389,6 +1413,7 @@ class MeetingArchive:
                         # the retry. Re-check next scan instead of resending it.
                         continue
                     meta.update(self.deliver(detail, meta, previous=meta))
+                    meta.setdefault("delivery_started_at", now.isoformat(timespec="seconds"))
                     meta["delivery_checked_at"] = now.isoformat(timespec="seconds")
                     meta["delivery_retry_at"] = (now + timedelta(minutes=15)).isoformat(timespec="seconds")
                     _atomic_json(path, meta)
@@ -1697,6 +1722,8 @@ class MeetingArchive:
         settled = [item for item in detail.get("fact_checks", []) if item.get("status") != "checking"]
         if settled:  # absent when empty, so reports made before fact checks keep their signature
             material["fact_checks"] = settled
+        if detail.get("after_edits"):  # likewise: unedited reports keep their signature
+            material["after"] = detail["after_edits"]
         return hashlib.sha256(
             json.dumps(material, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
@@ -2402,6 +2429,47 @@ class MeetingArchive:
                         f'<p>{esc(item.get("claim"))}</p>{fact}{source_html}</article>')
         return "".join(rows)
 
+    @staticmethod
+    def _edited_lines(detail: dict, field: str) -> list[str] | None:
+        text = (detail.get("after_edits") or {}).get(field)
+        return [line.strip() for line in str(text).splitlines() if line.strip()][:10] if text else None
+
+    @staticmethod
+    def _journal_groups(detail: dict) -> dict[str, list[dict]]:
+        groups: dict[str, list[dict]] = {}
+        for item in detail.get("journal", []):
+            groups.setdefault(str(item.get("category") or "OTHER"), []).append(item)
+        return groups
+
+    def report_summary(self, detail: dict) -> list[str]:
+        """The report's "Суть звонка" lines; the After screen shows these same lines (MEETONTRACK-163)."""
+        edited = self._edited_lines(detail, "summary")
+        if edited is not None:
+            return edited
+        groups = self._journal_groups(detail)
+        brief = []
+        for category in ("DECISION", "FACT", "COMMITMENT"):
+            for item in groups.get(category, [])[-2:]:
+                if category == "FACT" and re.search(r"(?:На экране|Источник:\s*OCR)", str(item.get("text") or ""), re.IGNORECASE):
+                    continue
+                line = self._brief_line(item.get("text"), 240)
+                if line and line not in brief:
+                    brief.append(line)
+        return brief[:3]
+
+    def report_next_steps(self, detail: dict) -> list[str]:
+        """The report's "Следующие шаги" lines; the After screen shows these same lines."""
+        edited = self._edited_lines(detail, "next_steps")
+        if edited is not None:
+            return edited
+        groups = self._journal_groups(detail)
+        followups = []
+        for item in [*groups.get("COMMITMENT", []), *groups.get("FACT", [])]:
+            line = self._brief_line(self._followup_sentence(item.get("text")), 220)
+            if line and line not in followups:
+                followups.append(line)
+        return followups[:5]
+
     def _report_html(self, detail: dict, frames: list[dict]) -> str:
         esc = lambda value: html.escape(str(value or ""))
         def provenance(item):
@@ -2417,9 +2485,7 @@ class MeetingArchive:
         started = _date(detail["started_at"])
         date_label = started.astimezone().strftime("%d.%m.%Y %H:%M") if started else "—"
         duration = _fmt_seconds(detail["duration_seconds"])
-        groups: dict[str, list[dict]] = {}
-        for item in detail["journal"]:
-            groups.setdefault(str(item.get("category") or "OTHER"), []).append(item)
+        groups = self._journal_groups(detail)
 
         labels = {
             "FACT": "Факты", "CONTRADICTION": "Противоречия", "HISTORY": "История",
@@ -2464,21 +2530,8 @@ class MeetingArchive:
                 '<li>Вы — локальный микрофон.</li><li>Другие голоса — имена не подтверждены записью или чатом.</li>'
                 if microphone_seen else '<li>Голоса есть, но имена участников не подтверждены записью или чатом.</li>'
             )
-        brief = []
-        for category in ("DECISION", "FACT", "COMMITMENT"):
-            for item in groups.get(category, [])[-2:]:
-                if category == "FACT" and re.search(r"(?:На экране|Источник:\s*OCR)", str(item.get("text") or ""), re.IGNORECASE):
-                    continue
-                line = self._brief_line(item.get("text"), 240)
-                if line and line not in brief:
-                    brief.append(line)
-        summary_items = "".join(f"<li>{esc(line)}</li>" for line in brief[:3])
-        followups = []
-        for item in [*groups.get("COMMITMENT", []), *groups.get("FACT", [])]:
-            line = self._brief_line(self._followup_sentence(item.get("text")), 220)
-            if line and line not in followups:
-                followups.append(line)
-        followup_items = "".join(f"<li>{esc(line)}</li>" for line in followups[:5])
+        summary_items = "".join(f"<li>{esc(line)}</li>" for line in self.report_summary(detail))
+        followup_items = "".join(f"<li>{esc(line)}</li>" for line in self.report_next_steps(detail))
         topics = []
         if (not self._is_generic_title(detail["title"])
                 and not re.match(r"^(?:Meet|Zoom)\s*[-—]\s*[a-z]{3}-[a-z]{4}-[a-z]{3}$", detail["title"], re.IGNORECASE)):

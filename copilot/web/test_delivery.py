@@ -10,6 +10,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 from archive import MeetingArchive
+from functools import partial
+from after_state import AfterState
+
+
+def setUpModule():
+    # Written before the 30 s pause in which After shows a ready report (MEETONTRACK-163);
+    # test_after_archive covers the pause, these keep testing their own rule.
+    patcher = patch("archive.AfterState", partial(AfterState, pause=0))
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
 
 
 class DeliveryTests(unittest.TestCase):

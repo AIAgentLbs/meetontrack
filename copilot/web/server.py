@@ -3023,14 +3023,28 @@ def archive_loop() -> None:
         TRANSCRIPT.stop.wait(10)
 
 
+# Set to check the send gate now instead of within 5 s (MEETONTRACK-163).
+DELIVERY_WAKE = threading.Event()
+
+
 def delivery_loop() -> None:
-    """Retry missing reports independently of live capture and report creation."""
+    """Retry missing reports independently of live capture and report creation.
+
+    Every 5 s the reports whose send gate just opened go; every 60 s all are scanned.
+    """
+    last_full = None
     while not TRANSCRIPT.stop.is_set():
         try:
-            ARCHIVE.retry_pending_deliveries()
+            due = ARCHIVE.after.due()
+            if due:
+                ARCHIVE.retry_pending_deliveries(meeting_ids=due)
+            if last_full is None or time.monotonic() - last_full >= 60:
+                last_full = time.monotonic()
+                ARCHIVE.retry_pending_deliveries()
         except Exception as exc:
             print(f"meeting delivery retry failed: {exc}", flush=True)
-        TRANSCRIPT.stop.wait(60)
+        DELIVERY_WAKE.wait(5)
+        DELIVERY_WAKE.clear()
 
 
 def delivery_health_loop() -> None:
