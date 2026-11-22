@@ -540,6 +540,120 @@ async function interactions(browser) {
   }
 }
 
+// The top bar during a call (Task 7): Recording with the clock, whether each side is heard, the last line heard,
+// Stop recording and its undo window. Fixed clocks keep the countdown and the timer exact.
+const beatTexts = page => page.locator('#call-beats .beat').allTextContents();
+async function callBar(browser) {
+  const stopKey = page => page.evaluate(() => (MAC ? 'Meta+Shift+E' : 'Alt+Shift+E'));
+  let page = await callPage(browser, 'hint', { at: Date.now() });
+  assert.equal(await text(page, '#call-status-text'), 'Recording');
+  assert.equal(await page.$eval('#call-status-text', node => node.classList.contains('rec')), true);
+  const timer = await text(page, '#call-timer');
+  assert.match(timer, /^\d\d:\d\d$/);
+  await page.clock.runFor(1100);
+  assert.notEqual(await text(page, '#call-timer'), timer, 'the clock runs');
+  assert.deepEqual(await beatTexts(page), ['You: heard', 'Other side: heard']);
+  assert.equal(await page.locator('#call-beats .bars[aria-hidden="true"]').count(), 2);
+  const heard = await page.$eval('#call-heard', node => ({ text: node.textContent, height: node.getBoundingClientRect().height,
+    line: parseFloat(getComputedStyle(node).lineHeight) || parseFloat(getComputedStyle(node).fontSize) * 1.5 }));
+  assert.match(heard.text, /^Transcript: /);
+  assert.ok(heard.height < heard.line * 1.5, `one line: ${heard.height} / ${heard.line}`);
+  // Stop recording sits after the status, right before Menu.
+  const order = await page.evaluate(() => {
+    const all = [...document.querySelectorAll('.topbar *')];
+    const stop = document.getElementById('call-stop');
+    return { afterStatus: all.indexOf(stop) > all.indexOf(document.getElementById('call-status')),
+      next: stop.nextElementSibling?.id };
+  });
+  assert.deepEqual(order, { afterStatus: true, next: 'menu-button' });
+  assert.equal(await text(page, '#call-stop .lbl-l'), 'Stop recording');
+  assert.equal(await page.locator('#call-stop kbd').isVisible(), true, 'the key shows at 1440 px');
+  // One click stops: no dialog.
+  await page.click('#call-stop');
+  await expectPost(page, '/api/recording/stop', { meeting_id: 'm1' });
+  assert.equal(await page.locator('dialog[open]').count(), 0);
+  page.api.posts.length = 0;
+  await page.waitForFunction(() => !document.getElementById('call-stop').disabled);
+  await page.keyboard.press(await stopKey(page));
+  await expectPost(page, '/api/recording/stop', { meeting_id: 'm1' });
+  // The menu lists Stop and the ask field's key.
+  assert.match(await page.locator('#menu-shortcuts').textContent(), /Stop recording.*A question about this call|A question about this call.*Stop recording/s);
+  // "/" outside a field goes to the ask field and is not typed; inside the field it is typed.
+  await page.locator('body').click({ position: { x: 5, y: 300 } });
+  await page.keyboard.press('/');
+  assert.equal(await focused(page), '#call-question');
+  assert.equal(await page.inputValue('#call-question'), '');
+  await page.keyboard.press('/');
+  assert.equal(await page.inputValue('#call-question'), '/');
+  await page.fill('#call-question', '');
+  // A layout that needs Shift for "/" (F20).
+  await page.locator('#call-name').click();
+  await page.evaluate(() => document.activeElement.blur());
+  await page.evaluate(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '/', code: 'Digit7', shiftKey: true, bubbles: true, cancelable: true })));
+  assert.equal(await focused(page), '#call-question');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+
+  // Under 1100 px the key label goes.
+  page = await callPage(browser, 'hint', { width: 1024 });
+  assert.equal(await page.locator('#call-stop').isVisible(), true);
+  assert.equal(await page.locator('#call-stop kbd').isVisible(), false, 'no key at 1024 px');
+  await page.context().close();
+
+  // The other side not heard: the bar keeps Recording and says which side, never contradicting the feed card.
+  for (const width of [1440, 400]) {
+    page = await callPage(browser, 'other_lost', { width });
+    assert.equal(await text(page, '#call-status-text'), 'Recording', `${width}`);
+    assert.equal(await page.$eval('#call-status-text', node => node.className), 'status-text rec');
+    assert.deepEqual(await beatTexts(page), ['You: heard', 'Other side: not heard']);
+    assert.equal(await page.locator('#call-beats .beat').nth(1).evaluate(node => node.classList.contains('lost')), true);
+    assert.equal(await visible(page, '#call-beats'), true);
+    assert.match(await text(page, '#call-problem .problem p'), /^You are heard\./);
+    assert.doesNotMatch(await page.locator('.topbar').innerText(), /not recording|stopped/i);
+    if (width === 400) assert.equal(await text(page, '#call-stop .lbl-s'), 'Stop');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, `${width}: scroll`);
+    await page.context().close();
+  }
+
+  // The undo window: when it stopped and the seconds left; Resume, no Stop and no heartbeat.
+  page = await callPage(browser, 'stopped', { at: Date.now() });
+  const stopped = await text(page, '#call-status-text');
+  assert.match(stopped, /^Recording stopped at \d\d:\d\d\. The report opens in \d+ s\.$/);
+  const seconds = Number(stopped.match(/in (\d+) s/)[1]);
+  await page.clock.runFor(2000);
+  assert.ok(Number((await text(page, '#call-status-text')).match(/in (\d+) s/)[1]) < seconds, 'the countdown falls');
+  assert.equal(await page.$eval('#call-status-text', node => node.className), 'status-text');
+  assert.equal(await visible(page, '#call-stop'), false);
+  assert.equal(await visible(page, '#call-live'), false);
+  assert.equal(await text(page, '#call-status-action'), 'Resume recording');
+  await page.click('#call-status-action');
+  await expectPost(page, '/api/recording/resume', { meeting_id: 'm1' });
+  await page.context().close();
+
+  // Too late to resume: plain words, never the code (F6).
+  page = await callPage(browser, 'stopped');
+  page.api.responses['/api/recording/resume'] = { status: 409, json: { ok: false, error: 'too_late' } };
+  await page.click('#call-status-action');
+  await page.waitForFunction(() => document.getElementById('call-status-text').textContent === 'The recording has already stopped');
+  assert.doesNotMatch(await page.locator('.topbar').innerText(), /too_late/);
+  await page.context().close();
+
+  // Stopped for good (a recorder that cannot pause): the time only, no Resume, no Stop.
+  page = await callPage(browser, 'stopped_final');
+  assert.match(await text(page, '#call-status-text'), /^Recording stopped at \d\d:\d\d\.$/);
+  assert.equal(await visible(page, '#call-status-action'), false);
+  assert.equal(await visible(page, '#call-stop'), false);
+  await page.context().close();
+
+  // No capture marker and nobody heard yet: silence is never "not heard".
+  page = await callPage(browser, 'windows_no_tracks');
+  page.api.fixture.state.transcript.segments = [];
+  await refresh(page);
+  assert.doesNotMatch((await beatTexts(page)).join(' '), /not heard/);
+  assert.deepEqual(await beatTexts(page), ['You', 'Other side']);
+  await page.context().close();
+}
+
 async function expectPost(page, path, body) {
   for (let tries = 0; tries < 50 && !posts(page, path).length; tries++) await page.waitForTimeout(20);
   assert.deepEqual(posts(page, path), [body]);
@@ -551,6 +665,7 @@ async function expectPost(page, path, body) {
     await functions(browser);
     await fixtures(browser);
     await interactions(browser);
+    await callBar(browser);
     await everyFixture(browser);
     console.log('call UI checks passed');
   } finally {

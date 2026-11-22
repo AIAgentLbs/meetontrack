@@ -315,6 +315,37 @@ function renderCall(state) {
   });
 }
 
+// The bar during a live call: the clock, whether each side is heard (from the same heartbeat as the feed's problem,
+// so the two never disagree) and the last line heard. Hidden when the call is not live or Stop was pressed (F16).
+const CALL_BEAT_WORDS = { heard: "call.heard", not_heard: "call.not_heard", checking: "call.checking" };
+function renderCallBar(state, now) {
+  const live = isLive(state, now) && callStatus(state, window.agendaData, window.permissionsData, now).kind !== "stopped";
+  $("call-live").hidden = !live;
+  if (!live) return;
+  const clock = callClock(state.recording_health?.capture?.started_at || state.transcript?.started_at, now);
+  if ($("call-timer").textContent !== clock) $("call-timer").textContent = clock;
+  const beat = heartbeat(state, now);
+  callPart("call-beats", ["you", "other"].map(side => [side, beat[side].state, beat[side].speaking]), sides => sides.map(([side, heard, speaking]) => {
+    const node = textNode("span", `beat${heard === "not_heard" ? " lost" : ""}`, "");
+    const bars = textNode("span", `bars${speaking ? "" : " quiet"}`, "");
+    bars.setAttribute("aria-hidden", "true");
+    bars.append(...[0, 1, 2].map(() => document.createElement("i")));
+    node.append(bars, t(`call.${side}`));
+    if (CALL_BEAT_WORDS[heard]) node.append(": ", textNode("b", "", t(CALL_BEAT_WORDS[heard])));
+    return node;
+  }));
+  const phrase = lastPhrase(state);
+  const line = phrase ? t("call.last_phrase").replace("{text}", () => phrase) : ""; // a function: "$&" in speech stays as said
+  if ($("call-heard").textContent !== line) $("call-heard").textContent = line;
+  $("call-heard").hidden = !line;
+}
+// The clock ticks every second; while stopped the whole bar does, for the countdown.
+setInterval(() => {
+  if (window.appState === undefined) return;
+  if (currentStatus().kind === "stopped") renderShell();
+  else renderCallBar(window.appState, Date.now());
+}, 1000);
+
 // A source with nothing else to open shows Where this comes from only when its line is cut. Measured after every
 // render and on resize; an open source stays open.
 function callFitWhere() {

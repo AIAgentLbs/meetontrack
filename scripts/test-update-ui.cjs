@@ -37,7 +37,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
           journal: [], frames: [], meeting_chat: [], project: {}} : {ok: true}});
       }
       const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-      if (!['index.html', 'app.js', 'updates.js', 'styles.css', 'screens.css', 'home.js', 'shell.js'].includes(file)) return route.abort();
+      if (!['index.html', 'app.js', 'updates.js', 'styles.css', 'screens.css', 'home.js', 'call.js', 'shell.js'].includes(file)) return route.abort();
       const type = file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html';
       return route.fulfill({contentType: type, body: await fs.readFile(path.join(root, file))});
     });

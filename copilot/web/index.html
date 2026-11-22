@@ -18,6 +18,11 @@
       </nav>
       <div class="status" id="call-status">
         <span class="status-text" id="call-status-text" aria-live="polite"></span>
+        <span class="call-live" id="call-live" hidden>
+          <span class="timer" id="call-timer"></span>
+          <span class="beats" id="call-beats"></span>
+          <span class="heard-line" id="call-heard" hidden></span>
+        </span>
         <span class="status-actions">
           <button id="call-status-action" type="button" hidden></button>
           <button class="ql" id="call-status-help" type="button" data-i18n="action.how_to_fix" hidden>Как исправить</button>
@@ -26,6 +31,7 @@
       <span class="spacer"></span>
       <div class="tools">
         <button class="delivery-alert" id="delivery-alert" type="button" aria-haspopup="dialog" hidden></button>
+        <button id="call-stop" type="button" aria-label="Остановить запись" data-i18n-aria-label="action.stop" hidden><span class="lbl-l" data-i18n="action.stop">Остановить запись</span><span class="lbl-s" data-i18n="action.stop_short">Остановить</span> <kbd aria-hidden="true"></kbd></button>
         <button id="menu-button" type="button" data-i18n="shell.menu" aria-haspopup="menu" aria-expanded="false" aria-controls="app-menu">Меню</button>
         <div class="menu" id="app-menu" role="menu" aria-labelledby="menu-button" hidden>
           <button class="narrow" id="menu-nav-home" type="button" role="menuitem" data-i18n="shell.home">Главная</button>

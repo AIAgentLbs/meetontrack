@@ -39,6 +39,30 @@ body:has(#archive-dialog[data-mode="library"]:not([hidden])) #home { display: no
 .topbar .rec { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; }
 .topbar .rec::before { content: ""; flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
 .topbar .status-text.fail { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* A live call: the clock, whether each side is heard and, under them, the last line heard. The bars move only while
+   that side speaks; a side not heard has flat bars and its word in the error colour. */
+.topbar .status:has(> #call-live:not([hidden])) { flex: 1 1 auto; flex-wrap: wrap; row-gap: 0; padding-block: 6px; }
+#call-live:not([hidden]) { display: contents; }
+.timer { font-variant-numeric: tabular-nums; font-weight: 600; }
+.beats { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 14px; }
+.beat { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.beat b { font-weight: 600; }
+.bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.bars i { width: 3px; height: 9px; background: var(--accent); transform-origin: bottom; }
+.bars i:nth-child(2) { height: 14px; }
+.bars i:nth-child(3) { height: 6px; }
+.bars:not(.quiet) i { animation: call-beat 0.8s ease-in-out infinite alternate; }
+.bars:not(.quiet) i:nth-child(2) { animation-delay: -0.3s; }
+.bars:not(.quiet) i:nth-child(3) { animation-delay: -0.55s; }
+.bars.quiet i { height: 4px; }
+.beat.lost .bars i { height: 2px; background: var(--danger); animation: none; }
+.beat.lost b { color: var(--danger); }
+@keyframes call-beat { from { transform: scaleY(0.35); } to { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) { .bars i { animation: none !important; } }
+.heard-line { contain: inline-size; flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; line-height: 1.5; color: var(--muted); }
+#call-stop { flex-shrink: 0; }
+.lbl-s { display: none; }
 /* A narrow window shrinks the status, never Menu or the delivery pill: the pill is a few words and is never cut. */
 .tools { position: relative; display: flex; align-items: center; gap: 16px; min-width: 0; }
 #menu-button { flex-shrink: 0; }
@@ -260,7 +284,7 @@ body[data-view="call"]:not([data-call-panel="notes"]):not([data-call-panel="chat
 
 /* Window narrower than 1100 px: no key labels in the bar; the memo button keeps ↵, filled or outlined. */
 @media (max-width: 1100px) {
-  .topbar .status kbd, .ask-field kbd, .dock kbd { display: none; }
+  .topbar .status kbd, #call-stop kbd, .ask-field kbd, .dock kbd { display: none; }
   .ask-field input { padding-right: 12px; }
 }
 /* Up to 820 px the page scrolls as a whole (styles.css): the call still fills the window, and the dock stays at its bottom. */
@@ -291,6 +315,14 @@ body[data-view="call"]:not([data-call-panel="notes"]):not([data-call-panel="chat
   .status-actions { grid-area: action; flex-wrap: wrap; max-width: 100%; margin-top: 6px; }
   #call-status-action { max-width: 100%; white-space: normal; text-align: left; }
   .topbar .delivery-alert { grid-area: alert; max-width: 100%; white-space: normal; }
+  /* A live call: Recording, Stop and Menu on one row, the clock and both sides under them, then the last line heard. */
+  .topbar:has(#call-stop:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "text stop menu" "live live live" "action action action" "alert alert alert"; padding-block: 6px; }
+  #call-stop { grid-area: stop; }
+  #call-live:not([hidden]) { grid-area: live; display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; width: 100%; min-width: 0;
+    font-size: 14px; }
+  .lbl-l { display: none; }
+  .lbl-s { display: inline; }
   .home .by-wide { display: none; }
   .home .by-narrow { display: inline; }
   .topbar .menu { right: 16px; }

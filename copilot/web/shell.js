@@ -25,7 +25,9 @@ function notRecordingReason(state, now = Date.now()) {
   const capture = health.capture?.state;
   if (capture && capture !== "inactive") {
     if (!recordingFresh(health, now)) return "stale";
-    return capture === "paused" || capture === "stalled" ? capture : "";
+    // One stalled side is still a recording: its beat and the feed's problem say which side (F19).
+    if (capture === "stalled") return (health.capture.tracks || []).every(track => track.state === "stalled") ? "stalled" : "";
+    return capture === "paused" ? capture : "";
   }
   // No capture marker (Windows): the recorder's own fresh status, read while the server still answers.
   if (stateConnectionFailed) return "stale";
@@ -57,6 +59,18 @@ function openView(view) {
 // A permission the platform cannot read ("unknown") shows nothing; Start recording never shows without a microphone.
 function callStatus(state, agenda, permissions, now = Date.now()) {
   const action = (id, primary = true) => ({ id, label: t(`action.${id}`), primary });
+  // Stop recording pressed for this call: the undo window, then the final stop until the recorder goes inactive.
+  // A recorder that cannot pause stops at once and reaches the page only as last_stop (no Resume).
+  const control = state?.recording_control || {};
+  const meeting = state?.transcript?.meeting_id;
+  const stopping = control.stopping;
+  if (stopping && stopping.meeting_id === meeting) {
+    const n = Math.max(0, Math.ceil((Date.parse(stopping.until) - now) / 1000));
+    return { kind: "stopped", text: t("status.stopped", { time: homeClock(stopping.stopped_at), n }), action: action("resume", false) };
+  }
+  if (!stopping && isLive(state, now) && control.last_stop?.meeting_id === meeting) {
+    return { kind: "stopped", text: t("status.stopped_final", { time: homeClock(control.last_stop.stopped_at) }), action: null };
+  }
   if (stateConnectionFailed && !isLive(state, now)) return { kind: "disconnected", text: t("status.disconnected"), action: null };
   if (isLive(state, now)) {
     const reason = notRecordingReason(state, now);
@@ -95,9 +109,15 @@ const STATUS_POSTS = {
   open_call_audio: ["/api/permissions/open", { which: "call_audio" }],
   open_recorder: ["/api/getting-started/open-recorder", {}],
   start: ["/api/getting-started/start-recording", {}],
+  // Recording control names the call shown on the page (contract "Recording control"): a stale tab stops nothing else.
+  stop: ["/api/recording/stop", {}],
+  resume: ["/api/recording/resume", {}],
 };
+// The server's own codes for Stop and Resume, in plain words (F6); anything else goes through plainError.
+const STATUS_ERRORS = new Set(["meeting_changed", "too_late", "stop_failed", "resume_failed"]);
 const MAC = /Mac/.test(navigator.platform);
 const RECORD_KEY = MAC ? "⌘⇧R" : "Alt+Shift+R";
+const STOP_KEY = MAC ? "⌘⇧E" : "Alt+Shift+E";
 const keyHint = label => {
   const node = textNode("kbd", "", label);
   node.setAttribute("aria-hidden", "true");
@@ -106,24 +126,31 @@ const keyHint = label => {
 let statusError = null; // {text, state}: a failed status action, shown until the next state poll replaces the state
 
 // A status action from the bar: its busy key makes a double click post once, and it stays disabled until the
-// agenda and permissions are fetched again.
+// agenda and permissions (Stop and Resume: the state) are fetched again. A failed Stop or Resume keeps the state
+// it failed on, so its error shows until the next poll.
 async function statusAction(button, id) {
   const key = `status|${id}`;
   if (homeBusy.has(key)) return;
   homeBusy.add(key);
   button.disabled = true;
   renderShell();
+  const [path, body] = STATUS_POSTS[id];
+  const recording = path.startsWith("/api/recording/");
+  let failed = false;
   try {
-    await post(...STATUS_POSTS[id]);
+    await post(path, recording ? { meeting_id: window.appState?.transcript?.meeting_id } : body);
   } catch (error) {
-    statusError = { text: plainError(error), state: window.appState };
+    failed = true;
+    statusError = { text: STATUS_ERRORS.has(error?.message) ? t(`status.error.${error.message}`) : plainError(error), state: window.appState };
   }
   try {
-    await refreshAgenda();
+    await (recording ? !failed && state() : refreshAgenda());
   } finally {
     homeRelease(key);
     renderShell();
-    if (document.activeElement === document.body && !button.closest("#home")) $("call-status-action").focus();
+    if (document.activeElement === document.body && !button.closest("#home")) {
+      [$("call-status-action"), $("call-stop")].find(node => !node.hidden)?.focus();
+    }
   }
 }
 
@@ -142,7 +169,8 @@ function renderStatus(view) {
   const text = $("call-status-text");
   const shown = statusError?.text || (SHORT_BAR.matches && status.short) || status.text;
   if (text.textContent !== shown) text.textContent = shown;
-  text.className = `status-text${status.kind === "recording" ? " rec" : statusError || status.kind !== "waiting" ? " fail" : ""}`;
+  const calm = status.kind === "waiting" || status.kind === "stopped";
+  text.className = `status-text${status.kind === "recording" ? " rec" : statusError || !calm ? " fail" : ""}`;
   const button = $("call-status-action");
   button.hidden = !status.action;
   if (status.action) {
@@ -154,6 +182,9 @@ function renderStatus(view) {
     button.replaceChildren(label);
     if (id === "start") button.append(keyHint(RECORD_KEY));
   }
+  // Stop recording: during a live call until it is pressed; one click, no dialog.
+  $("call-stop").hidden = !isLive(window.appState) || status.kind === "stopped";
+  $("call-stop").disabled = homeBusy.has("status|stop");
   // R34: the bar owns a call that is not being recorded, and How to fix sits beside its button.
   $("call-status-help").hidden = status.kind !== "not_recording";
   $("menu-notes").hidden = view === "home";
@@ -180,15 +211,22 @@ barWatch.observe($("blocker-banner"));
 addEventListener("scroll", fitBar, { passive: true });
 
 // Keys. Enter opens the next call's memo, J its link, N skips it (Home only, through the row's own controls);
-// the record key starts recording when the status offers it. None fire in a field, on a button (Enter),
-// or while a dialog, an overlay or the menu is open.
+// the record key starts recording when the status offers it, the stop key stops it during a call, and "/" goes to
+// the call's ask field. None fire in a field, on a button (Enter), or while a dialog, an overlay or the menu is open.
+// `combo`: a modifier combination that is ours everywhere; `shift`: Shift allowed (layouts that need it for "/");
+// `focus`: the control takes focus instead of a click.
 const homeControl = selector => ($("home").hidden ? null : $("home").querySelector(`.row.next ${selector}`));
 const shortcuts = [
   { label: "shell.key.memo", kbd: "↵", match: event => event.key === "Enter",
     control: () => homeControl('.actions button[aria-controls][aria-expanded="false"]') },
-  { label: "action.start", kbd: RECORD_KEY, record: true,
+  { label: "action.start", kbd: RECORD_KEY, combo: true,
     match: event => event.code === "KeyR" && event.shiftKey && (MAC ? event.metaKey && !event.altKey : event.altKey && !event.metaKey),
     control: () => (currentStatus().action?.id === "start" ? $("call-status-action") : null) },
+  { label: "action.stop", kbd: STOP_KEY, combo: true,
+    match: event => event.code === "KeyE" && event.shiftKey && (MAC ? event.metaKey && !event.altKey : event.altKey && !event.metaKey),
+    control: () => ($("call-stop").hidden ? null : $("call-stop")) },
+  { label: "call.ask_label", kbd: "/", shift: true, focus: true, match: event => event.key === "/",
+    control: () => ($("call").hidden ? null : $("call-question")) },
   { label: "shell.key.join", kbd: "J", match: event => event.code === "KeyJ", control: () => homeControl('.actions a.ql[target="_blank"]') },
   { label: "shell.key.skip", kbd: "N", match: event => event.code === "KeyN", control: () => homeControl('.actions button.quiet[data-key$="|skip"]') },
 ];
@@ -197,13 +235,17 @@ const OVERLAYS = "dialog[open], #settings-panel:not([hidden]), #getting-started:
 document.addEventListener("keydown", event => {
   const shortcut = shortcuts.find(item => item.match(event));
   if (!shortcut) return;
-  // The record combo is ours everywhere, so it never reloads the page, even where it does nothing.
-  if (shortcut.record) event.preventDefault();
+  // The combos are ours everywhere, so they never reload the page or open a browser tool, even where they do nothing.
+  if (shortcut.combo) event.preventDefault();
   if (event.repeat || document.querySelector(OVERLAYS)) return;
-  const plain = !shortcut.record && (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey);
+  const plain = !shortcut.combo && (event.metaKey || event.ctrlKey || event.altKey || (event.shiftKey && !shortcut.shift));
   if (plain || event.target.closest?.(`input, textarea, select, [contenteditable]${shortcut.kbd === "↵" ? ', button, a, summary, [role="button"]' : ""}`)) return;
   const control = shortcut.control();
   if (!control || control.disabled) return;
+  if (shortcut.focus) {
+    event.preventDefault(); // the "/" goes to the field, not into it (F20)
+    return control.focus();
+  }
   control.click();
   // ↵ leaves focus on the memo's button, so ↵ again folds it (this ↵ must not also press the button it lands on).
   if (shortcut.kbd === "↵") {
@@ -231,7 +273,7 @@ function renderShortcuts() {
     button.type = "button";
     button.setAttribute("role", "menuitem");
     button.append(textNode("span", "mi", t(item.label)), keyHint(item.kbd));
-    button.addEventListener("click", () => item.control()?.click());
+    button.addEventListener("click", () => (item.focus ? item.control()?.focus() : item.control()?.click()));
     return button;
   }));
 }
@@ -253,6 +295,7 @@ function renderShell() {
   $("call").hidden = view !== "call" || panel;
   $("call-back").hidden = !panel;
   if (view === "call") renderCall(window.appState);
+  renderCallBar(window.appState, Date.now());
   if (view === "home") $("nav-home").setAttribute("aria-current", "page");
   else $("nav-home").removeAttribute("aria-current");
   renderHome(window.agendaData, window.appState);
@@ -338,6 +381,8 @@ $("call-status-action").addEventListener("click", event => {
   } catch {}
   renderShell();
 });
+$("call-stop").addEventListener("click", event => statusAction(event.currentTarget, "stop"));
+$("call-stop").querySelector("kbd").textContent = STOP_KEY;
 $("menu-notes").addEventListener("click", () => (document.body.dataset.view === "call" ? openCallPanel("notes")
   : document.querySelector('[data-content-view="notes"]').click()));
 

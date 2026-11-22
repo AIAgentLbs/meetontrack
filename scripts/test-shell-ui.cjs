@@ -232,6 +232,44 @@ const errors = [];
       disconnected: ['not_recording', 'Запись не идет: нет свежих данных от программы записи', null],
       disconnectedLive: ['not_recording', 'Запись не идет: нет свежих данных от программы записи', null],
     });
+    // Stop recording (plan 3): the undo window, then the final stop; another call's stop never shows. One stalled
+    // side keeps Recording (its beat and the feed say which side); every track stalled is not recording (F19).
+    const stops = await page.evaluate(() => {
+      const now = Date.parse('2026-11-21T12:00:00Z');
+      const at = seconds => new Date(now + seconds * 1000).toISOString();
+      const call = (control, extra = {}) => ({ transcript: { meeting_id: 'm1', status: 'recording', live: true },
+        recording_control: { stopping: null, last_stop: null, ...control }, ...extra });
+      const tracks = (...states) => ({ recording_health: { checked_at: now / 1000 - 2, capture: { state: 'stalled', audio_recording: false,
+        tracks: states.map((state, index) => ({ source: index ? 'system' : 'mic', state, last_growth_age_seconds: 40 })) } } });
+      const short = status => [status.kind, status.text, status.action && `${status.action.id}${status.action.primary ? '!' : ''}`];
+      const cases = {
+        stopping: call({ stopping: { meeting_id: 'm1', stopped_at: at(-10), until: at(20) } }),
+        final: call({ last_stop: { meeting_id: 'm1', stopped_at: at(-4) } }),
+        otherLastStop: call({ last_stop: { meeting_id: 'm0', stopped_at: at(-4) } }),
+        otherStopping: call({ stopping: { meeting_id: 'm0', stopped_at: at(-10), until: at(20) } }),
+        oneStalled: call({}, tracks('recording', 'stalled')),
+        bothStalled: call({}, tracks('stalled', 'stalled')),
+      };
+      return { time: homeClock(at(-10)), finalTime: homeClock(at(-4)),
+        ...Object.fromEntries(Object.entries(cases).map(([name, state]) => [name, short(callStatus(state, { meetings: [] }, {}, now))])) };
+    });
+    assert.deepEqual(stops, {
+      time: stops.time, finalTime: stops.finalTime,
+      stopping: ['stopped', `Запись остановлена в ${stops.time}. Через 20 с откроется отчет.`, 'resume'],
+      final: ['stopped', `Запись остановлена в ${stops.finalTime}.`, null],
+      otherLastStop: ['recording', 'Запись', null],
+      otherStopping: ['recording', 'Запись', null],
+      oneStalled: ['recording', 'Запись', null],
+      bothStalled: ['not_recording', 'Запись не идет: звук перестал записываться', null],
+    });
+    assert.match(stops.time, /^\d\d:\d\d$/);
+    assert.deepEqual(await page.evaluate(() => ['status.stopped', 'status.stopped_final', 'action.resume', 'action.stop', 'action.stop_short']
+      .map(key => translations.en[key])), ['Recording stopped at {time}. The report opens in {n} s.', 'Recording stopped at {time}.',
+      'Resume recording', 'Stop recording', 'Stop']);
+    assert.deepEqual(await page.evaluate(() => ['meeting_changed', 'too_late', 'stop_failed', 'resume_failed']
+      .map(code => translations.ru[`status.error.${code}`])), ['Звонок уже сменился, обновите страницу', 'Запись уже остановлена',
+      'Запись не остановилась, откройте программу записи', 'Запись не продолжилась, откройте программу записи']);
+
     assert.deepEqual(await page.evaluate(() => ['status.waiting_manual', 'status.waiting_at_manual'].map(key => translations.en[key])),
       ['Waiting for a call', 'Waiting for the {time} call']);
     // The same reasons exist in English.
@@ -269,14 +307,15 @@ const errors = [];
     await page.locator('#call-status-action').click();
     await page.waitForFunction(() => document.body.dataset.view === 'call');
 
-    // Top bar: Home, Past calls, one call status and Menu. The delivery pill joins them only with a problem.
+    // Top bar: Home, Past calls, one call status, Stop recording during a call, and Menu. The delivery pill joins
+    // them only with a problem.
     const barControls = () => page.evaluate(() => [...document.querySelectorAll('.topbar button, .topbar .status')]
       .filter(node => !node.closest('#app-menu') && !node.parentElement.closest('.status') && node.checkVisibility())
       .map(node => node.id));
-    assert.deepEqual(await barControls(), ['nav-home', 'archive-button', 'call-status', 'menu-button']);
+    assert.deepEqual(await barControls(), ['nav-home', 'archive-button', 'call-status', 'call-stop', 'menu-button']);
     delivery = problem;
     await page.waitForFunction(() => document.querySelector('#delivery-alert').checkVisibility());
-    assert.deepEqual(await barControls(), ['nav-home', 'archive-button', 'call-status', 'delivery-alert', 'menu-button']);
+    assert.deepEqual(await barControls(), ['nav-home', 'archive-button', 'call-status', 'delivery-alert', 'call-stop', 'menu-button']);
     delivery = healthy;
     await page.waitForFunction(() => !document.querySelector('#delivery-alert').checkVisibility());
     assert.equal(await page.locator('#refresh-button').count(), 0);
