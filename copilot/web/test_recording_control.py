@@ -233,6 +233,29 @@ class RecordingControlTests(unittest.TestCase):
         self.assertIsNone(control.snapshot()["stopping"])
         self.assertIsNone(control.snapshot()["last_stop"])
 
+    def test_a_slow_resume_keeps_showing_the_stop_until_the_recorder_answers(self):
+        # M3: polls see the stop while the recorder has not resumed; the disk already says nothing is pending (I-series).
+        run = Recorder(block=RESUME)
+        control = self.control(run)
+        control.stop("m1")
+        resumer = threading.Thread(target=control.resume, args=("m1",))
+        resumer.start()
+        self.assertTrue(run.entered.wait(5))
+        self.assertEqual(control.snapshot()["stopping"]["meeting_id"], "m1")
+        self.assertIsNone(json.loads(self.path.read_text())["stopping"], "a restart never stops a resumed call")
+        run.release.set()
+        resumer.join(5)
+        self.assertIsNone(control.snapshot()["stopping"])
+        # A failed resume shows the stop throughout and keeps it, in memory and on disk.
+        run = Recorder(codes={RESUME: 1})
+        self.path.unlink()
+        control = self.control(run)
+        control.stop("m1")
+        with self.assertRaisesRegex(RuntimeError, "resume_failed"):
+            control.resume("m1")
+        self.assertEqual(control.snapshot()["stopping"]["meeting_id"], "m1")
+        self.assertEqual(json.loads(self.path.read_text())["stopping"]["meeting_id"], "m1")
+
     def test_tick_and_resume_race(self):
         # The tick took the pending stop first: a resume at the edge is too late.
         run = Recorder(block=STOP)

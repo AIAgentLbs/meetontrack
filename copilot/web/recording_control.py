@@ -72,11 +72,12 @@ class RecordingControl:
             return self._command(verb, None)
         return True if done.returncode == 0 else None if done.returncode == REFUSED else False
 
-    def _save(self) -> None:
+    def _save(self, stopping: dict | None | bool = True) -> None:
+        """Writes the state; `stopping` other than True writes that instead of the one in memory."""
         private_dir(self.path.parent)
         temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(
-            {"version": 1, "stopping": self.stopping, "last_stop": self.last_stop}), encoding="utf-8")
+        temporary.write_text(json.dumps({"version": 1, "stopping": self.stopping if stopping is True else stopping,
+                                         "last_stop": self.last_stop}), encoding="utf-8")
         temporary.chmod(0o600)
         os.replace(temporary, self.path)
 
@@ -156,12 +157,11 @@ class RecordingControl:
                 except OSError:
                     pass
                 raise ValueError("meeting_changed")
-            # Cleared on disk before the recorder resumes: a restart must never stop a resumed call.
-            self.stopping = None
+            # Cleared on disk before the recorder resumes: a restart must never stop a resumed call. Polls keep
+            # seeing the stop until the recorder answers, so a slow resume never shows the live bar early (M3).
             try:
-                self._save()
+                self._save(stopping=None)
             except OSError:
-                self.stopping = pending
                 raise RuntimeError("resume_failed") from None  # a code, never the OS text with the path
             resumed = self._command("resume", pending.get("session"))
             if resumed is None:  # the recorder is live with another call: that recording is over
@@ -172,12 +172,12 @@ class RecordingControl:
                     pass
                 raise ValueError("meeting_changed")
             if not resumed:
-                self.stopping = pending
                 try:
                     self._save()
                 except OSError:
                     pass  # memory stays authoritative while the server runs
                 raise RuntimeError("resume_failed")
+            self.stopping = None
 
     def tick(self) -> None:
         with self.lock:
