@@ -94,6 +94,30 @@ class AnalysisReplyTests(unittest.TestCase):
         self.assertEqual(question.count(SPEAKABLE_RULE), 1)
         self.assertIn('"reply"', question)
 
+    def test_prompts_name_no_one_and_file_the_other_sides_question_as_incoming(self):
+        # B2: no owner's name in any analysis prompt; in a call of two, every question from the other side
+        # is put to the user, so a voice agent asking "When can you start?" gets an answer card.
+        empty = SimpleNamespace(snapshot=lambda *a: [], claims=lambda *a: [], ACTIONABLE=set())
+        with mock.patch.object(server, "JOURNAL", empty), mock.patch.object(server, "FACT_CHECKS", empty), \
+                mock.patch.object(server, "PLANS", SimpleNamespace(snapshot=lambda *a: None)):
+            question = analysis_question({"meeting_id": "one"}, "")[0]
+        prompts = [question, CodexSession._base_prompt(CodexSession(None), "q", "t", "m", {}),
+                   CodexSession._continuation_prompt("q", "t", "m", {}),
+                   server.Handler._transcript_text({"capture_warnings": [{}], "segments": []})]
+        for prompt in prompts:
+            self.assertNotRegex(prompt, r"Майк|Mike")
+        self.assertIn("в звонке один на один каждый вопрос собеседника адресован пользователю", question)
+        self.assertNotIn("до 18 слов", prompts[1] + prompts[2])  # one length rule: SPEAKABLE_RULE's
+
+    def test_other_sides_question_without_a_named_speaker_is_incoming(self):
+        # A call-audio segment the diarizer did not name is still the other side: it keeps its reply.
+        self.transcript["segments"] = [{"text": QUESTION, "source": "system", "speaker_id": "unassigned", "speaker": ""}]
+        [item] = self.capture("d", "incoming", "We can start on Monday.")
+        self.assertEqual((item["category"], item["reply"]), ("INCOMING_QUESTION", "We can start on Monday."))
+        self.transcript["segments"] = [{"text": QUESTION, "source": "microphone", "speaker_id": "unassigned"}]
+        [item] = self.capture("e", "incoming", "We can start on Monday.")
+        self.assertEqual(item["category"], "OPEN_QUESTION")
+
     def test_urgent_analysis_gap(self):
         session = CodexSession(None)
         for offset, urgent, expected in [(0, False, True), (20, False, False), (20, True, True), (30, True, False)]:
