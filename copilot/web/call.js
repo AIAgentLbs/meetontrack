@@ -186,6 +186,13 @@ function lastPhrase(state) {
   const text = String(state?.transcript?.segments?.at(-1)?.text || "").trim();
   return text.length > 90 ? `…${text.slice(-90).replace(/^\S*\s+/u, "")}` : text;
 }
+// Who said the last line: "Вы", or a named person by first name; a generic label stays whole (N4).
+function lastSpeaker(state) {
+  const segment = state?.transcript?.segments?.at(-1);
+  if (!segment) return "";
+  const label = speakerLabel(segment);
+  return label && label === (segment.speaker_label || segment.speaker) ? label.split(/\s+/u)[0] : label;
+}
 
 // The feed: the call's name, a problem when a side is not heard, the one slot, the paused note and the earlier
 // hints. Each part is rebuilt only when what it shows changes, so focus and an open source line survive the poll.
@@ -464,13 +471,13 @@ function renderCallBar(state, now) {
     return node;
   }));
   const phrase = lastPhrase(state);
-  const line = phrase ? t("call.last_phrase").replace("{text}", () => phrase) : ""; // a function: "$&" in speech stays as said
+  const label = phrase ? t("call.last_phrase", { who: lastSpeaker(state) }).split("{text}")[0] : "";
+  const line = phrase ? `${label}${phrase}` : "";
   // The label stays whole and the words are cut from the start, so the newest ones show in a narrow bar (E3).
   const heard = $("call-heard");
   if (heard.dataset.line !== line) {
     heard.dataset.line = line;
     heard.dataset.phrase = phrase;
-    const [label] = t("call.last_phrase").split("{text}");
     const words = document.createElement("span");
     words.className = "heard-words";
     words.append(textNode("bdi", "", phrase));

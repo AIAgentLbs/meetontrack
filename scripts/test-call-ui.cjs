@@ -562,7 +562,7 @@ async function callBar(browser) {
   assert.equal(await page.locator('#call-beats .bars[aria-hidden="true"]').count(), 2);
   const heard = await page.$eval('#call-heard', node => ({ text: node.textContent, height: node.getBoundingClientRect().height,
     line: parseFloat(getComputedStyle(node).lineHeight) || parseFloat(getComputedStyle(node).fontSize) * 1.5 }));
-  assert.match(heard.text, /^Transcript: /);
+  assert.match(heard.text, /^(You|Anna): /); // N4: the speaker, not a label
   assert.ok(heard.height < heard.line * 1.5, `one line: ${heard.height} / ${heard.line}`);
   // Stop recording sits after the status, right before Menu.
   const order = await page.evaluate(() => {
@@ -912,7 +912,7 @@ async function fixWave(browser) {
         first: first.left >= box.left - 1 && first.right <= box.right + 1, last: last.left >= box.left - 1 && last.right <= box.right + 1,
         cut: line.scrollWidth > line.clientWidth || [...line.children].some(child => child.scrollWidth > child.clientWidth) };
     });
-    assert.ok(shown.text.startsWith('Transcript: '), shown.text);
+    assert.ok(shown.text.startsWith('Anna: '), shown.text);
     assert.ok(shown.text.endsWith('second week'), shown.text);
     assert.equal(shown.first, true, `${width}: the label shows`);
     assert.equal(shown.last, true, `${width}: the newest words show`);
@@ -1524,6 +1524,23 @@ async function round4(browser) {
     assert.ok(Math.abs(resume.top - resume.menu) <= 8, `${width}: Resume on Menu's row`);
     await page.click('#call-stop');
     await expectPost(page, '/api/recording/resume', { meeting_id: 'm1' });
+    await page.context().close();
+  }
+  // N4: the heard line names its speaker, the first name or "Вы", and at 400 px it stays with three words or more.
+  for (const [lang, anna, you] of [['ru', 'Анна: ', 'Вы: '], ['en', 'Anna: ', 'You: ']]) for (const width of [1440, 400]) {
+    const page = await callPage(browser, 'hint', { lang, data: lang, width });
+    const said = lang === 'ru' ? 'Комитет собирается по четвергам, регионы подключатся позже' : 'The committee meets on Thursdays, the regions join later';
+    page.api.fixture.state.transcript.segments.push({ source: 'system', speaker: lang === 'ru' ? 'Анна Петрова' : 'Anna Petrova', text: said,
+      timestamp: new Date().toISOString() });
+    await refresh(page);
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    assert.equal(await visible(page, '#call-heard'), true, `${lang} ${width}: shown`);
+    const line = plain(await text(page, '#call-heard'));
+    assert.ok(line.startsWith(anna), `${lang} ${width}: ${line}`);
+    assert.ok(line.replace(anna, '').replace(/^…/u, '').split(/\s+/u).length >= 3, `${lang} ${width}: ${line}`);
+    page.api.fixture.state.transcript.segments.push({ source: 'microphone', speaker: 'Me', text: said, timestamp: new Date().toISOString() });
+    await refresh(page);
+    assert.ok(plain(await text(page, '#call-heard')).startsWith(you), `${lang} ${width}: you`);
     await page.context().close();
   }
   // N1 (P1): every hint in the slot has one source component: Where this comes from, closed, holding the source; or,
