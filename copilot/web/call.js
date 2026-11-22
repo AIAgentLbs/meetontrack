@@ -146,7 +146,8 @@ function lastPhrase(state) {
 
 // The feed: the call's name, a problem when a side is not heard, the one slot, the paused note and the earlier
 // hints. Each part is rebuilt only when what it shows changes, so focus and an open source line survive the poll.
-let callPending = null; // {question, at}: the person's own question, sent, its answer not back yet
+let callPending = null; // {question, at, queued}: the person's own question, its answer not back yet; queued: not sent yet
+let callAskError = null; // {question, text}: the last Ask failed, shown in the feed until the next one (B3)
 let callEarlierOpen = false;
 const callWhereOpen = new Set(); // keys of the hints whose source is open
 const callSignatures = {};
@@ -189,8 +190,9 @@ function callProblem(state, now) {
 // question and its answer still show, since the ask field keeps working.
 function callSlot(state, current, now, stopped = null) {
   const own = current?.kind === "own" ? current : null;
-  if (callPending && ((own && own.at > callPending.at) || (!requestBusy && !state?.copilot?.busy))) callPending = null;
+  if (callPending && !callPending.queued && ((own && own.at > callPending.at) || (!requestBusy && !state?.copilot?.busy))) callPending = null;
   if (callPending) return { type: "pending", label: t("call.own"), question: callPending.question };
+  if (callAskError) return { type: "ask_error", label: t("call.own"), question: callAskError.question, text: callAskError.text };
   if (own) return { type: "own", label: own.label, question: own.question, text: own.text };
   if (stopped) return { type: "stopped", text: t(stopped === "stop_failed" ? "call.stop_pending" : "call.stopped") };
   if (current?.kind === "answer") {
@@ -217,6 +219,7 @@ function callSlotNodes(slot) {
   if (slot.type === "waiting") return [textNode("p", "waiting", slot.text), textNode("p", "heard-wait", t("call.waiting_help"))];
   if (slot.question) nodes.push(textNode("p", "heard-q", slot.question));
   if (slot.type === "pending" || slot.type === "heard") nodes.push(textNode("p", "heard-wait", t("call.heard_wait")));
+  if (slot.type === "ask_error") nodes.push(textNode("p", "heard-wait fail", slot.text));
   if (slot.type === "own") {
     nodes.push(textNode("p", "own-answer", readableAnswer(slot.text)));
     const actions = document.createElement("p");
@@ -286,6 +289,10 @@ function renderCall(state) {
     return [box];
   });
 
+  // A question queued behind an analysis goes out once nothing else holds the line.
+  if (callPending?.queued && !requestBusy && !state?.copilot?.busy && window.callAsk(callPending.question)) {
+    callPending = { question: callPending.question, at: Date.now() };
+  }
   const pick = pickHint(state, now);
   callPart("call-slot", callSlot(state, pick.current, now, stopped), callSlotNodes);
   callFitWhere();
@@ -409,12 +416,24 @@ addEventListener("DOMContentLoaded", () => {
     event.preventDefault();
     const field = $("call-question");
     const question = field.value.trim();
-    if (!question || !window.callAsk(question)) return;
-    callPending = { question, at: Date.now() };
+    if (!question) return;
+    // An analysis holds the line: the question waits in the slot and goes out when it ends (B3).
+    const sent = window.callAsk(question);
+    if (!sent && !requestBusy) return;
+    callAskError = null;
+    callPending = { question, at: Date.now(), queued: !sent };
     field.value = "";
     renderCall(window.appState);
   });
 });
+// A failed Ask (app.js sendQuestion): the feed says so, and the question goes back into an empty field to try again.
+window.callAskFailed = (question, text) => {
+  if (callPending?.question === question) callPending = null;
+  callAskError = { question, text };
+  const field = $("call-question");
+  if (!field.value.trim()) field.value = question;
+  if (document.body.dataset.view === "call") renderCall(window.appState);
+};
 // Escape closes the panel, unless a menu, a dialog or an overlay is open: that one closes first.
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape" || !document.body.dataset.callPanel || document.querySelector(OVERLAYS)) return;

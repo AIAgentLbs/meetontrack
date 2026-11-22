@@ -434,19 +434,19 @@ async function interactions(browser) {
   assert.deepEqual(page.errors, []);
   await page.context().close();
 
-  // An auto-analysis holds the request: the question stays in the field and nothing is sent (F4).
-  page = await callPage(browser, 'own_pending');
+  // An auto-analysis holds the request: the question waits in the slot and goes out when it ends (B3, replaces F4).
+  page = await callPage(browser, 'hint');
   let release;
   page.api.responses['/api/analyze'] = new Promise(resolve => { release = resolve; });
   await page.evaluate(() => { void analyze(false); });
   await page.waitForFunction(() => requestBusy);
   await page.fill('#call-question', 'What did Anna say about the budget?');
   await page.press('#call-question', 'Enter');
-  await page.waitForTimeout(200);
-  assert.equal(await page.inputValue('#call-question'), 'What did Anna say about the budget?');
+  assert.equal(await page.inputValue('#call-question'), '');
+  assert.equal(await text(page, '#call-slot .heard-q'), 'What did Anna say about the budget?');
   assert.deepEqual(posts(page, '/api/chat'), []);
-  assert.equal(await page.locator('#call-slot .heard-wait').count(), 0);
-  release();
+  release({ status: 200, json: { ok: true, skipped: true } });
+  await expectPost(page, '/api/chat', { question: 'What did Anna say about the budget?' });
   await page.context().close();
 
   // The answer to your own question, and Open in chat.
@@ -884,6 +884,37 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // B3: a question typed while an analysis runs is queued: it shows as waiting at once and goes out when the
+  // analysis ends. A failed Ask says so in the feed and gives the question back for another try.
+  {
+    const page = await callPage(browser, 'hint');
+    await page.evaluate(() => { requestBusy = true; });
+    await page.fill('#call-question', 'What did Anna say about the budget?');
+    await page.press('#call-question', 'Enter');
+    assert.equal(await page.inputValue('#call-question'), '');
+    assert.equal(await text(page, '#call-slot .heard-q'), 'What did Anna say about the budget?');
+    assert.match(await text(page, '#call-slot .heard-wait'), /^The answer is being prepared/);
+    await refresh(page);
+    assert.deepEqual(posts(page, '/api/chat'), []);
+    await page.evaluate(() => { requestBusy = false; });
+    await refresh(page);
+    await expectPost(page, '/api/chat', { question: 'What did Anna say about the budget?' });
+    await page.context().close();
+  }
+  {
+    const page = await callPage(browser, 'hint');
+    page.api.responses['/api/chat'] = 'abort';
+    await page.fill('#call-question', 'Who signs?');
+    await page.press('#call-question', 'Enter');
+    const unreachable = await page.evaluate(() => t('error.unreachable'));
+    await page.waitForFunction(text => document.getElementById('call-slot').textContent.includes(text), unreachable);
+    assert.equal(await text(page, '#call-slot .heard-q'), 'Who signs?');
+    assert.equal(await page.inputValue('#call-question'), 'Who signs?');
+    await refresh(page);
+    assert.ok((await text(page, '#call-slot')).includes(unreachable), 'the error stays through a poll');
+    assert.deepEqual(page.errors, []);
+    await page.context().close();
+  }
   // B1: the long hint shows whole, in one smaller step of type, never clamped and with nothing hidden behind Where.
   for (const [lang, width] of [['ru', 1440], ['en', 1440], ['ru', 400]]) {
     const page = await callPage(browser, 'long_hint', { lang, data: lang, width });

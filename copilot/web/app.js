@@ -3503,6 +3503,7 @@ async function sendQuestion(clean) {
   } catch (error) {
     elements.help.textContent = plainError(error);
     elements.help.classList.add("error");
+    window.callAskFailed?.(clean, plainError(error));
   } finally {
     requestBusy = false;
     await state();
