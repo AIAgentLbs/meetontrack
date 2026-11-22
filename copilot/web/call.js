@@ -207,20 +207,28 @@ function lastSpeaker(state) {
 let callPending = null; // {question, at, queued, meeting}: the person's own question, its answer not back yet; queued: not sent yet
 let callAskNote = null; // a line under the feed about the Ask field: one question already waits, or the call changed (J3)
 let callCountdownShown = false; // the feed shows the undo countdown; when it does not, the bar does (P4)
-let callKept = null; // a question that came back while the field held another draft: one click returns it (M5)
+let callKept = []; // questions that came back while the field held another draft, oldest first (M5, P6)
+const CALL_KEPT_MAX = 3;
+// Kept once each, at most three: past that the oldest goes (P6). ponytail: a fourth failure in a row drops one.
+function callKeep(question) {
+  if (callKept.includes(question)) return;
+  callKept = [...callKept, question].slice(-CALL_KEPT_MAX);
+}
 // An unsent question goes back into an empty field; over another draft it is kept, never lost (M5).
 function callGiveBack(question) {
   const field = $("call-question");
   const draft = field.value.trim();
   if (!draft) field.value = question;
-  else if (draft !== question) callKept = question;
+  else if (draft !== question) callKeep(question);
 }
-// Returning it keeps the draft it replaces in turn, so the button stays until the field is empty or the same.
+// Returning brings back the oldest; the draft it replaces is kept in turn, so the button stays until none is left.
 function callReturnKept() {
   const field = $("call-question");
   const draft = field.value.trim();
-  field.value = callKept;
-  callKept = draft && draft !== callKept ? draft : null;
+  const [oldest, ...rest] = callKept;
+  field.value = oldest;
+  callKept = rest;
+  if (draft && draft !== oldest) callKeep(draft);
   renderCall(window.appState);
   field.focus();
 }
@@ -430,7 +438,7 @@ function renderCall(state) {
   // Nothing else to show: the pause is the main line, one message (D2). Under a hint it stays a note.
   const pausedSlot = paused && slot.type === "waiting";
   callPart("call-slot", pausedSlot ? { type: "paused", text: t("call.paused"), retry: paused } : slot, callSlotNodes);
-  const note = callAskNote || callKept ? { text: callAskNote || "", kept: callKept }
+  const note = callAskNote || callKept.length ? { text: callAskNote || "", kept: callKept.length > 0 }
     : paused && !pausedSlot ? { text: `${t("call.paused")} ${paused}`, check: true } : null;
   $("call-note").hidden = !note;
   callPart("call-note", note, note => note.check

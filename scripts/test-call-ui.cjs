@@ -1765,6 +1765,21 @@ async function round4(browser) {
     assert.equal(await page.inputValue('#call-question'), 'Какой бюджет?');
     await page.context().close();
   }
+  // P6: two questions come back over a draft: both are kept (never overwritten), the oldest returns first, and the
+  // list holds at most three.
+  {
+    const page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru' });
+    await page.fill('#call-question', 'Черновик');
+    await page.evaluate(() => { callGiveBack('Вопрос А'); callGiveBack('Вопрос Б'); renderCall(window.appState); });
+    await page.click('#call-note button');
+    assert.equal(await page.inputValue('#call-question'), 'Вопрос А');
+    await page.click('#call-note button');
+    assert.equal(await page.inputValue('#call-question'), 'Вопрос Б');
+    await page.click('#call-note button');
+    assert.equal(await page.inputValue('#call-question'), 'Черновик', 'the draft comes back too');
+    assert.equal(await page.evaluate(() => { ['1', '2', '3', '4'].forEach(callGiveBack); return callKept.length; }), 3);
+    await page.context().close();
+  }
   // M4: the queued question names its call; the server refusing it (the call changed in between) is the J3 note,
   // never an error, and the question goes back into the field.
   {
