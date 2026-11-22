@@ -225,6 +225,11 @@ function callSlot(state, current, now, stopped = null) {
 function callSlotNodes(slot) {
   const nodes = [textNode("p", "say", slot.label || "")];
   if (slot.type === "stopped") return [textNode("p", "waiting", slot.text)];
+  if (slot.type === "paused") {
+    const retry = textNode("p", "heard-wait", `${slot.retry} `);
+    retry.append(callButton("ql", t("call.check_ai"), () => $("getting-started-open").click()));
+    return [textNode("p", "waiting", slot.text), retry];
+  }
   if (slot.type === "waiting") return [textNode("p", "waiting", slot.text), textNode("p", "heard-wait", t("call.waiting_help"))];
   if (slot.question) nodes.push(textNode("p", "heard-q", slot.question));
   if (slot.type === "pending" || slot.type === "heard") nodes.push(textNode("p", "heard-wait", t(slot.later ? "call.heard_later" : "call.heard_wait")));
@@ -302,16 +307,19 @@ function renderCall(state) {
   if (callPending?.queued && !requestBusy && !state?.copilot?.busy && window.callAsk(callPending.question)) {
     callPending = { question: callPending.question, at: Date.now() };
   }
-  const pick = pickHint(state, now);
-  callPart("call-slot", callSlot(state, pick.current, now, stopped), callSlotNodes);
-  callFitWhere();
-
   // The analysis failed: hints pause until the next try, five minutes after it (F3).
   const analysis = state?.copilot?.analysis;
   const failed = analysis?.state === "error" ? callAt(analysis.at) : null;
   const retry = failed === null ? null : failed + 300000;
   // A retry time that has passed is not shown: the next try comes with the next analysis.
-  const note = retry === null || stopped ? null : retry > now ? t("call.paused", { n: Math.ceil((retry - now) / 60000) }) : t("call.paused_next");
+  const paused = retry === null || stopped ? null : retry > now ? t("call.paused_retry", { n: Math.ceil((retry - now) / 60000) }) : t("call.paused_next");
+  const pick = pickHint(state, now);
+  const slot = callSlot(state, pick.current, now, stopped);
+  // Nothing else to show: the pause is the main line, one message (D2). Under a hint it stays a note.
+  const pausedSlot = paused && slot.type === "waiting";
+  callPart("call-slot", pausedSlot ? { type: "paused", text: t("call.paused"), retry: paused } : slot, callSlotNodes);
+  callFitWhere();
+  const note = paused && !pausedSlot ? `${t("call.paused")} ${paused}` : null;
   $("call-note").hidden = !note;
   callPart("call-note", note, text => [`${text} `, callButton("ql", t("call.check_ai"), () => $("getting-started-open").click())]);
 

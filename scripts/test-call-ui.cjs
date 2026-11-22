@@ -368,12 +368,16 @@ async function interactions(browser) {
 
   // The AI did not answer: hints pause with the next try, and the link opens the guide.
   page = await callPage(browser, 'paused_ai');
-  const note = await text(page, '#call-note');
-  assert.match(note, /^Hints paused: the AI did not answer\. Recording continues, next try in 5\u00a0min\./);
-  // The note is the only message: no analysis-failure banner over the Call view.
+  assert.equal(await text(page, '#call-slot .waiting'), 'Hints paused: the AI did not answer.');
+  // The pause is the only message: no analysis-failure banner over the Call view.
   assert.equal(await visible(page, '#blocker-banner'), false);
   // A retry time that has passed is not shown.
   page.api.fixture.state.copilot.analysis.at = new Date(Date.now() - 10 * 60000).toISOString();
+  await refresh(page);
+  assert.equal(await text(page, '#call-slot .heard-wait').then(value => value.replace(/ Check the AI in settings$/, '')),
+    'Recording continues, the next try comes with the next analysis.');
+  // A hint still fresh keeps the slot; the pause is a note under it.
+  page.api.fixture.state.journal = [{ id: 'j1', category: 'ASK', text: 'Ask who signs?', meeting_id: 'm1', created_at: new Date().toISOString() }];
   await refresh(page);
   assert.equal(await text(page, '#call-note').then(value => value.replace(/ Check the AI in settings$/, '')),
     'Hints paused: the AI did not answer. Recording continues, the next try comes with the next analysis.');
@@ -883,6 +887,18 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // D2: paused AI with nothing to show: the main line says hints are paused, one message, no waiting line under it.
+  for (const [lang, main, retry] of [['en', 'Hints paused: the AI did not answer.', /^Recording continues, next try in 5\u00a0min\. Check the AI in settings$/],
+    ['ru', 'Подсказки на паузе: ИИ не ответил.', /^Запись идет, следующая попытка через 5\u00a0мин\. /]]) {
+    const page = await callPage(browser, 'paused_ai', { at: Date.now(), lang });
+    assert.equal(await text(page, '#call-slot .waiting'), main, lang);
+    assert.match(await text(page, '#call-slot .heard-wait'), retry, lang);
+    assert.equal(await visible(page, '#call-note'), false, `${lang}: one message`);
+    assert.doesNotMatch(await page.locator('#call').innerText(), /A hint appears here|Подсказка появится здесь|ask your own question below|Свой вопрос можно задать/);
+    await page.click('#call-slot button.ql');
+    assert.equal(await visible(page, '#getting-started'), true, `${lang}: the link opens the guide`);
+    await page.context().close();
+  }
   // D1: every time in Call is elapsed call time, the top-bar clock (the call began 12:40 before `at`).
   {
     const at = Date.now();
