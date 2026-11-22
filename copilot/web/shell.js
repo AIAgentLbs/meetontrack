@@ -312,6 +312,8 @@ function renderShell() {
   $("home").hidden = view !== "home";
   // The Call view: the feed, or one panel over it (call.js openCallPanel). Another view closes the panel.
   if (view !== "call") delete document.body.dataset.callPanel;
+  // More belongs to the Call feed: left open as the call ends, it would block Home's shortcuts (E2).
+  if (view !== "call" && !$("call-more-menu").hidden) toggleMenu($("call-more-menu"), $("call-more"), false);
   const panel = Boolean(document.body.dataset.callPanel);
   $("call").hidden = view !== "call" || panel;
   $("call-back").hidden = !panel;

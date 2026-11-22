@@ -890,6 +890,21 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // E2: the call ends while More is open: More closes, so Home's shortcuts work again.
+  {
+    const page = await callPage(browser, 'more_open', { width: 400 });
+    await page.click('#call-more');
+    assert.equal(await visible(page, '#call-more-menu'), true);
+    page.api.fixture.state.transcript = { ...page.api.fixture.state.transcript, status: 'finished', live: false,
+      ended_at: new Date(Date.now() - 2 * 3600000).toISOString(), updated_at: new Date(Date.now() - 2 * 3600000).toISOString(),
+      latest_at: new Date(Date.now() - 2 * 3600000).toISOString() };
+    page.api.fixture.state.recording_health.capture = { state: 'inactive', audio_recording: false, tracks: [] };
+    await refresh(page);
+    assert.equal(await page.evaluate(() => document.body.dataset.view), 'home');
+    assert.equal(await page.evaluate(() => document.getElementById('call-more-menu').hidden), true, 'More closed');
+    assert.equal(await page.getAttribute('#call-more', 'aria-expanded'), 'false');
+    await page.context().close();
+  }
   // E1: a long Earlier list opened from More starts under the real top bar (taller than --bar-h at 400 px when it
   // wraps), not under it; a short one ends above the real dock.
   for (const [fixture, extra] of [['earlier_open', 8], ['other_lost', 0]]) {
