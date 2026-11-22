@@ -446,6 +446,25 @@ class RecordingControlTests(unittest.TestCase):
         control.tick()
         self.assertEqual(run.argv, [["record", "stop"]])
 
+    def test_state_answers_while_the_recorder_is_asked(self):
+        # I3: the page's state poll never waits for a recorder command (up to 4 s for the ack, 10 s on Windows).
+        run = Recorder(block=STOP)
+        control = self.control(run)
+        control.stop("m1")
+        self.now[0] = T0 + 31
+        ticker = threading.Thread(target=control.tick)
+        ticker.start()
+        self.assertTrue(run.entered.wait(5))
+        answered = []
+        poll = threading.Thread(target=lambda: answered.append(control.snapshot()))
+        poll.start()
+        poll.join(0.5)
+        self.assertEqual(len(answered), 1, "snapshot waited for the recorder")
+        self.assertEqual(answered[0]["stopping"]["meeting_id"], "m1")
+        run.release.set()
+        ticker.join(5)
+        self.assertIsNone(control.snapshot()["stopping"])
+
     def test_loop_ticks_until_the_event(self):
         control = self.control(Recorder())
         stop = threading.Event()

@@ -37,7 +37,9 @@ class RecordingControl:
         self.binary, self.path, self.current_meeting, self.session = binary, path, current_meeting, session
         self.run, self.clock, self.grace = run, clock, grace
         # One lock for every check-and-clear of `stopping`, held across the recorder command,
-        # so at the window's edge exactly one of resume and the deferred stop wins.
+        # so at the window's edge exactly one of resume and the deferred stop wins. Readers take no
+        # lock: `stopping` and `last_stop` are only ever replaced whole, never changed in place, so the
+        # state poll never waits for a recorder command (fix wave I3).
         self.lock = threading.Lock()
         self.stopping, self.last_stop = None, None
         try:
@@ -191,6 +193,5 @@ class RecordingControl:
             stop_event.wait(1)
 
     def snapshot(self) -> dict:
-        with self.lock:
-            return {"stopping": self.stopping and dict(self.stopping),
-                    "last_stop": self.last_stop and dict(self.last_stop)}
+        stopping, last_stop = self.stopping, self.last_stop
+        return {"stopping": stopping and dict(stopping), "last_stop": last_stop and dict(last_stop)}
