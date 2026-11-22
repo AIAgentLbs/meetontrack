@@ -916,6 +916,7 @@ let transcriptSignature = "";
 let renderedMessages = "";
 let requestBusy = false;
 let autoAnalysisPrimed = false;
+let heardPrimed = ""; // the heard question the last automatic analysis was started for
 // After an urgent request the server skipped (inside its 15 s gap), the time from which the next
 // poll asks again while a heard question still waits, even if the transcript has not changed.
 let urgentRetryAt = 0;
@@ -3429,14 +3430,19 @@ async function state() {
       && data.copilot.analysis?.state === "idle";
     const analysisKey = `${data.transcript.meeting_id}:${data.transcript.status}:${data.transcript.latest_at}:${(data.meeting_chat || []).length}:${(data.meeting_chat || []).at(-1)?.id || ""}`;
     const urgentRetryDue = Boolean(data.heard_question) && urgentRetryAt > 0 && Date.now() >= urgentRetryAt;
+    // A question offered as heard for the first time asks at once, also when the transcript key did not change
+    // (a provisional line turned final with the same start time, B4).
+    const heard = data.heard_question;
+    const heardKey = heard ? `${heard.at}|${heard.text}` : "";
     if (
       (data.transcript.live || finishedWithoutAnalysis) &&
       (data.transcript.latest_at || data.meeting_chat?.length) &&
-      (analysisKey !== autoAnalysisPrimed || urgentRetryDue) &&
+      (analysisKey !== autoAnalysisPrimed || urgentRetryDue || (heardKey && heardKey !== heardPrimed)) &&
       !requestBusy &&
       !data.copilot.busy
     ) {
       autoAnalysisPrimed = analysisKey;
+      heardPrimed = heardKey;
       void analyze(finishedWithoutAnalysis, Boolean(data.heard_question));
     }
   } catch (error) {

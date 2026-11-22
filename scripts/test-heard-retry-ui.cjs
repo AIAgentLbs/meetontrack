@@ -29,7 +29,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       if (url.pathname === '/api/state') return route.fulfill({ json: state() });
       if (url.pathname === '/api/analyze') {
         asks.push(route.request().postDataJSON());
-        return route.fulfill({ json: { ok: true, skipped: true } });  // inside the server's gap
+        // The first lands inside the server's gap (skipped); the later ones run.
+        return route.fulfill({ json: asks.length === 1 ? { ok: true, skipped: true } : { ok: true, answer: '' } });
       }
       if (url.pathname.startsWith('/api/')) return route.fulfill({ json: { ok: true } });
       const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
@@ -58,6 +59,13 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     heard = null;  // the analysis took it up (or it aged out)
     await settle(40000);
     assert.equal(asks.length, 2, 'no retry without a waiting question');
+
+    // B4: a provisional line became final with the same start time, so the transcript key did not change; the
+    // server now offers it as heard, and the page asks at once.
+    heard = { text: 'Who signs off the purchase?', speaker: 'Anna Petrova', at: '2026-10-22T10:01:00+00:00' };
+    await settle(3000);
+    assert.equal(asks.length, 3, 'a question that became final asks at once');
+    assert.deepEqual(asks[2], { force: false, urgent: true });
     assert.deepEqual(errors, []);
     console.log('heard-retry: ok');
   } finally {

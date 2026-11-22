@@ -30,6 +30,18 @@ def _seconds(value: object) -> float | None:
         return None
 
 
+def analysed_watermark(segments: list[dict], latest_at: str) -> str:
+    """The newest transcript time an analysis reads in final form: `latest_at`, or just before the first
+    line still provisional. A provisional question cannot be captured, and a finalized line keeps its start
+    time, so a watermark past it would hide a question the analysis never took up (B4)."""
+    provisional = [at for item in segments if item.get("provisional")
+                   if (at := _seconds(item.get("timestamp"))) is not None]
+    latest = _seconds(latest_at) if latest_at else None
+    if not provisional or (latest is not None and latest < min(provisional)):
+        return latest_at
+    return datetime.fromtimestamp(min(provisional) - 0.001).astimezone().isoformat()
+
+
 def heard_question(segments: list[dict], journal: list[dict], *, analysed_until: str,
                    busy: bool, now: float) -> dict | None:
     """The newest recent question from the other side that the analysis has not taken up yet.

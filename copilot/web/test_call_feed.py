@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import server
-from call_feed import SPEAKABLE_RULE, heard_question
+from call_feed import SPEAKABLE_RULE, analysed_watermark, heard_question
 from permissions import open_settings
 from server import CodexSession, MeetingJournal, analysis_question
 
@@ -59,6 +59,27 @@ class HeardQuestionTests(unittest.TestCase):
         # The analysis started after the question began (at -5 s) but saw a transcript
         # whose newest line was older: the question was not in it and still waits.
         self.assertEqual(heard([segment()], until=iso(10), busy=False)["text"], QUESTION)
+
+
+class ProvisionalQuestionTests(unittest.TestCase):
+    """B4: an analysis that read a question while it was provisional has not read it."""
+
+    def test_watermark_stops_before_the_first_provisional_line(self):
+        segments = [segment("Thanks.", ago=20), segment(ago=10, provisional=True),
+                    segment("Right.", ago=5, source="microphone")]
+        until = analysed_watermark(segments, iso(5))
+        self.assertLess(datetime.fromisoformat(until).timestamp(), NOW - 10)
+        segments[1].pop("provisional")  # finalized, same start time
+        self.assertEqual(heard(segments, until=until)["text"], QUESTION)
+        self.assertEqual(analysed_watermark(segments, iso(5)), iso(5))
+
+    def test_finalized_line_is_a_new_analysis(self):
+        session = CodexSession(None)
+        with mock.patch.object(server.time, "time", return_value=NOW):
+            self.assertTrue(session.should_analyze("same text", False, latest_at=iso(11)))
+        with mock.patch.object(server.time, "time", return_value=NOW + 20):
+            self.assertTrue(session.should_analyze("same text", False, urgent=True, latest_at=iso(5)))
+            self.assertFalse(session.should_analyze("same text", False, urgent=True, latest_at=iso(5)))
 
 
 class AnalysisReplyTests(unittest.TestCase):
