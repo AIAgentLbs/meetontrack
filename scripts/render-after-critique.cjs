@@ -2,7 +2,9 @@
 // English (with fixture data in the page's language), full page, into <out-dir>, with index.html and manifest.json.
 // Opened states are opened before the shot: answered_open unfolds the first folded line of the board, transcript_open
 // opens the transcript. The view scrolls inside its own section, so the viewport grows until nothing scrolls inside the
-// page and the full page shows the whole view. refining runs on a held clock, so the shot shows the first answer, before the refined summary.
+// page and the full page shows the whole view; the manifest keeps the viewport and the inner scroll from before the fit.
+// refining pauses the page's clock once it has loaded, so no poll brings the refined summary before both shots; a second
+// poll by the last shot fails the page.
 // Reduced motion. A page that fails to load is a failure entry in the manifest and the run goes on. Exits 1 when a page
 // failed, raised an error or scrolled horizontally. It does not run the critique.
 // Usage: PLAYWRIGHT_MODULE=... node scripts/render-after-critique.cjs <out-dir>
@@ -25,15 +27,23 @@ if (missing.length) {
   process.exit(1);
 }
 
-// Grows the viewport by what still scrolls inside an element (the After section, an open panel), so a full-page shot holds it.
+// What scrolls inside an element (the After section, an open panel): [[selector, extra px]].
+const inner = page => page.evaluate(() => [...document.body.querySelectorAll('*')]
+  .filter(node => ['auto', 'scroll'].includes(getComputedStyle(node).overflowY) && node.checkVisibility())
+  .map(node => [`${node.tagName.toLowerCase()}${node.id ? `#${node.id}` : ''}`, node.scrollHeight - node.clientHeight])
+  .filter(([, extra]) => extra > 1));
+
+// Grows the viewport by what still scrolls inside an element, so a full-page shot holds the whole view. Returns the
+// viewport before the fit, for the manifest; throws when something still scrolls inside after 3 rounds.
 async function fit(page, width) {
-  for (let round = 0; round < 3; round += 1) {
-    const extra = await page.evaluate(() => Math.max(0, ...[...document.body.querySelectorAll('*')]
-      .filter(node => ['auto', 'scroll'].includes(getComputedStyle(node).overflowY) && node.checkVisibility())
-      .map(node => node.scrollHeight - node.clientHeight)));
-    if (extra <= 1) return;
-    await page.setViewportSize({ width, height: page.viewportSize().height + extra });
+  const before = { height: page.viewportSize().height, scrolled: await inner(page) };
+  let scrolled = before.scrolled;
+  for (let round = 0; round < 3 && scrolled.length; round += 1) {
+    await page.setViewportSize({ width, height: page.viewportSize().height + Math.max(...scrolled.map(([, extra]) => extra)) });
+    scrolled = await inner(page);
   }
+  if (scrolled.length) throw new Error(`still scrolls inside after 3 rounds: ${JSON.stringify(scrolled)}`);
+  return before;
 }
 
 (async () => {
@@ -53,16 +63,19 @@ async function fit(page, width) {
             await page.waitForFunction(lang => document.documentElement.lang === lang
               && document.body.dataset.view === 'after' && !document.getElementById('after').hidden
               && document.querySelector('#after-send .after-headline')?.textContent, lang, { timeout: 5000 });
-            if (state === 'refining' && page.api.afterPolls !== 1) throw new Error(`refining: ${page.api.afterPolls} polls before the shot`);
+            if (state === 'refining') await page.clock.pauseAt(await page.evaluate(() => Date.now() + 50));
             if (OPENERS[state]) await page.locator(OPENERS[state]).first().click();
-            await fit(page, width);
+            const before = await fit(page, width);
+            const shots = [];
             for (const scheme of ['light', 'dark']) {
               const file = `${state}-${width}-${scheme}-${lang}.png`;
               await page.emulateMedia({ colorScheme: scheme });
               if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) problems.push(`${file}: horizontal scroll`);
               await page.screenshot({ path: path.join(out, file), fullPage: true });
-              manifest.push({ state, width, scheme, lang, file });
+              shots.push({ state, width, scheme, lang, file, before });
             }
+            if (state === 'refining' && page.api.afterPolls !== 1) throw new Error(`refining: ${page.api.afterPolls} polls by the last shot`);
+            manifest.push(...shots);
           } catch (error) {
             problems.push(`${state} ${width} ${lang}: ${error.message}`);
             manifest.push({ state, width, lang, failed: error.message });
