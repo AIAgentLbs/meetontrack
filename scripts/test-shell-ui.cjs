@@ -247,15 +247,22 @@ const errors = [];
         final: call({ last_stop: { meeting_id: 'm1', stopped_at: at(-4) } }),
         otherLastStop: call({ last_stop: { meeting_id: 'm0', stopped_at: at(-4) } }),
         otherStopping: call({ stopping: { meeting_id: 'm0', stopped_at: at(-10), until: at(20) } }),
+        // The same id recording again after its final stop (not seen from today's recorders, guarded anyway).
+        startedAfterStop: call({ last_stop: { meeting_id: 'm1', stopped_at: at(-60) } }),
+        startedBeforeStop: call({ last_stop: { meeting_id: 'm1', stopped_at: at(-60) } }),
         oneStalled: call({}, tracks('recording', 'stalled')),
         bothStalled: call({}, tracks('stalled', 'stalled')),
       };
-      return { time: homeClock(at(-10)), finalTime: homeClock(at(-4)),
+      cases.startedAfterStop.transcript.started_at = at(-10);
+      cases.startedBeforeStop.transcript.started_at = at(-600);
+      return { time: homeClock(at(-10)), finalTime: homeClock(at(-4)), beforeTime: homeClock(at(-60)),
         ...Object.fromEntries(Object.entries(cases).map(([name, state]) => [name, short(callStatus(state, { meetings: [] }, {}, now))])) };
     });
     assert.deepEqual(stops, {
-      time: stops.time, finalTime: stops.finalTime,
-      stopping: ['stopped', `Запись остановлена в ${stops.time}. Через 20 с откроется отчет.`, 'resume'],
+      time: stops.time, finalTime: stops.finalTime, beforeTime: stops.beforeTime,
+      startedAfterStop: ['recording', 'Запись', null],
+      startedBeforeStop: ['stopped', `Запись остановлена в ${stops.beforeTime}.`, null],
+      stopping: ['stopped', `Запись остановлена в ${stops.time}. Через 20\u00a0с откроется отчет.`, 'resume'],
       final: ['stopped', `Запись остановлена в ${stops.finalTime}.`, null],
       otherLastStop: ['recording', 'Запись', null],
       otherStopping: ['recording', 'Запись', null],
@@ -264,7 +271,7 @@ const errors = [];
     });
     assert.match(stops.time, /^\d\d:\d\d$/);
     assert.deepEqual(await page.evaluate(() => ['status.stopped', 'status.stopped_final', 'action.resume', 'action.stop', 'action.stop_short']
-      .map(key => translations.en[key])), ['Recording stopped at {time}. The report opens in {n} s.', 'Recording stopped at {time}.',
+      .map(key => translations.en[key])), ['Recording stopped at {time}. The report opens in {n}\u00a0s.', 'Recording stopped at {time}.',
       'Resume recording', 'Stop recording', 'Stop']);
     assert.deepEqual(await page.evaluate(() => ['meeting_changed', 'too_late', 'stop_failed', 'resume_failed']
       .map(code => translations.ru[`status.error.${code}`])), ['Звонок уже сменился, обновите страницу', 'Запись уже остановлена',

@@ -54,8 +54,9 @@ body:has(#archive-dialog[data-mode="library"]:not([hidden])) #home { display: no
 .bars:not(.quiet) i { animation: call-beat 0.8s ease-in-out infinite alternate; }
 .bars:not(.quiet) i:nth-child(2) { animation-delay: -0.3s; }
 .bars:not(.quiet) i:nth-child(3) { animation-delay: -0.55s; }
-.bars.quiet i { height: 4px; }
-.beat.lost .bars i { height: 2px; background: var(--danger); animation: none; }
+/* At rest every bar has one height, a level meter at rest, never dots. A side not heard says so in words, no bars. */
+.bars.quiet i { height: 8px; opacity: 0.55; }
+.beat.lost .bars { display: none; }
 .beat.lost b { color: var(--danger); }
 @keyframes call-beat { from { transform: scaleY(0.35); } to { transform: scaleY(1); } }
 @media (prefers-reduced-motion: reduce) { .bars i { animation: none !important; } }

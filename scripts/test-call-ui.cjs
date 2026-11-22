@@ -618,10 +618,15 @@ async function callBar(browser) {
   // The undo window: when it stopped and the seconds left; Resume, no Stop and no heartbeat.
   page = await callPage(browser, 'stopped', { at: Date.now() });
   const stopped = await text(page, '#call-status-text');
-  assert.match(stopped, /^Recording stopped at \d\d:\d\d\. The report opens in \d+ s\.$/);
-  const seconds = Number(stopped.match(/in (\d+) s/)[1]);
+  assert.match(stopped, /^Recording stopped at \d\d:\d\d\. The report opens in \d+\u00a0s\.$/);
+  const seconds = Number(stopped.match(/in (\d+)\u00a0s/)[1]);
+  // A screen reader hears the stop once, not every second (Minor 2): the bar's text is not a live region.
+  assert.equal(await page.$eval('#call-status-text', node => node.getAttribute('aria-live')), null);
+  const announced = await text(page, '#call-status-live');
+  assert.match(announced, /^Recording stopped at \d\d:\d\d\. The report opens in/);
   await page.clock.runFor(2000);
-  assert.ok(Number((await text(page, '#call-status-text')).match(/in (\d+) s/)[1]) < seconds, 'the countdown falls');
+  assert.ok(Number((await text(page, '#call-status-text')).match(/in (\d+)\u00a0s/)[1]) < seconds, 'the countdown falls');
+  assert.equal(await text(page, '#call-status-live'), announced, 'the countdown is not announced');
   assert.equal(await page.$eval('#call-status-text', node => node.className), 'status-text');
   assert.equal(await visible(page, '#call-stop'), false);
   assert.equal(await visible(page, '#call-live'), false);
@@ -643,6 +648,58 @@ async function callBar(browser) {
   assert.match(await text(page, '#call-status-text'), /^Recording stopped at \d\d:\d\d\.$/);
   assert.equal(await visible(page, '#call-status-action'), false);
   assert.equal(await visible(page, '#call-stop'), false);
+  await page.context().close();
+
+  // Not recording (paused, or no fresh data): no heartbeat beside it, the bar says why (Important 2).
+  page = await callPage(browser, 'hint');
+  assert.equal(await text(page, '#call-status-live'), 'Recording');
+  for (const kind of ['paused', 'stale']) {
+    const state = page.api.fixture.state;
+    if (kind === 'paused') Object.assign(state.recording_health.capture, { state: 'paused' });
+    else state.recording_health.checked_at = Date.now() / 1000 - 600;
+    await refresh(page);
+    assert.match(await text(page, '#call-status-text'), /^Not recording: /, kind);
+    assert.equal(await visible(page, '#call-live'), false, `${kind}: no heartbeat`);
+    assert.equal(await text(page, '#call-status-live'), await text(page, '#call-status-text'), `${kind}: announced`);
+  }
+  await page.context().close();
+
+  // Still bars rest at one visible height; a side not heard shows its words, no red dots (Minor 3).
+  page = await callPage(browser, 'other_lost');
+  const bars = await page.$$eval('#call-beats .beat', nodes => nodes.map(node => ({
+    quiet: node.querySelector('.bars').classList.contains('quiet'), shown: node.querySelector('.bars').getClientRects().length > 0,
+    heights: [...node.querySelectorAll('.bars i')].map(bar => bar.getBoundingClientRect().height) })));
+  const still = bars.find(beat => beat.quiet && beat.shown);
+  assert.ok(still, 'a quiet side');
+  assert.equal(new Set(still.heights).size, 1, `one resting height: ${still.heights}`);
+  assert.ok(still.heights[0] >= 6, `a visible baseline: ${still.heights[0]}`);
+  assert.equal(bars[1].shown, false, 'the lost side has no bars');
+  await page.context().close();
+
+  // A failed Stop stays readable for 8 s at least and offers Open the recorder (Minor 1).
+  page = await callPage(browser, 'hint', { at: Date.now() });
+  page.api.responses['/api/recording/stop'] = { status: 500, json: { ok: false, error: 'stop_failed' } };
+  await page.click('#call-stop');
+  await page.waitForFunction(() => document.getElementById('call-status-text').textContent === 'The recording did not stop, open the recorder');
+  assert.equal(await text(page, '#call-status-action'), 'Open the recorder');
+  await page.clock.runFor(5000); // two polls
+  assert.equal(await text(page, '#call-status-text'), 'The recording did not stop, open the recorder', 'still there after the polls');
+  await page.clock.runFor(4000);
+  await refresh(page);
+  assert.equal(await text(page, '#call-status-text'), 'Recording', 'gone after 8 s and a new state');
+  assert.equal(await visible(page, '#call-status-action'), false);
+  // Open the recorder does what the bar's own one does.
+  await page.waitForFunction(() => !document.getElementById('call-stop').disabled);
+  await page.click('#call-stop');
+  await page.waitForFunction(() => document.getElementById('call-status-action').textContent === 'Open the recorder');
+  await page.click('#call-status-action');
+  await expectPost(page, '/api/getting-started/open-recorder', {});
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+
+  // RU at 400 px: the number and «с» never part.
+  page = await callPage(browser, 'stopped', { width: 400, lang: 'ru', data: 'ru' });
+  assert.match(await text(page, '#call-status-text'), /Через \d+\u00a0с откроется отчет\.$/);
   await page.context().close();
 
   // No capture marker and nobody heard yet: silence is never "not heard".

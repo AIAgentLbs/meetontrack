@@ -68,7 +68,9 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
     const n = Math.max(0, Math.ceil((Date.parse(stopping.until) - now) / 1000));
     return { kind: "stopped", text: t("status.stopped", { time: homeClock(stopping.stopped_at), n }), action: action("resume", false) };
   }
-  if (!stopping && isLive(state, now) && control.last_stop?.meeting_id === meeting) {
+  // A live recording that began after the final stop is a new one, even under the same id.
+  const started = Date.parse(state?.recording_health?.capture?.started_at || state?.transcript?.started_at || "");
+  if (!stopping && isLive(state, now) && control.last_stop?.meeting_id === meeting && !(started > Date.parse(control.last_stop.stopped_at))) {
     return { kind: "stopped", text: t("status.stopped_final", { time: homeClock(control.last_stop.stopped_at) }), action: null };
   }
   if (stateConnectionFailed && !isLive(state, now)) return { kind: "disconnected", text: t("status.disconnected"), action: null };
@@ -114,7 +116,9 @@ const STATUS_POSTS = {
   resume: ["/api/recording/resume", {}],
 };
 // The server's own codes for Stop and Resume, in plain words (F6); anything else goes through plainError.
-const STATUS_ERRORS = new Set(["meeting_changed", "too_late", "stop_failed", "resume_failed"]);
+// A recorder that did not answer gets the bar's existing Open the recorder.
+const STATUS_ERRORS = { meeting_changed: null, too_late: null, stop_failed: "open_recorder", resume_failed: "open_recorder" };
+const STATUS_ERROR_MS = 8000; // a Stop or Resume error stays this long at least, so it can be read on stage
 const MAC = /Mac/.test(navigator.platform);
 const RECORD_KEY = MAC ? "⌘⇧R" : "Alt+Shift+R";
 const STOP_KEY = MAC ? "⌘⇧E" : "Alt+Shift+E";
@@ -123,7 +127,9 @@ const keyHint = label => {
   node.setAttribute("aria-hidden", "true");
   return node;
 };
-let statusError = null; // {text, state}: a failed status action, shown until the next state poll replaces the state
+// {text, state, until, action}: a failed status action, shown until the next state poll replaces the state and,
+// for Stop and Resume, at least until `until`; `action` is offered in place of the status's own.
+let statusError = null;
 
 // A status action from the bar: its busy key makes a double click post once, and it stays disabled until the
 // agenda and permissions (Stop and Resume: the state) are fetched again. A failed Stop or Resume keeps the state
@@ -139,9 +145,12 @@ async function statusAction(button, id) {
   let failed = false;
   try {
     await post(path, recording ? { meeting_id: window.appState?.transcript?.meeting_id } : body);
+    statusError = null;
   } catch (error) {
     failed = true;
-    statusError = { text: STATUS_ERRORS.has(error?.message) ? t(`status.error.${error.message}`) : plainError(error), state: window.appState };
+    const code = Object.hasOwn(STATUS_ERRORS, error?.message) ? error.message : null;
+    statusError = { text: code ? t(`status.error.${code}`) : plainError(error), state: window.appState,
+      until: recording ? Date.now() + STATUS_ERROR_MS : 0, action: code && STATUS_ERRORS[code] };
   }
   try {
     await (recording ? !failed && state() : refreshAgenda());
@@ -160,15 +169,23 @@ const SHORT_BAR = matchMedia("(max-width: 480px)");
 SHORT_BAR.addEventListener("change", () => renderShell());
 
 function renderStatus(view) {
-  if (statusError && statusError.state !== window.appState) statusError = null;
+  if (statusError && statusError.state !== window.appState && !(statusError.until > Date.now())) statusError = null;
   const status = currentStatus();
   // Another view opened by hand during a call: the way back to the call is the status's action.
   if (isLive(window.appState) && view !== viewFor(window.appState, null)) {
     status.action = { id: "back", label: t("action.back_to_call"), primary: true };
   }
+  if (statusError?.action) status.action = { id: statusError.action, label: t(`action.${statusError.action}`), primary: true };
   const text = $("call-status-text");
   const shown = statusError?.text || (SHORT_BAR.matches && status.short) || status.text;
   if (text.textContent !== shown) text.textContent = shown;
+  // Screen readers hear a change of status, not each second of the undo countdown (the visible text is not live).
+  const heard = $("call-status-live");
+  const said = status.kind === "stopped" && !statusError ? `${status.kind}|${status.action?.id}` : shown;
+  if (heard.dataset.said !== said) {
+    heard.dataset.said = said;
+    heard.textContent = shown;
+  }
   const calm = status.kind === "waiting" || status.kind === "stopped";
   text.className = `status-text${status.kind === "recording" ? " rec" : statusError || !calm ? " fail" : ""}`;
   const button = $("call-status-action");
@@ -226,7 +243,7 @@ const shortcuts = [
     match: event => event.code === "KeyE" && event.shiftKey && (MAC ? event.metaKey && !event.altKey : event.altKey && !event.metaKey),
     control: () => ($("call-stop").hidden ? null : $("call-stop")) },
   { label: "call.ask_label", kbd: "/", shift: true, focus: true, match: event => event.key === "/",
-    control: () => ($("call").hidden ? null : $("call-question")) },
+    control: () => ($("call-question").getClientRects().length ? $("call-question") : null) },
   { label: "shell.key.join", kbd: "J", match: event => event.code === "KeyJ", control: () => homeControl('.actions a.ql[target="_blank"]') },
   { label: "shell.key.skip", kbd: "N", match: event => event.code === "KeyN", control: () => homeControl('.actions button.quiet[data-key$="|skip"]') },
 ];

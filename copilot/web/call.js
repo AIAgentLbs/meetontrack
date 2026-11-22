@@ -316,10 +316,11 @@ function renderCall(state) {
 }
 
 // The bar during a live call: the clock, whether each side is heard (from the same heartbeat as the feed's problem,
-// so the two never disagree) and the last line heard. Hidden when the call is not live or Stop was pressed (F16).
+// so the two never disagree) and the last line heard. Shown only beside Recording: a call not live (F16), stopped,
+// paused or without fresh data has no heartbeat to show. One stalled side is still Recording (F19), with its beat.
 const CALL_BEAT_WORDS = { heard: "call.heard", not_heard: "call.not_heard", checking: "call.checking" };
 function renderCallBar(state, now) {
-  const live = isLive(state, now) && callStatus(state, window.agendaData, window.permissionsData, now).kind !== "stopped";
+  const live = callStatus(state, window.agendaData, window.permissionsData, now).kind === "recording";
   $("call-live").hidden = !live;
   if (!live) return;
   const clock = callClock(state.recording_health?.capture?.started_at || state.transcript?.started_at, now);
