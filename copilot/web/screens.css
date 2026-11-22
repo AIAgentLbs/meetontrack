@@ -63,6 +63,11 @@ body:has(#archive-dialog[data-mode="library"]:not([hidden])) #home { display: no
 @media (prefers-reduced-motion: reduce) { .bars i { animation: none !important; } }
 .heard-line { contain: inline-size; flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 13px; line-height: 1.5; color: var(--muted); }
+/* The words cut from the start (right-to-left box, the text isolated left-to-right), the label kept whole (E3). */
+.heard-line:not([hidden]) { display: flex; }
+.heard-line > span:first-child { flex-shrink: 0; white-space: pre; }
+.heard-words { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.heard-words bdi { direction: ltr; }
 #call-stop { flex-shrink: 0; }
 .lbl-s { display: none; }
 /* A narrow window shrinks the status, never Menu or the delivery pill: the pill is a few words and is never cut. */

@@ -372,7 +372,14 @@ function renderCallBar(state, now) {
   }));
   const phrase = lastPhrase(state);
   const line = phrase ? t("call.last_phrase").replace("{text}", () => phrase) : ""; // a function: "$&" in speech stays as said
-  if ($("call-heard").textContent !== line) $("call-heard").textContent = line;
+  // The label stays whole and the words are cut from the start, so the newest ones show in a narrow bar (E3).
+  if ($("call-heard").textContent !== line) {
+    const [label] = t("call.last_phrase").split("{text}");
+    const words = document.createElement("span");
+    words.className = "heard-words";
+    words.append(textNode("bdi", "", phrase));
+    $("call-heard").replaceChildren(textNode("span", "", label), words);
+  }
   $("call-heard").hidden = !line;
 }
 // The clock ticks every second; while stopped the whole bar does, for the countdown.

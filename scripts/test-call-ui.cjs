@@ -890,6 +890,30 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // E3: in a narrow window the last line heard keeps its label and its newest words; the cut is at the start.
+  for (const width of [520, 760]) {
+    const page = await callPage(browser, 'hint', { width });
+    const said = 'The committee meets on Thursdays and the regional offices join later, so the earliest start is the second week';
+    page.api.fixture.state.transcript.segments.push({ source: 'system', speaker: 'Anna Petrova', text: said, timestamp: new Date().toISOString() });
+    await refresh(page);
+    const shown = await page.evaluate(() => {
+      const line = document.getElementById('call-heard');
+      const box = line.getBoundingClientRect();
+      const range = document.createRange();
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+      const at = (node, offset) => { range.setStart(node, offset); range.setEnd(node, offset + 1); return range.getBoundingClientRect(); };
+      const first = at(nodes[0], 0), lastNode = nodes.at(-1), last = at(lastNode, lastNode.length - 1);
+      return { text: line.textContent,
+        first: first.left >= box.left - 1 && first.right <= box.right + 1, last: last.left >= box.left - 1 && last.right <= box.right + 1,
+        cut: line.scrollWidth > line.clientWidth || [...line.children].some(child => child.scrollWidth > child.clientWidth) };
+    });
+    assert.ok(shown.text.startsWith('Transcript: '), shown.text);
+    assert.ok(shown.text.endsWith('second week'), shown.text);
+    assert.equal(shown.first, true, `${width}: the label shows`);
+    assert.equal(shown.last, true, `${width}: the newest words show`);
+    await page.context().close();
+  }
   // E2: the call ends while More is open: More closes, so Home's shortcuts work again.
   {
     const page = await callPage(browser, 'more_open', { width: 400 });
