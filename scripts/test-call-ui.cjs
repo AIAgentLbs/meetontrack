@@ -621,30 +621,31 @@ async function callBar(browser) {
     await page.context().close();
   }
 
-  // The undo window: the seconds left (G2); Resume, no Stop and no heartbeat.
+  // The undo window (N2, N3): the bar says Stopped with the call's clock frozen at the stop, Resume sits in Stop's place,
+  // the one countdown is in the feed; no heartbeat.
   page = await callPage(browser, 'stopped', { at: Date.now() });
-  const stopped = await text(page, '#call-status-text');
-  assert.match(stopped, /^Recording stopped\. You can resume for \d+ more\u00a0sec\.$/); // H1
-  const seconds = Number(stopped.match(/for (\d+) more/)[1]);
+  assert.match(await text(page, '#call-status-text'), /^Stopped \d\d:\d\d$/);
+  const left = async () => Number((await text(page, '#call-slot p')).match(/ in (\d+)/)[1]);
+  const seconds = await left();
   // A screen reader hears the stop once, not every second (Minor 2): the bar's text is not a live region.
   assert.equal(await page.$eval('#call-status-text', node => node.getAttribute('aria-live')), null);
   const announced = await text(page, '#call-status-live');
-  assert.match(announced, /^Recording stopped\./);
+  assert.match(announced, /^Stopped /);
   await page.clock.runFor(2000);
-  assert.ok(Number((await text(page, '#call-status-text')).match(/for (\d+) more/)[1]) < seconds, 'the countdown falls');
-  assert.equal(await text(page, '#call-status-live'), announced, 'the countdown is not announced');
+  assert.ok(await left() < seconds, 'the countdown falls');
+  assert.equal(await text(page, '#call-status-live'), announced, 'nothing is announced every second');
   assert.equal(await page.$eval('#call-status-text', node => node.className), 'status-text');
-  assert.equal(await visible(page, '#call-stop'), false);
+  assert.equal(await visible(page, '#call-status-action'), false);
   assert.equal(await visible(page, '#call-live'), false);
-  assert.equal(await text(page, '#call-status-action'), 'Resume recording');
-  await page.click('#call-status-action');
+  assert.equal(await page.locator('#call-stop').getAttribute('aria-label'), 'Resume recording');
+  await page.click('#call-stop');
   await expectPost(page, '/api/recording/resume', { meeting_id: 'm1' });
   await page.context().close();
 
   // Too late to resume: plain words, never the code (F6).
   page = await callPage(browser, 'stopped');
   page.api.responses['/api/recording/resume'] = { status: 409, json: { ok: false, error: 'too_late' } };
-  await page.click('#call-status-action');
+  await page.click('#call-stop');
   await page.waitForFunction(() => document.getElementById('call-status-text').textContent === 'The recording has already stopped');
   assert.doesNotMatch(await page.locator('.topbar').innerText(), /too_late/);
   await page.context().close();
@@ -714,9 +715,10 @@ async function callBar(browser) {
   assert.deepEqual(page.errors, []);
   await page.context().close();
 
-  // RU at 400 px: the number and «с» never part.
+  // RU at 400 px: the number and «сек» never part (D4), in the one countdown, the feed's (N2).
   page = await callPage(browser, 'stopped', { width: 400, lang: 'ru', data: 'ru' });
-  assert.match(await text(page, '#call-status-text'), /^Запись остановлена\. Продолжить можно еще \d+\u00a0сек\.$/); // D4, H1
+  assert.match(await text(page, '#call-status-text'), /^Остановлено \d\d:\d\d$/);
+  assert.match(await text(page, '#call-slot p'), / через \d+\u00a0сек,/);
   await page.context().close();
 
   // No capture marker and nobody heard yet: silence is never "not heard".
@@ -748,16 +750,13 @@ async function narrow(browser) {
     const dock = await box(page, '.dock');
     const bar = await box(page, '.topbar');
     assert.ok(slot.top >= bar.bottom && slot.bottom <= dock.top, `${label}: the slot is in view ${JSON.stringify([slot, bar.bottom, dock.top])}`);
-    // Stop stays in the bar with its short label, the only Stop: More never has one; stopped, the bar has none either.
+    // Stop stays in the bar with its short label, the only Stop: More never has one. Stopped, the same button is Resume
+    // with its short label (N3).
     assert.equal(await page.locator('#call-more-menu [role="menuitem"]').count(), 3, `${label}: three items in More`);
     assert.equal(await page.locator('#call-more-stop').count(), 0);
-    const stop = await visible(page, '#call-stop');
-    assert.equal(stop, fixture !== 'stopped', `${label}: Stop`);
-    if (stop) {
-      assert.equal(await visible(page, '#call-stop .lbl-s'), true, `${label}: short label`);
-      assert.equal(await text(page, '#call-stop .lbl-s'), 'Stop');
-      assert.equal(await visible(page, '#call-stop .lbl-l'), false);
-    }
+    assert.equal(await visible(page, '#call-stop'), true, `${label}: Stop`);
+    assert.equal(await page.locator('#call-stop').innerText(), fixture === 'stopped' ? 'Resume' : 'Stop', `${label}: short label`);
+    assert.equal(await visible(page, '#call-stop .lbl-l'), false);
     // "/" still goes to the ask field: More hides the row, never the field.
     await page.locator('#call-name').click();
     await page.keyboard.press('/');
@@ -1143,7 +1142,8 @@ async function fixWave(browser) {
     assert.equal(await page.locator('#call-problem > *').count(), 0, `${fixture}: no problem card`);
     // One plain line (G2, G3, L3): what comes next in the undo window, the recording saved after the final stop.
     assert.match(await text(page, '#call-slot p'), fixture === 'stopped'
-      ? /^The recording is saved in \d+\u00a0sec, then you can open the call results\.$/ : /^The recording is saved\.$/, fixture);
+      ? /^Recording stopped at \d\d:\d\d\. The results appear here in \d+\u00a0sec, until then you can resume recording\.$/
+      : /^The recording is saved\.$/, fixture);
     assert.equal(await page.locator('#call-question').isEnabled(), true);
     await page.fill('#call-question', 'What did Anna say about the budget?');
     await page.press('#call-question', 'Enter');
@@ -1205,14 +1205,16 @@ async function polish(browser) {
   for (const name of NAMES) for (const lang of ['en', 'ru']) {
     assert.doesNotMatch(JSON.stringify(build(name, lang).state.journal.map(item => [item.text, item.reply, item.evidence])), /\b\d\d:\d\d\b/, `${name} ${lang}`);
   }
-  // G2, H1, L3: the bar says the recording stopped and how long it can be resumed; the feed says what comes next.
-  for (const [lang, bar, feed] of [['ru', /^Запись остановлена\. Продолжить можно еще \d+\u00a0сек\.$/, /^Через \d+\u00a0сек запись сохранится/],
-    ['en', /^Recording stopped\. You can resume for \d+ more\u00a0sec\.$/, /^The recording is saved in \d+\u00a0sec/]]) {
+  // G2, H1, N2: the bar says Stopped at the call's clock, Resume in Stop's place; the feed counts down to the results.
+  // The one time in the feed is that elapsed clock (G1), never a time of day.
+  for (const [lang, bar, feed] of [['ru', /^Остановлено (\d\d:\d\d)$/, /^Запись остановлена на (\d\d:\d\d)\. Итоги появятся здесь через \d+\u00a0сек/],
+    ['en', /^Stopped (\d\d:\d\d)$/, /^Recording stopped at (\d\d:\d\d)\. The results appear here in \d+\u00a0sec/]]) {
     const page = await callPage(browser, 'stopped', { lang, data: lang, at });
-    assert.match(await text(page, '#call-status-text'), bar, lang);
-    assert.equal(await text(page, '#call-status-action'), lang === 'ru' ? 'Продолжить запись' : 'Resume recording');
-    assert.match(await text(page, '#call-slot'), feed, lang);
-    assert.doesNotMatch(await page.locator('#call').innerText(), /больше не будет|No more hints|\d:\d\d/, lang);
+    const clock = (await text(page, '#call-status-text')).match(bar)?.[1];
+    assert.ok(clock, lang);
+    assert.equal(await page.locator('#call-stop').innerText(), lang === 'ru' ? 'Продолжить запись' : 'Resume recording');
+    assert.equal((await text(page, '#call-slot')).match(feed)?.[1], clock, lang);
+    assert.doesNotMatch((await page.locator('#call').innerText()).replace(clock, ''), /больше не будет|No more hints|\d:\d\d/, lang);
     await page.context().close();
   }
   // G3: the final stop says the recording is saved and opens this meeting's results.
@@ -1316,10 +1318,10 @@ async function polish(browser) {
 async function round3(browser) {
   const plain = value => String(value).replace(/\u00a0/g, ' ').trim();
   // H1 (P1): the stopping state reads as stopped, in the bar and in the feed, never as the AI's pause.
-  for (const [lang, bar, feed] of [['ru', 'Запись остановлена. Продолжить можно еще 20 сек.', /^Через \d+ сек запись сохранится/],
-    ['en', 'Recording stopped. You can resume for 20 more sec.', /^The recording is saved in \d+ sec/]]) {
+  for (const [lang, bar, feed] of [['ru', /^Остановлено \d\d:\d\d$/, /^Запись остановлена на \d\d:\d\d\. Итоги появятся здесь через \d+ сек/],
+    ['en', /^Stopped \d\d:\d\d$/, /^Recording stopped at \d\d:\d\d\. The results appear here in \d+ sec/]]) {
     const page = await callPage(browser, 'stopped', { lang, data: lang });
-    assert.equal(plain(await text(page, '#call-status-text')), bar);
+    assert.match(plain(await text(page, '#call-status-text')), bar);
     assert.match(plain(await text(page, '#call-slot p')), feed);
     assert.doesNotMatch(await page.locator('#call').innerText(), /паузе|paused/i);
     await page.context().close();
@@ -1500,6 +1502,30 @@ async function round3(browser) {
 // Section L: critique 4 (30/40), and sections K3 and M.
 async function round4(browser) {
   const plain = value => String(value).replace(/\u00a0/g, ' ').trim();
+  // N2: one countdown, in the feed. The bar says Stopped with the call's clock frozen at the stop; nothing says
+  // "will be saved". N3: Resume is the Stop button itself, same place and size at every width, never a second row.
+  for (const width of [1440, 1024, 400]) {
+    const live = await callPage(browser, 'hint', { lang: 'ru', data: 'ru', width });
+    const stop = await live.$eval('#call-stop', node => node.getBoundingClientRect().toJSON());
+    await live.context().close();
+    const page = await callPage(browser, 'stopped', { lang: 'ru', data: 'ru', width, at: Date.now() });
+    const bar = plain(await text(page, '#call-status-text'));
+    assert.match(bar, /^Остановлено \d\d:\d\d$/, `${width}: ${bar}`);
+    await page.clock.runFor(3000);
+    assert.equal(plain(await text(page, '#call-status-text')), bar, `${width}: the clock is frozen`);
+    assert.match(plain(await text(page, '#call-slot p')),
+      /^Запись остановлена на \d\d:\d\d\. Итоги появятся здесь через \d+ сек, до тех пор запись можно продолжить\.$/);
+    assert.doesNotMatch(`${await page.locator('#call').innerText()} ${await page.locator('.topbar').innerText()}`, /сохранит|Продолжить можно еще/);
+    assert.equal(await visible(page, '#call-status-action'), false, `${width}: no second Resume`);
+    const resume = await page.$eval('#call-stop', node => ({ ...node.getBoundingClientRect().toJSON(), text: node.innerText.trim(),
+      menu: document.getElementById('menu-button').getBoundingClientRect().top }));
+    assert.match(resume.text, width > 700 ? /^Продолжить запись/ : /^Продолжить$/);
+    for (const side of ['left', 'top', 'width', 'height']) assert.ok(Math.abs(resume[side] - stop[side]) <= 1, `${width} ${side}: ${resume[side]} / ${stop[side]}`);
+    assert.ok(Math.abs(resume.top - resume.menu) <= 8, `${width}: Resume on Menu's row`);
+    await page.click('#call-stop');
+    await expectPost(page, '/api/recording/resume', { meeting_id: 'm1' });
+    await page.context().close();
+  }
   // N1 (P1): every hint in the slot has one source component: Where this comes from, closed, holding the source; or,
   // with no source, one muted line that says so. Nothing else under the line to say.
   for (const [fixture, expected] of [['hint', 'open'], ['memo_question', 'open'], ['long_hint', 'open'], ['answer', 'none'],
@@ -1626,11 +1652,11 @@ async function round4(browser) {
       assert.ok(ages.earlier.every(at => at <= ages.current), `${name}: Earlier holds a newer item`);
     await page.context().close();
   }
-  // L3: in the undo window the feed says what comes next, counting down, and the ask field stays usable.
-  for (const [lang, body] of [['ru', 'Через 20 сек запись сохранится, и можно будет открыть итоги.'],
-    ['en', 'The recording is saved in 20 sec, then you can open the call results.']]) {
+  // L3, N2: in the undo window the feed says what comes next, counting down, and the ask field stays usable.
+  for (const [lang, body] of [['ru', /^Запись остановлена на \d\d:\d\d\. Итоги появятся здесь через 20 сек, до тех пор запись можно продолжить\.$/],
+    ['en', /^Recording stopped at \d\d:\d\d\. The results appear here in 20 sec, until then you can resume recording\.$/]]) {
     const page = await callPage(browser, 'stopped', { lang, data: lang, at: Date.now() });
-    assert.equal(plain(await text(page, '#call-slot p')), body);
+    assert.match(plain(await text(page, '#call-slot p')), body);
     await page.clock.runFor(2000);
     assert.match(plain(await text(page, '#call-slot p')), /18 sec|18 сек/);
     assert.equal(await page.locator('#call-question').isEditable(), true);

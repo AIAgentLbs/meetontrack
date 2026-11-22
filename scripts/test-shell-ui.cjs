@@ -260,9 +260,9 @@ const errors = [];
     });
     assert.deepEqual(stops, {
       startedAfterStop: ['recording', 'Запись', null],
-      // No time of the stop (G1): the bar's one clock is the call's; the undo window says when it stops (G2).
+      // No time of day (G1): the bar's one clock is the call's, frozen at the stop; Resume is the Stop button (N2, N3).
       startedBeforeStop: ['stopped', 'Запись остановлена.', null],
-      stopping: ['stopped', 'Запись остановлена. Продолжить можно еще 20\u00a0сек.', 'resume'],
+      stopping: ['stopped', 'Остановлено 14:50', null],
       final: ['stopped', 'Запись остановлена.', null],
       otherLastStop: ['recording', 'Запись', null],
       otherStopping: ['recording', 'Запись', null],
@@ -270,7 +270,7 @@ const errors = [];
       bothStalled: ['not_recording', 'Запись не идет: звук перестал записываться', null],
     });
     assert.deepEqual(await page.evaluate(() => ['status.stopped', 'status.stopped_final', 'action.resume', 'action.stop', 'action.stop_short']
-      .map(key => translations.en[key])), ['Recording stopped. You can resume for {n} more\u00a0sec.', 'Recording stopped.',
+      .map(key => translations.en[key])), ['Stopped {time}', 'Recording stopped.',
       'Resume recording', 'Stop recording', 'Stop']);
     assert.deepEqual(await page.evaluate(() => ['meeting_changed', 'too_late', 'stop_failed', 'resume_failed']
       .map(code => translations.ru[`status.error.${code}`])), ['Звонок уже сменился, обновите страницу', 'Запись уже остановлена',

@@ -24,6 +24,13 @@ body:has(#archive-dialog[data-mode="library"]:not([hidden])) #home { display: no
   background: var(--surface); border-bottom: 1px solid var(--line); font-size: 15px; line-height: 1.5;
 }
 .topbar .spacer { flex: 1; }
+/* Stop (or Resume) and Menu never shrink under their labels: the live status gives way first (N3). */
+.topbar .tools { flex-shrink: 0; }
+/* From 901 px navigation, Stop and Menu sit on the bar's first row, where a one-row bar centers them anyway: a live bar
+   that wraps to three rows keeps Stop where the one-row stopped bar shows Resume (N3). */
+@media (min-width: 901px) {
+  .topbar :is(.navs, .tools) { align-self: flex-start; margin-top: 12px; }
+}
 .navs { display: flex; gap: 16px; }
 .topbar .nav {
   display: inline-flex; align-items: center; min-height: 36px; padding: 0 4px; border: 0; border-radius: 0;
@@ -42,7 +49,7 @@ body:has(#archive-dialog[data-mode="library"]:not([hidden])) #home { display: no
 .topbar .status-text.fail { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 /* A live call: the clock, whether each side is heard and, under them, the last line heard. The bars move only while
    that side speaks; a side not heard has flat bars and its word in the error colour. */
-.topbar .status:has(> #call-live:not([hidden])) { flex: 1 1 auto; flex-wrap: wrap; row-gap: 0; padding-block: 6px; }
+.topbar .status:has(> #call-live:not([hidden])) { flex: 1 1 auto; flex-wrap: wrap; row-gap: 0; padding-block: 6px; min-width: 0; }
 #call-live:not([hidden]) { display: contents; }
 .timer { font-variant-numeric: tabular-nums; font-weight: 600; }
 .beats { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 14px; }
@@ -69,6 +76,10 @@ body:has(#archive-dialog[data-mode="library"]:not([hidden])) #home { display: no
 .heard-words { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .heard-words bdi { direction: ltr; }
 #call-stop { flex-shrink: 0; }
+/* Stop and, in the undo window, Resume: one button whose labels share one cell, so it keeps its place and size (N3). */
+#call-stop:not([hidden]) { display: inline-grid; grid-auto-flow: column; align-items: center; column-gap: 0.3em; }
+#call-stop > span { grid-row: 1; grid-column: 1; }
+#call-stop[data-mode="resume"] > .stop, #call-stop:not([data-mode="resume"]) > .resume, #call-stop[data-mode="resume"] kbd { visibility: hidden; }
 .lbl-s { display: none; }
 /* A narrow window shrinks the status, never Menu or the delivery pill: the pill is a few words and is never cut. */
 .tools { position: relative; display: flex; align-items: center; gap: 16px; min-width: 0; }
@@ -361,6 +372,8 @@ body[data-view="call"]:not([data-call-panel="notes"]):not([data-call-panel="chat
   .topbar:has(#call-stop:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto auto;
     grid-template-areas: "text stop menu" "live live live" "action action action" "alert alert alert"; padding-block: 6px; }
   #call-stop { grid-area: stop; }
+  /* Stop, Resume and Menu at the top of the first row, whatever the status beside them (N3). */
+  .topbar:has(#call-stop:not([hidden])) :is(#call-stop, #menu-button) { align-self: start; }
   #call-live:not([hidden]) { grid-area: live; display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; width: 100%; min-width: 0;
     font-size: 14px; }
   .lbl-l { display: none; }

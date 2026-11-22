@@ -68,9 +68,11 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
   if (stopping?.failed && stopping.meeting_id === meeting) {
     return { kind: "stop_failed", text: t("status.error.stop_failed"), action: action("open_recorder") };
   }
+  // The undo window: Stopped and the call's clock frozen at the stop; the one countdown is in the feed, and Resume
+  // takes Stop's own place (N2, N3).
   if (stopping && stopping.meeting_id === meeting) {
-    const n = Math.max(0, Math.ceil((Date.parse(stopping.until) - now) / 1000));
-    return { kind: "stopped", text: t("status.stopped", { n }), action: action("resume", false) };
+    const clock = callClock(state?.recording_health?.capture?.started_at || state?.transcript?.started_at, Date.parse(stopping.stopped_at));
+    return { kind: "stopped", text: t("status.stopped", { time: clock }), clock, action: null, resume: true };
   }
   // A live recording that began after the final stop is a new one, even under the same id.
   const started = Date.parse(state?.recording_health?.capture?.started_at || state?.transcript?.started_at || "");
@@ -204,9 +206,13 @@ function renderStatus(view) {
     button.replaceChildren(label);
     if (id === "start") button.append(keyHint(RECORD_KEY));
   }
-  // Stop recording: during a live call until it is pressed; one click, no dialog.
-  $("call-stop").hidden = !isLive(window.appState) || status.kind === "stopped";
-  $("call-stop").disabled = homeBusy.has("status|stop");
+  // Stop recording: during a live call until it is pressed; one click, no dialog. In the undo window the same button,
+  // in the same place and size, is Resume (N3).
+  const stop = $("call-stop");
+  stop.dataset.mode = status.resume ? "resume" : "stop";
+  stop.setAttribute("aria-label", t(status.resume ? "action.resume" : "action.stop"));
+  stop.hidden = !status.resume && (!isLive(window.appState) || status.kind === "stopped");
+  stop.disabled = homeBusy.has(`status|${stop.dataset.mode}`);
   // R34: the bar owns a call that is not being recorded, and How to fix sits beside its button.
   $("call-status-help").hidden = status.kind !== "not_recording";
   $("menu-notes").hidden = view === "home";
@@ -421,7 +427,7 @@ $("call-status-action").addEventListener("click", event => {
   } catch {}
   renderShell();
 });
-$("call-stop").addEventListener("click", event => statusAction(event.currentTarget, "stop"));
+$("call-stop").addEventListener("click", event => statusAction(event.currentTarget, event.currentTarget.dataset.mode === "resume" ? "resume" : "stop"));
 $("call-stop").querySelector("kbd").textContent = STOP_KEY;
 $("menu-chat").addEventListener("click", () => openCallPanel("chat"));
 $("menu-notes").addEventListener("click", () => (document.body.dataset.view === "call" ? openCallPanel("notes")
