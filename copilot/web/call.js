@@ -552,6 +552,8 @@ function openCallPanel(panel) {
 
 addEventListener("DOMContentLoaded", () => {
   $("call-earlier-open").addEventListener("click", () => {
+    // Over Board or Transcript the dock's Earlier goes back to the feed with the list open.
+    if (document.body.dataset.callPanel) return (callEarlierOpen = true), openCallPanel(null);
     callEarlierOpen = !callEarlierOpen;
     renderCall(window.appState);
   });

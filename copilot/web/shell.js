@@ -323,7 +323,8 @@ function renderShell() {
   // More belongs to the Call feed: left open as the call ends, it would block Home's shortcuts (E2).
   if (view !== "call" && !$("call-more-menu").hidden) toggleMenu($("call-more-menu"), $("call-more"), false);
   const panel = Boolean(document.body.dataset.callPanel);
-  $("call").hidden = view !== "call" || panel;
+  // Board and Transcript keep the feed's hint and the dock around them (N6); chat and notes take the whole view.
+  $("call").hidden = view !== "call" || (panel && !["board", "transcript"].includes(document.body.dataset.callPanel));
   $("call-back").hidden = !panel;
   if (view === "call") renderCall(window.appState);
   renderCallBar(window.appState, Date.now());

@@ -326,7 +326,7 @@ body[data-view="call"] #speaker-edit { color: var(--text); }
 /* Up to 820 px a Call panel fills the window under the bar and scrolls inside itself: the board stacks its four
    columns in one scroll, never capped lists with dead space under them, and the page never grows past the window (L1, L4). */
 @media (max-width: 820px) {
-  body[data-view="call"][data-call-panel] main.workspace { height: calc(100dvh - var(--bar-h)); min-height: 0; overflow: hidden; }
+  body[data-view="call"][data-call-panel] main.workspace { flex: 1; min-height: 0; overflow: hidden; }
   body[data-view="call"][data-call-panel] .workspace-view:has(.call-board:not([hidden])) { max-height: none; min-height: 0; }
   body[data-view="call"] .call-board .board-list { max-height: none; overflow: visible; }
   body[data-view="call"] .call-board .board-columns { grid-auto-rows: auto; }
@@ -343,11 +343,21 @@ body[data-view="call"]:not([data-call-panel="notes"]):not([data-call-panel="chat
   .topbar .status kbd, #call-stop kbd, .ask-field kbd, .dock kbd { display: none; }
   .ask-field input { padding-right: 12px; }
 }
-/* Up to 820 px the page scrolls as a whole (styles.css): the call still fills the window, and the dock stays at its bottom. */
+/* Up to 820 px other views scroll the page as a whole (styles.css); Call keeps the window: the feed or the panel scrolls
+   inside it, and the dock never moves (N5). */
 @media (max-width: 820px) {
-  .call { min-height: calc(100dvh - var(--bar-h)); }
-  .dock { position: sticky; bottom: 0; }
+  body[data-view="call"] { display: flex; height: 100dvh; overflow: hidden; }
 }
+/* Board or Transcript open (N6): the current hint stays above the panel, compact, and the dock stays under it. */
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) .call { display: contents; }
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) .feed { order: 1; flex: none; overflow: visible;
+  padding: 16px 0 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) :is(#call-name, #call-problem, #call-note, #call-earlier,
+  #call-slot .why, #call-slot .why-acts, #call-slot .why-more, #call-slot .actions, #call-slot .heard-wait) { display: none; }
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) #call-slot :is(.hint, .own-answer, .waiting) {
+  font-size: 17px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; max-width: none; }
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) main.workspace { order: 2; }
+body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) .dock { order: 3; }
 /* Window narrower than 700 px: navigation goes into the menu. */
 @media (max-width: 700px) {
   .navs { display: none; }

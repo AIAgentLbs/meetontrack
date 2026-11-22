@@ -531,12 +531,14 @@ async function interactions(browser) {
     for (const close of ['Escape', '#call-back']) {
       await page.click(opener);
       assert.equal(await visible(page, target), true, `${fixture}: ${target}`);
-      assert.equal(await visible(page, '#call'), false);
+      // N6: the feed folds to its compact hint above the panel; the call's name and Earlier are gone.
+      assert.equal(await visible(page, '#call-name'), false);
+      assert.equal(await visible(page, '#call-slot'), true);
       assert.equal(await focused(page), heading);
       assert.equal(await text(page, '#call-back'), 'Back to the call');
       if (close === 'Escape') await page.keyboard.press('Escape');
       else await page.click(close);
-      assert.equal(await visible(page, '#call'), true, `${fixture}: ${close} closes`);
+      assert.equal(await visible(page, '#call-name'), true, `${fixture}: ${close} closes`);
       assert.equal(await visible(page, target), false);
       assert.equal(await visible(page, '#call-back'), false);
       assert.equal(await focused(page), opener);
@@ -827,10 +829,10 @@ async function narrow(browser) {
     await more.click();
     await page.click(item);
     assert.equal(await visible(page, target), true, item);
-    assert.equal(await visible(page, '#call'), false);
+    assert.equal(await visible(page, '#call-name'), false); // N6: the compact hint only
     assert.equal(await focused(page), heading);
     await page.keyboard.press('Escape');
-    assert.equal(await visible(page, '#call'), true, `${item}: Escape`);
+    assert.equal(await visible(page, '#call-name'), true, `${item}: Escape`);
     assert.equal(await focused(page), '#call-more');
   }
   // The window widens past 700 px with More open: More closes, and focus goes to the ask field, never to the page.
@@ -857,8 +859,8 @@ async function narrow(browser) {
   assert.ok(short.max <= 560 - short.bar - short.dockHeight, `max-height leaves the bar and the dock: ${JSON.stringify(short)}`);
   // Earlier from More scrolls the list into view, between the bar and the dock.
   await page.click('#call-more-earlier');
-  // The list starts below the dock at this height, so seeing it means the page scrolled to it.
-  assert.ok(await page.evaluate(() => scrollY) > 0, 'scrolled to Earlier');
+  // The list starts below the dock at this height, so seeing it means the feed scrolled to it; the page never does (N5).
+  assert.deepEqual(await page.evaluate(() => [scrollY, document.querySelector('.feed').scrollTop > 0]), [0, true], 'scrolled to Earlier');
   const list = await box(page, '#call-earlier');
   const barNow = await box(page, '.topbar');
   const dockNow = await box(page, '.dock');
@@ -1525,6 +1527,41 @@ async function round4(browser) {
     await page.click('#call-stop');
     await expectPost(page, '/api/recording/resume', { meeting_id: 'm1' });
     await page.context().close();
+  }
+  // N5: at 400x900 no pane makes the page scroll, and the dock never moves. N6: with Board or Transcript open the
+  // current hint stays above the panel, compact, and the ask dock stays usable under it, at every width.
+  for (const width of [400, 1024, 1440]) {
+    let dockTop = null;
+    for (const [fixture, item] of [['hint'], ['earlier_open', 'earlier'], ['more_open'], ['transcript_open', 'transcript'],
+      ['board_open', 'board'], ['long_hint'], ['stopped']]) {
+      if (fixture === 'more_open' && width > 700) continue; // More exists under 700 px only
+      const label = `${fixture} ${width}`;
+      const page = await callPage(browser, fixture, { lang: 'ru', data: 'ru', width });
+      if (fixture === 'more_open') await page.click('#call-more');
+      if (item && width <= 700) { await page.click('#call-more'); await page.click(`#call-more-${item}`); }
+      else if (item) await page.click(`#call-${item}-open`);
+      await page.evaluate(() => new Promise(requestAnimationFrame));
+      const at = await page.evaluate(() => ({ over: document.scrollingElement.scrollHeight - innerHeight,
+        dock: document.querySelector('.dock').getBoundingClientRect().top }));
+      if (width === 400) assert.ok(at.over <= 0, `${label}: the page scrolls by ${at.over}px`);
+      dockTop ??= at.dock;
+      assert.ok(Math.abs(at.dock - dockTop) <= 1, `${label}: the dock moved ${at.dock} / ${dockTop}`);
+      if (item === 'transcript' || item === 'board') {
+        const hint = await page.$eval('#call-slot .hint', node => ({ ...node.getBoundingClientRect().toJSON(),
+          line: parseFloat(getComputedStyle(node).lineHeight) }));
+        const panel = await box(page, item === 'board' ? '#call-board' : '#transcript-heading');
+        assert.ok(hint.height > 0 && hint.bottom <= panel.top, `${label}: the hint above the panel ${hint.bottom} / ${panel.top}`);
+        assert.ok(hint.height <= hint.line * 2.2, `${label}: compact ${hint.height} / ${hint.line}`);
+        assert.equal(await visible(page, '#call-slot .why-acts'), false, `${label}: no source toggle in compact form`);
+        assert.equal(await visible(page, '#call-name'), false, `${label}: no call name`);
+        assert.equal(await page.locator('#call-question').isEditable(), true, `${label}: the ask field`);
+        await page.fill('#call-question', 'Кто решает в комитете?');
+        await page.press('#call-question', 'Enter');
+        await expectPost(page, '/api/chat', { question: 'Кто решает в комитете?' });
+        assert.equal(await page.evaluate(() => document.body.dataset.callPanel), item, `${label}: the panel stays open`);
+      }
+      await page.context().close();
+    }
   }
   // N4: the heard line names its speaker, the first name or "Вы", and at 400 px it stays with three words or more.
   for (const [lang, anna, you] of [['ru', 'Анна: ', 'Вы: '], ['en', 'Anna: ', 'You: ']]) for (const width of [1440, 400]) {
