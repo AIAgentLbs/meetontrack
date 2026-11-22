@@ -152,6 +152,8 @@ const translations = {
     "call.for_sec": "{n}\u00a0сек",
     "call.for_min": "{n}\u00a0мин",
     "call.from_memo": "Из мемо, вопрос {n}",
+    "call.source": "Источник: {text}",
+    "call.board_details": "Источник",
     "call.where": "Откуда подсказка",
     "call.where_hide": "Свернуть",
     "call.heard_wait": "Ответ готовится, обычно несколько секунд. Появится здесь же.",
@@ -529,6 +531,8 @@ const translations = {
     "call.for_sec": "{n} s",
     "call.for_min": "{n} min",
     "call.from_memo": "From the memo, question {n}",
+    "call.source": "Source: {text}",
+    "call.board_details": "Source",
     "call.where": "Where this comes from",
     "call.where_hide": "Hide",
     "call.heard_wait": "The answer is being prepared, usually a few seconds. It will appear here.",
@@ -2558,7 +2562,10 @@ function renderCallBoard(plan, journal) {
       const detail = document.createElement("details");
       const key = `${activeTranscript?.meeting_id}:${item.origin}:${item.id}`;
       detail.open = boardExpanded.has(key);
-      detail.append(textNode("summary", "", t("board.details")), textNode("p", "", readableAnswer(item.text)));
+      // In Call the detail says "Источник", the feed's one word for it, never "Основание" (G5).
+      const body = readableAnswer(item.text);
+      detail.append(textNode("summary", "", t(call ? "call.board_details" : "board.details")),
+        textNode("p", "", call ? body.replace(/(?:Основание|Evidence):/gu, `${t("call.board_details")}:`) : body));
       if (item.evidence) detail.append(textNode("p", "board-evidence", t("plan.evidence", { quote: item.evidence })));
       if (item.origin === "plan" && plan.source_label) detail.append(textNode("small", "", plan.source_label));
       if (item.speaker) detail.append(textNode("small", "", item.speaker));

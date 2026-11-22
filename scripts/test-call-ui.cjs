@@ -99,15 +99,15 @@ async function functions(browser) {
   // The label says the verb once: a line that starts with it loses it (ruling 8).
   assert.equal(parts.text, 'The date slips.');
   assert.equal(parts.label, 'Say');
-  assert.equal(parts.source, 'Anna, 12:31', 'one form of source line, no prefix (G5)');
+  assert.equal(parts.source, 'Source: Anna, 12:31', 'one source prefix (G5)');
   assert.deepEqual(parts.detail, ['The memo has no date.', 'we wait for the committee', 'Anna Petrova']);
   const fallback = await run(() => hintCandidates({ journal: [{ category: 'ASK', created_at: new Date().toISOString(),
     text: 'Ask who signs?', evidence: 'a committee decides' }] })[0]);
-  assert.equal(fallback.source, 'a committee decides');
+  assert.equal(fallback.source, 'Source: a committee decides');
   assert.deepEqual(fallback.detail, []);
   const marked = await run(() => hintCandidates({ journal: [{ category: 'RISK', created_at: new Date().toISOString(),
     text: '**Say the date slips.**\n**Source:** `memo`' }] })[0]);
-  assert.deepEqual([marked.text, marked.source], ['The date slips.', 'memo']);
+  assert.deepEqual([marked.text, marked.source], ['The date slips.', 'Source: memo']);
   // The verb sets the label (ruling 6), and the line shows whole (B1).
   const verbs = await run(() => ['Спросите, кто подписывает?', 'Скажите: старт в понедельник.', 'Ask whether the regional offices that join the pilot later keep the same price and start conditions',
     'Asking around is fine.', 'Уточните сроки.'].map(line => {
@@ -1260,17 +1260,28 @@ async function polish(browser) {
     const lines = await page.locator('#call-earlier .earlier-hint').allTextContents();
     assert.ok(lines.includes(lang === 'ru' ? 'Старт в марте или в апреле?' : 'Does the start fall in March or in April?'), lines.join(' | '));
     assert.equal((await page.locator('#call-earlier').innerText()).split(build('earlier_open', lang).state.journal[1].text).length - 1, 1, `${lang}: question once`);
+    // One source prefix across Call (G5 addendum): "Источник:" / "Source:", never "Основание" / "Evidence".
     for (const source of await page.locator('#call-earlier .why').allTextContents()) {
-      assert.doesNotMatch(source, /^(Основание|Источник|Evidence|Source):/, source);
+      assert.match(source, lang === 'ru' ? /^Источник: \S/ : /^Source: \S/, source);
     }
+    assert.doesNotMatch(await page.locator('#call').innerText(), /Основание|Evidence/, lang);
     const clipped = await page.$$eval('#call-earlier .why', nodes => nodes.filter(node => node.scrollWidth > node.clientWidth + 1).length);
     assert.equal(clipped, 0, `${lang}: wrapped, not cut`);
     await page.context().close();
   }
-  // The live slot's source line has no prefix either.
+  // The live slot's source line has the same prefix; the memo's line says where it is from by itself; the board's
+  // detail uses the same word.
   {
-    const page = await ru('hint', { at });
-    assert.equal(await text(page, '#call-slot .why'), 'Анна упомянула комитет, но без имени.');
+    let page = await ru('hint', { at });
+    assert.equal(await text(page, '#call-slot .why'), 'Источник: Анна упомянула комитет, но без имени.');
+    await page.click('#call-board-open');
+    await page.$$eval('#call-board details', nodes => nodes.forEach(node => { node.open = true; }));
+    const board = await page.locator('#call-board').innerText();
+    assert.doesNotMatch(board, /Основание/, board);
+    assert.match(board, /Источник/);
+    await page.context().close();
+    page = await ru('memo_question', { at });
+    assert.equal(await text(page, '#call-slot .why'), 'Из мемо, вопрос 2');
     await page.context().close();
   }
   // The last phrase heard never opens on half a word at 400 px.

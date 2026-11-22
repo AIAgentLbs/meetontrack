@@ -70,9 +70,9 @@ function callParts(raw, item) {
   const head = text.split(CALL_HINT_SPLIT)[0];
   const rest = text.slice(head.length).replace(/^\n/, "").split("\n").map(line => line.trim()).filter(Boolean);
   const evidence = String(item.evidence || "").trim();
-  // One form of source line (G5): its content, muted, with no "Основание:" or "Source:" in front.
+  // One source prefix across Call (G5): "Источник:", whatever word the model put in front.
   const source = (rest[0] || evidence).replace(/^(?:Основание|Источник|Evidence|Source):\s*/u, "");
-  return { source, detail: [...rest.slice(1), rest.length ? evidence : "", String(item.speaker || "").trim()].filter(Boolean) };
+  return { source: source && t("call.source", { text: source }), raw: source, detail: [...rest.slice(1), rest.length ? evidence : "", String(item.speaker || "").trim()].filter(Boolean) };
 }
 
 function hintCandidates(state) {
@@ -90,8 +90,11 @@ function hintCandidates(state) {
     if (item.category === "INCOMING_QUESTION" && item.reply && open) {
       const speaker = String(item.speaker || "").trim();
       const label = speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
+      const parts = callParts(item.reply, item);
+      // A source that only repeats the question is left out: the question shows once (B6).
+      if (callSame(parts.raw, String(item.text || ""))) parts.source = "";
       hints.push({ kind: "answer", tier: 1, at, label, question: String(item.text || ""), speaker,
-        ...callCut(callLine(item.reply).line), ...callParts(item.reply, item) });
+        ...callCut(callLine(item.reply).line), ...parts });
     } else if (item.category === "CONTRADICTION" && open) {
       const line = callLine(item.text);
       hints.push({ kind: "check", tier: 2, at, label: t("call.clarify"), question: "",
@@ -110,7 +113,7 @@ function hintCandidates(state) {
     const quote = uiLanguage === "ru" ? `«${said}»` : `“${said}”`;
     const line = callLine(item.fact);
     hints.push({ kind: "check", tier: 2, at, label: t("call.clarify"), question: "",
-      ...callCut(line.verb === "clarify" ? line.rest : line.line), source: speaker ? `${speaker}: ${quote}` : quote, detail: [] });
+      ...callCut(line.verb === "clarify" ? line.rest : line.line), source: t("call.source", { text: speaker ? `${speaker}: ${quote}` : quote }), detail: [] });
   }
   const questions = (state?.call_plan?.items || []).filter(item => item.kind === "question");
   const next = questions.findIndex(item => item.status !== "resolved");
@@ -358,7 +361,7 @@ function renderCall(state) {
   // A heard question says who asked, in quotes; our answer sits under its own label, so it never reads as hers (B6).
   const earlier = pick.earlier.map(hint => (hint.kind === "answer"
     ? { asked: hint.speaker ? t("call.asked", { name: hint.speaker, question: hint.question }) : t("call.asked_plain", { question: hint.question }),
-      label: t("call.answer"), at: hint.at, text: hint.text, source: callSame(hint.source, hint.question) ? "" : hint.source }
+      label: t("call.answer"), at: hint.at, text: hint.text, source: hint.source }
     : { label: hint.label, at: hint.at, text: hint.text, source: hint.source }));
   const open = $("call-earlier-open");
   const count = t("call.earlier", { n: earlier.length });
