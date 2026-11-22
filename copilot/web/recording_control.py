@@ -47,7 +47,7 @@ class RecordingControl:
         # state poll never waits for a recorder command (fix wave I3).
         self.lock = threading.Lock()
         self.stopping, self.last_stop = None, None
-        self.outdated = False  # the recorder rejected --session: it needs an update (P2)
+        self.outdated = False  # the recorder's latest answer rejected --session: it needs an update (P2, Q3)
         try:
             saved = json.loads(path.read_text(encoding="utf-8"))
             if saved.get("version") == 1:
@@ -62,6 +62,8 @@ class RecordingControl:
         argv = [str(self.binary), "record", verb]
         if session:
             argv += ["--session", session.split("|")[0]]  # the live file's meeting_id
+        # "outdated" describes the latest answer only, never a sticky flag (Q3).
+        self.outdated = False
         try:
             done = self.run(argv, capture_output=True, text=True, timeout=10, check=False)
         except (OSError, subprocess.SubprocessError):
@@ -73,8 +75,6 @@ class RecordingControl:
             log.warning("the recorder does not know --session (an older version): not sent `record %s`", verb)
             self.outdated = True
             return False
-        if done.returncode == 0:
-            self.outdated = False
         return True if done.returncode == 0 else None if done.returncode == REFUSED else False
 
     def _failed(self) -> RuntimeError:

@@ -524,6 +524,18 @@ class RecordingControlTests(unittest.TestCase):
             failing.stop("m1")
         self.assertFalse(failing.snapshot()["outdated"])
 
+    def test_the_stop_error_follows_the_recorders_latest_answer(self):
+        # Q3: "outdated" describes the latest answer, never a sticky flag: a recorder that said "unknown option" and
+        # then fails some other way gives the plain stop error.
+        answers = [SimpleNamespace(returncode=64, stdout="", stderr="Error: Unknown option '--session'\n")] * 2
+        control = self.control(lambda argv, **kwargs: answers.pop(0) if answers else SimpleNamespace(
+            returncode=1, stdout="", stderr="Capture command failed"))
+        with self.assertLogs("recording_control", "WARNING"), self.assertRaisesRegex(RuntimeError, "recorder_outdated"):
+            control.stop("m1")
+        with self.assertRaisesRegex(RuntimeError, "^stop_failed$"):
+            control.stop("m1")
+        self.assertFalse(control.snapshot()["outdated"])
+
     def test_stop_again_with_an_unreadable_live_file_lets_the_recorder_judge(self):
         # K1: unknown is not "ended": the stop goes out with the session, and the recorder decides.
         run = Recorder({STOP: 1})
