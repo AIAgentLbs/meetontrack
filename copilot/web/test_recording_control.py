@@ -465,6 +465,41 @@ class RecordingControlTests(unittest.TestCase):
         ticker.join(5)
         self.assertIsNone(control.snapshot()["stopping"])
 
+    def test_stop_again_with_an_unreadable_live_file_lets_the_recorder_judge(self):
+        # K1: unknown is not "ended": the stop goes out with the session, and the recorder decides.
+        run = Recorder({STOP: 1})
+        control = self.control(run)
+        control.stop("m1")
+        self.now[0] = T0 + 31
+        control.tick()
+        self.sessions["m1"] = None
+        with self.assertRaisesRegex(RuntimeError, "stop_failed"):
+            control.stop("m1")
+        self.assertEqual(run.argv[-1], ["record", "stop", "--session", "m1"])
+        self.assertEqual(control.snapshot()["stopping"]["meeting_id"], "m1", "never ended silently")
+        self.assertIsNone(control.snapshot()["last_stop"])
+        run.codes = {STOP: 3}  # the recorder is live with another session: that recording is over
+        self.assertIsNone(control.stop("m1")["until"])
+        self.assertIsNone(control.snapshot()["stopping"])
+        self.assertEqual(control.snapshot()["last_stop"]["meeting_id"], "m1")
+
+    def test_last_stop_is_set_before_the_pending_stop_clears(self):
+        # K2: a poll between the two writes never sees neither, which would show the live bar for a moment.
+        control = self.control(Recorder())
+        control.stop("m1")
+        seen = []
+        original = type(control).__setattr__
+
+        def spy(obj, name, value):
+            if name in ("stopping", "last_stop"):
+                seen.append((obj.stopping, obj.last_stop))
+            original(obj, name, value)
+        with mock.patch.object(type(control), "__setattr__", spy):
+            self.now[0] = T0 + 31
+            control.tick()
+        self.assertFalse(any(stopping is None and last is None for stopping, last in seen[1:]), seen)
+        self.assertEqual(seen[-1][1]["meeting_id"], "m1")
+
     def test_loop_ticks_until_the_event(self):
         control = self.control(Recorder())
         stop = threading.Event()

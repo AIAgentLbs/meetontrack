@@ -79,8 +79,9 @@ class RecordingControl:
         return None if live is None else live == expected
 
     def _ended(self, pending: dict) -> None:
-        self.stopping = None
+        # last_stop first: a poll between the two writes never sees neither, so never the live bar (K2).
         self.last_stop = {"meeting_id": pending["meeting_id"], "stopped_at": pending["stopped_at"]}
+        self.stopping = None
 
     def stop(self, meeting_id: str) -> dict:
         if meeting_id != self.current_meeting():
@@ -91,7 +92,8 @@ class RecordingControl:
                 if not pending.get("failed"):
                     return {"stopped_at": pending["stopped_at"], "until": pending["until"]}
                 # The deferred stop keeps failing: Stop pressed again tries it now, for this recording only.
-                if self._same(pending) and self._command("stop", pending.get("session")) is False:
+                # Unknown (an unreadable live file) still sends it: the recorder judges the session (K1).
+                if self._same(pending) is not False and self._command("stop", pending.get("session")) is False:
                     raise RuntimeError("stop_failed")
                 self._ended(pending)
                 self._save()
@@ -119,7 +121,7 @@ class RecordingControl:
                 raise ValueError("meeting_changed")
             if not stopped:
                 raise RuntimeError("stop_failed")  # a paused recorder keeps its pending stop in memory
-            self.stopping, self.last_stop = None, {"meeting_id": meeting_id, "stopped_at": stopped_at}
+            self.last_stop, self.stopping = {"meeting_id": meeting_id, "stopped_at": stopped_at}, None
             try:
                 self._save()
             except OSError:
