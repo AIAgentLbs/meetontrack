@@ -255,24 +255,22 @@ const errors = [];
       };
       cases.startedAfterStop.transcript.started_at = at(-10);
       cases.startedBeforeStop.transcript.started_at = at(-600);
-      // Elapsed call time, the top-bar clock (D1): the call began 15 min before now.
-      return { time: '14:50', finalTime: '14:56', beforeTime: '09:00',
+      return {
         ...Object.fromEntries(Object.entries(cases).map(([name, state]) => [name, short(callStatus(state, { meetings: [] }, {}, now))])) };
     });
     assert.deepEqual(stops, {
-      time: stops.time, finalTime: stops.finalTime, beforeTime: stops.beforeTime,
       startedAfterStop: ['recording', 'Запись', null],
-      startedBeforeStop: ['stopped', `Запись остановлена на ${stops.beforeTime}.`, null],
-      stopping: ['stopped', `Запись остановлена на ${stops.time}. Через 20\u00a0сек откроется отчет.`, 'resume'],
-      final: ['stopped', `Запись остановлена на ${stops.finalTime}.`, null],
+      // No time of the stop (G1): the bar's one clock is the call's; the undo window says when it stops (G2).
+      startedBeforeStop: ['stopped', 'Запись остановлена.', null],
+      stopping: ['stopped', 'Запись остановится через 20\u00a0сек.', 'resume'],
+      final: ['stopped', 'Запись остановлена.', null],
       otherLastStop: ['recording', 'Запись', null],
       otherStopping: ['recording', 'Запись', null],
       oneStalled: ['recording', 'Запись', null],
       bothStalled: ['not_recording', 'Запись не идет: звук перестал записываться', null],
     });
-    assert.match(stops.time, /^\d\d:\d\d$/);
     assert.deepEqual(await page.evaluate(() => ['status.stopped', 'status.stopped_final', 'action.resume', 'action.stop', 'action.stop_short']
-      .map(key => translations.en[key])), ['Recording stopped at {time}. The report opens in {n}\u00a0s.', 'Recording stopped at {time}.',
+      .map(key => translations.en[key])), ['Recording stops in {n}\u00a0s.', 'Recording stopped.',
       'Resume recording', 'Stop recording', 'Stop']);
     assert.deepEqual(await page.evaluate(() => ['meeting_changed', 'too_late', 'stop_failed', 'resume_failed']
       .map(code => translations.ru[`status.error.${code}`])), ['Звонок уже сменился, обновите страницу', 'Запись уже остановлена',

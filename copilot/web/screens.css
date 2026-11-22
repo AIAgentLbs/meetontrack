@@ -267,7 +267,8 @@ body[data-view="call"] :is(#transcript-show, #swap-panels) { display: none; }
 .earlier { margin-top: 40px; border-top: 1px solid var(--line); }
 .earlier ul { padding: 0; list-style: none; }
 .earlier li { padding: 16px 0; border-bottom: 1px solid var(--line); }
-.earlier .why { margin-top: 4px; }
+/* An earlier source line wraps: at 400 px a cut would end it on half a word (G5). */
+.earlier .why { margin-top: 4px; white-space: normal; overflow-wrap: anywhere; }
 .earlier-hint { overflow-wrap: anywhere; }
 .earlier-q { margin-bottom: 8px; overflow-wrap: anywhere; }
 .earlier-empty { padding: 16px 0; color: var(--muted); }
@@ -299,9 +300,16 @@ body[data-view="call"][data-call-panel="transcript"] #transcript-hide { display:
 body[data-view="call"] :is(#workspace-filters, .call-board .board-summary, .board-item-controls select,
   .board-item-heading .traffic-light, .transcript-tabs, .pane-header .status-strip, #transcript-meta) { display: none; }
 body[data-view="call"] .board-item.resolved .board-item-heading p { color: var(--muted); }
+/* A panel sits in the feed's column on the feed's one background (G4); the board's four columns may go wider. */
+body[data-view="call"][data-call-panel] main.workspace { background: var(--page); padding-inline: max(0px, calc((100% - 880px) / 2)); }
+body[data-view="call"][data-call-panel="board"] main.workspace { padding-inline: max(0px, calc((100% - 1160px) / 2)); }
+body[data-view="call"][data-call-panel] :is(.transcript-pane, .copilot-pane) { background: none; }
+body[data-view="call"] #speaker-edit { color: var(--text); }
+/* A column with no counter keeps its rule in line with the others. */
+body[data-view="call"] .call-board .board-column-header p { min-height: 1lh; }
 /* The dock is the one ask field over the feed; the Notes and Chat panels keep their composer, for a note or a follow-up (F5). */
 body[data-view="call"]:not([data-call-panel="notes"]):not([data-call-panel="chat"]) .composer-wrap { display: none; }
-#call-back { grid-row: 1; grid-column: 1; justify-self: start; margin: 8px 20px; min-height: 32px; padding: 0; border: 0; border-radius: 0;
+#call-back { grid-row: 1; grid-column: 1; justify-self: start; margin: 8px 16px; min-height: 32px; padding: 0; border: 0; border-radius: 0;
   background: none; color: var(--text); font-size: 15px; font-weight: 500; cursor: pointer; }
 
 /* Window narrower than 1100 px: no key labels in the bar; the memo button keeps ↵, filled or outlined. */

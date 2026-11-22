@@ -70,12 +70,12 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
   }
   if (stopping && stopping.meeting_id === meeting) {
     const n = Math.max(0, Math.ceil((Date.parse(stopping.until) - now) / 1000));
-    return { kind: "stopped", text: t("status.stopped", { time: callElapsed(callAt(stopping.stopped_at), state), n }), action: action("resume", false) };
+    return { kind: "stopped", text: t("status.stopped", { n }), action: action("resume", false) };
   }
   // A live recording that began after the final stop is a new one, even under the same id.
   const started = Date.parse(state?.recording_health?.capture?.started_at || state?.transcript?.started_at || "");
   if (!stopping && isLive(state, now) && control.last_stop?.meeting_id === meeting && !(started > Date.parse(control.last_stop.stopped_at))) {
-    return { kind: "stopped", text: t("status.stopped_final", { time: callElapsed(callAt(control.last_stop.stopped_at), state) }), action: null };
+    return { kind: "stopped", final: true, text: t("status.stopped_final"), action: null };
   }
   if (stateConnectionFailed && !isLive(state, now)) return { kind: "disconnected", text: t("status.disconnected"), action: null };
   if (isLive(state, now)) {
@@ -176,7 +176,8 @@ function renderStatus(view) {
   if (statusError && statusError.state !== window.appState && !(statusError.until > Date.now())) statusError = null;
   const status = currentStatus();
   // Another view opened by hand during a call: the way back to the call is the status's action.
-  if (isLive(window.appState) && view !== viewFor(window.appState, null)) {
+  // A stopped call keeps its own action (Resume in the undo window, none after): there is no call to go back to.
+  if (isLive(window.appState) && status.kind !== "stopped" && view !== viewFor(window.appState, null)) {
     status.action = { id: "back", label: t("action.back_to_call"), primary: true };
   }
   if (statusError?.action) status.action = { id: statusError.action, label: t(`action.${statusError.action}`), primary: true };

@@ -16,14 +16,30 @@ const callAt = value => {
   const at = Date.parse(value);
   return Number.isNaN(at) ? null : at;
 };
-// Every time in Call is elapsed call time, the top-bar clock (D1): a wall-clock time next to 12:40 reads as hours old.
+// One clock per job (G1): the bar counts the call (callClock), an item says how old it is, lost sound says for how
+// long. A time node carries its moment and is kept current in place by callTimes, so nothing is rebuilt for it.
 const callStartIso = state => state?.recording_health?.capture?.started_at || state?.transcript?.started_at;
-// Without a known start there is no top-bar clock either, so the wall clock cannot contradict it.
-const callElapsed = (at, state) => (at === null ? "" : callAt(callStartIso(state)) === null ? homeClock(at) : callClock(callStartIso(state), at));
-const callLabel = (label, at, state) => {
-  const time = callElapsed(at, state);
-  return time ? t("call.at", { label, time }) : label;
-};
+function callTime(at, kind) {
+  const node = textNode("span", "", "");
+  node.dataset.time = kind;
+  node.dataset.at = at;
+  return node;
+}
+function callTimes(now = Date.now()) {
+  for (const node of document.querySelectorAll("[data-time]")) {
+    const seconds = Math.max(0, Math.floor((now - Number(node.dataset.at)) / 1000));
+    const minutes = Math.floor(seconds / 60);
+    const text = node.dataset.time === "age" ? (minutes ? t("call.min_ago", { n: minutes }) : t("call.just_now"))
+      : minutes ? t("call.for_min", { n: minutes }) : t("call.for_sec", { n: seconds });
+    if (node.textContent !== text) node.textContent = text;
+  }
+}
+// A label with the item's age: "Спросите · 2 мин назад". A memo question has no moment, so no age.
+function callSay(className, label, at) {
+  const node = textNode("p", className, label);
+  if (at !== null && at !== undefined) node.append(" · ", callTime(at, "age"));
+  return node;
+}
 // The verb the label says (Ask, Say, Clarify): a line that starts with it loses it, so the verb is said once
 // (ruling 8). The verb comes from the whole line, so a cut never turns Ask into Say (ruling 6).
 const CALL_VERBS = [["ask", "Спросите|Ask"], ["say", "Скажите|Say"], ["clarify", "Уточните|Clarify"]];
@@ -54,7 +70,9 @@ function callParts(raw, item) {
   const head = text.split(CALL_HINT_SPLIT)[0];
   const rest = text.slice(head.length).replace(/^\n/, "").split("\n").map(line => line.trim()).filter(Boolean);
   const evidence = String(item.evidence || "").trim();
-  return { source: rest[0] || evidence, detail: [...rest.slice(1), rest.length ? evidence : "", String(item.speaker || "").trim()].filter(Boolean) };
+  // One form of source line (G5): its content, muted, with no "Основание:" or "Source:" in front.
+  const source = (rest[0] || evidence).replace(/^(?:Основание|Источник|Evidence|Source):\s*/u, "");
+  return { source, detail: [...rest.slice(1), rest.length ? evidence : "", String(item.speaker || "").trim()].filter(Boolean) };
 }
 
 function hintCandidates(state) {
@@ -63,7 +81,7 @@ function hintCandidates(state) {
   const own = messages.findLastIndex((message, index) => message.role === "assistant" && messages[index - 1]?.role === "user");
   if (own > 0) {
     const at = callAt(messages[own].at);
-    hints.push({ kind: "own", tier: 0, at, label: callLabel(t("call.own"), at, state), question: String(messages[own - 1].text || ""),
+    hints.push({ kind: "own", tier: 0, at, label: t("call.own"), question: String(messages[own - 1].text || ""),
       text: String(messages[own].text || ""), source: "", detail: [] });
   }
   for (const item of state?.journal || []) {
@@ -72,15 +90,15 @@ function hintCandidates(state) {
     if (item.category === "INCOMING_QUESTION" && item.reply && open) {
       const speaker = String(item.speaker || "").trim();
       const label = speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
-      hints.push({ kind: "answer", tier: 1, at, label: callLabel(label, at, state), question: String(item.text || ""), speaker,
+      hints.push({ kind: "answer", tier: 1, at, label, question: String(item.text || ""), speaker,
         ...callCut(callLine(item.reply).line), ...callParts(item.reply, item) });
     } else if (item.category === "CONTRADICTION" && open) {
       const line = callLine(item.text);
-      hints.push({ kind: "check", tier: 2, at, label: callLabel(t("call.clarify"), at, state), question: "",
+      hints.push({ kind: "check", tier: 2, at, label: t("call.clarify"), question: "",
         ...callCut(line.verb === "clarify" ? line.rest : line.line), ...callParts(item.text, item) });
     } else if (["ASK", "RISK", "OBJECTION"].includes(item.category) && open) {
       const line = callLine(item.text);
-      hints.push({ kind: "signal", tier: 3, at, label: callLabel(callVerbLabel(line), at, state), question: "", ...callCut(line.rest),
+      hints.push({ kind: "signal", tier: 3, at, label: callVerbLabel(line), question: "", ...callCut(line.rest),
         ...callParts(item.text, item) });
     }
   }
@@ -91,7 +109,7 @@ function hintCandidates(state) {
     const said = item.quote || item.claim || "";
     const quote = uiLanguage === "ru" ? `«${said}»` : `“${said}”`;
     const line = callLine(item.fact);
-    hints.push({ kind: "check", tier: 2, at, label: callLabel(t("call.clarify"), at, state), question: "",
+    hints.push({ kind: "check", tier: 2, at, label: t("call.clarify"), question: "",
       ...callCut(line.verb === "clarify" ? line.rest : line.line), source: speaker ? `${speaker}: ${quote}` : quote, detail: [] });
   }
   const questions = (state?.call_plan?.items || []).filter(item => item.kind === "question");
@@ -148,7 +166,7 @@ function callClock(startIso, now) {
 
 function lastPhrase(state) {
   const text = String(state?.transcript?.segments?.at(-1)?.text || "").trim();
-  return text.length > 90 ? `…${text.slice(-90)}` : text;
+  return text.length > 90 ? `…${text.slice(-90).replace(/^\S*\s+/u, "")}` : text;
 }
 
 // The feed: the call's name, a problem when a side is not heard, the one slot, the paused note and the earlier
@@ -188,9 +206,7 @@ function callProblem(state, now) {
   const beat = heartbeat(state, now);
   const side = beat.other.state === "not_heard" ? "other" : beat.you.state === "not_heard" ? "you" : null;
   if (!side) return null;
-  const since = beat[side].since;
-  const time = callElapsed(since, state);
-  return { side, title: time ? t(`call.${side}_lost`, { time }) : t(`call.${side}_lost_now`) };
+  return { side, since: beat[side].since };
 }
 
 // What the slot shows: the pending own question, then the hint picked, a heard question, or the waiting line.
@@ -201,10 +217,13 @@ function callSlot(state, current, now, stopped = null) {
   if (callPending && !callPending.queued && ((own && own.at > callPending.at) || (!requestBusy && !state?.copilot?.busy))) callPending = null;
   if (callPending) return { type: "pending", label: t("call.own"), question: callPending.question };
   if (callAskError) return { type: "ask_error", label: t("call.own"), question: callAskError.question, text: callAskError.text };
-  if (own) return { type: "own", label: own.label, question: own.question, text: own.text };
-  if (stopped) return { type: "stopped", text: t(stopped === "stop_failed" ? "call.stop_pending" : "call.stopped") };
+  if (own) return { type: "own", label: own.label, at: own.at, question: own.question, text: own.text };
+  // The undo window: hints pause, the bar says when the recording stops (G2). The final stop: saved, and the
+  // way to this meeting's results (G3).
+  if (stopped) return { type: "stopped", final: stopped === "stopped_final",
+    text: t({ stop_failed: "call.stop_pending", stopped: "call.stopped", stopped_final: "call.saved" }[stopped]) };
   if (current?.kind === "answer") {
-    return { type: "answer", key: callHintKey(current), label: current.label, question: current.question, text: current.text,
+    return { type: "answer", key: callHintKey(current), label: current.label, at: current.at, question: current.question, text: current.text,
       full: current.full, source: "", detail: [] };
   }
   const heard = state?.heard_question;
@@ -212,19 +231,26 @@ function callSlot(state, current, now, stopped = null) {
     const speaker = String(heard.speaker || "").trim();
     const label = speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
     const later = analysisSkipped !== null && analysisSkipped === state?.transcript?.meeting_id;
-    return { type: "heard", label: callLabel(label, callAt(heard.at), state), question: String(heard.text), later };
+    return { type: "heard", label, at: callAt(heard.at), question: String(heard.text), later };
   }
   if (current) {
     const key = callHintKey(current);
-    return { type: "hint", key, label: current.label, text: current.text, full: current.full, source: current.source, detail: current.detail };
+    return { type: "hint", key, label: current.label, at: current.at, text: current.text, full: current.full, source: current.source, detail: current.detail };
   }
   const beat = heartbeat(state, now);
   return { type: "waiting", text: t(beat.you.state === "heard" || beat.other.state === "heard" ? "call.waiting_heard" : "call.waiting") };
 }
 
 function callSlotNodes(slot) {
-  const nodes = [textNode("p", "say", slot.label || "")];
-  if (slot.type === "stopped") return [textNode("p", "waiting", slot.text)];
+  const nodes = [callSay("say", slot.label || "", slot.at)];
+  if (slot.type === "stopped") {
+    if (!slot.final) return [textNode("p", "waiting", slot.text)];
+    // The last screen of the call has one way on: this meeting's results (G3).
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    actions.append(callButton("primary", t("call.open_results"), () => openView("after")));
+    return [textNode("p", "waiting", slot.text), actions];
+  }
   if (slot.type === "paused") {
     const retry = textNode("p", "heard-wait", `${slot.retry} `);
     retry.append(callButton("ql", t("call.check_ai"), () => $("getting-started-open").click()));
@@ -284,13 +310,17 @@ function renderCall(state) {
   if ($("call-name").textContent !== name) $("call-name").textContent = name;
 
   // After Stop the paused tracks stop growing: no problem card, no hint, no paused note (A4).
-  const kind = callStatus(state, window.agendaData, window.permissionsData, now).kind;
-  const stopped = kind === "stopped" || kind === "stop_failed" ? kind : null;
-  callPart("call-problem", stopped ? null : callProblem(state, now), problem => {
+  const status = callStatus(state, window.agendaData, window.permissionsData, now);
+  const stopped = status.kind === "stop_failed" ? "stop_failed" : status.kind === "stopped" ? (status.final ? "stopped_final" : "stopped") : null;
+  const problem = stopped ? null : callProblem(state, now);
+  callPart("call-problem", problem && { side: problem.side, timed: problem.since !== null }, problem => {
     const box = document.createElement("div");
     box.className = "problem";
     const heading = document.createElement("h3");
-    heading.append(textNode("span", "fail", problem.title));
+    // "Собеседника не слышно 40 сек": the duration is a time node, so the card is not rebuilt every second.
+    const [before, after = ""] = t(`call.${problem.side}_lost${problem.timed ? "" : "_now"}`).split("{time}");
+    heading.append(textNode("span", "fail", before));
+    if (problem.timed) heading.firstChild.append(callTime(0, "for"), after);
     const actions = document.createElement("div");
     actions.className = "actions";
     const other = problem.side === "other";
@@ -302,6 +332,8 @@ function renderCall(state) {
     box.append(heading, textNode("p", "", t(other ? "call.other_lost_text" : "call.you_lost_text")), actions);
     return [box];
   });
+  const lost = $("call-problem").querySelector("[data-time]");
+  if (lost) lost.dataset.at = problem.since;
 
   // A question queued behind an analysis goes out once nothing else holds the line.
   if (callPending?.queued && !requestBusy && !state?.copilot?.busy && window.callAsk(callPending.question)) {
@@ -326,8 +358,8 @@ function renderCall(state) {
   // A heard question says who asked, in quotes; our answer sits under its own label, so it never reads as hers (B6).
   const earlier = pick.earlier.map(hint => (hint.kind === "answer"
     ? { asked: hint.speaker ? t("call.asked", { name: hint.speaker, question: hint.question }) : t("call.asked_plain", { question: hint.question }),
-      label: callLabel(t("call.answer"), hint.at, state), text: hint.text, source: callSame(hint.source, hint.question) ? "" : hint.source }
-    : { label: hint.label, text: hint.text, source: hint.source }));
+      label: t("call.answer"), at: hint.at, text: hint.text, source: callSame(hint.source, hint.question) ? "" : hint.source }
+    : { label: hint.label, at: hint.at, text: hint.text, source: hint.source }));
   const open = $("call-earlier-open");
   const count = t("call.earlier", { n: earlier.length });
   if (open.textContent !== count) open.textContent = count;
@@ -342,12 +374,13 @@ function renderCall(state) {
     items.append(...list.map(hint => {
       const item = document.createElement("li");
       if (hint.asked) item.append(textNode("p", "earlier-q", hint.asked));
-      item.append(textNode("p", "say", hint.label), textNode("p", "earlier-hint", hint.text));
+      item.append(callSay("say", hint.label, hint.at), textNode("p", "earlier-hint", hint.text));
       if (hint.source) item.append(textNode("p", "why", hint.source));
       return item;
     }));
     return [items];
   });
+  callTimes(now);
 }
 
 // The bar during a live call: the clock, whether each side is heard (from the same heartbeat as the feed's problem,
@@ -373,20 +406,32 @@ function renderCallBar(state, now) {
   const phrase = lastPhrase(state);
   const line = phrase ? t("call.last_phrase").replace("{text}", () => phrase) : ""; // a function: "$&" in speech stays as said
   // The label stays whole and the words are cut from the start, so the newest ones show in a narrow bar (E3).
-  if ($("call-heard").textContent !== line) {
+  const heard = $("call-heard");
+  heard.hidden = !line;
+  if (heard.dataset.line !== line) {
+    heard.dataset.line = line;
     const [label] = t("call.last_phrase").split("{text}");
     const words = document.createElement("span");
     words.className = "heard-words";
-    words.append(textNode("bdi", "", phrase));
-    $("call-heard").replaceChildren(textNode("span", "", label), words);
+    const shown = textNode("bdi", "", phrase);
+    words.append(shown);
+    heard.replaceChildren(textNode("span", "", label), words);
+    // Whole words only: they drop from the start until the line fits, so it never opens on half a word (G5).
+    let rest = phrase.replace(/^…/u, "");
+    while (words.scrollWidth > words.clientWidth + 1 && /\s/u.test(rest)) {
+      rest = rest.replace(/^\S+\s+/u, "");
+      shown.textContent = `…${rest}`;
+    }
   }
-  $("call-heard").hidden = !line;
 }
+// A new width fits the last phrase again on the next tick.
+addEventListener("resize", () => delete $("call-heard").dataset.line);
 // The clock ticks every second; while stopped the whole bar does, for the countdown.
 setInterval(() => {
   if (window.appState === undefined) return;
   if (currentStatus().kind === "stopped") renderShell();
   else renderCallBar(window.appState, Date.now());
+  callTimes();
 }, 1000);
 
 // A source with nothing else to open shows Where this comes from only when its line is cut. Measured after every

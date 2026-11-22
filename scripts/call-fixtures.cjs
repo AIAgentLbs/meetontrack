@@ -12,9 +12,9 @@ const TEXT = {
     review: 'Pilot review', anna: 'Anna Petrova', company: 'Example LLC', me: 'Me',
     questions: ['What budget is set for the pilot this year?', 'Who signs off the purchase?', 'Which part of the proposal matters most now?'],
     ask: 'Ask who signs off the purchase?\nEvidence: Anna mentioned a committee but no name.',
-    risk: 'The start date slips if the contract waits for the committee.\nSource: Anna, 09:31',
-    objection: 'The price looks high next to their own estimate.',
-    contradiction: 'Anna said the start is in March, the memo says April.\nSource: memo and your notes',
+    risk: 'We can sign before the committee meets, so the start holds.\nEvidence: Anna said the committee meets on Thursdays.',
+    objection: 'Setup is already in the price, there is nothing extra to pay.\nEvidence: Anna compared the price with her own estimate.',
+    contradiction: 'Clarify: does the start fall in March or in April?\nEvidence: Anna said March, the memo says April.',
     claim: 'Our pilot last year covered every regional office.', fact: 'Last year the pilot covered two offices out of five.',
     incoming: 'When can you start the pilot?', reply: 'We can start on the first Monday after the contract is signed.',
     heard: 'How long does the setup take on our side?',
@@ -24,12 +24,12 @@ const TEXT = {
     long: 'Ask: will the regional offices that join the pilot later keep the same price and the same start conditions as the first two?',
   },
   ru: {
-    review: 'Обзор пилота', anna: 'Анна Петрова', company: 'ООО Пример', me: 'Я',
+    review: 'Обзор пилота', anna: 'Анна Петрова', company: 'ООО Пример', me: 'Вы',
     questions: ['Какой бюджет заложен на пилот в этом году?', 'Кто подписывает закупку?', 'Какая часть предложения сейчас важнее всего?'],
     ask: 'Спросите, кто подписывает закупку?\nОснование: Анна упомянула комитет, но без имени.',
-    risk: 'Старт сдвинется, если договор будет ждать комитет.\nИсточник: Анна, 09:31',
-    objection: 'Цена кажется высокой рядом с их собственной оценкой.',
-    contradiction: 'Анна назвала старт в марте, в мемо апрель.\nИсточник: мемо и ваши заметки',
+    risk: 'Можем подписать до заседания комитета, тогда старт не сдвинется.\nОснование: Анна сказала, что комитет собирается по четвергам.',
+    objection: 'Настройка уже входит в цену, доплачивать не нужно.\nОснование: Анна сравнила цену со своей оценкой.',
+    contradiction: 'Уточните: старт в марте или в апреле?\nОснование: Анна назвала март, в мемо апрель.',
     claim: 'Наш пилот в прошлом году охватил все региональные офисы.', fact: 'В прошлом году пилот охватил два офиса из пяти.',
     incoming: 'Когда вы сможете начать пилот?', reply: 'Можем начать в первый понедельник после подписания договора.',
     heard: 'Сколько времени занимает настройка с нашей стороны?',
@@ -108,9 +108,12 @@ function build(name, lang = 'en', now = Date.now()) {
     // The real server shape: CodexSession.ask sets copilot.error and record_analysis the analysis error (D3).
     paused_ai: () => { state.call_plan = null; state.copilot.error = 'AI_TIMEOUT: no answer within the limit';
       state.copilot.analysis = { state: 'error', at: ago(20 * SEC), message: 'AI_TIMEOUT: no answer within the limit' }; },
-    // The call audio stopped growing 40 s ago, and the transcript carries the open gap.
-    other_lost: () => { hint(); state.recording_health.capture = capture(now, [track('mic'), track('system', 'stalled', 40)]);
-      state.transcript.capture_warnings = [{ reason: 'system-audio-lost', started_at: ago(40 * SEC) }]; },
+    // The call audio stopped growing 40 s ago, and the transcript carries the open gap: nothing from the other side
+    // after it, so the hint from Anna's words is older than the loss and the memo question is current.
+    other_lost: () => { hint(); state.journal[0] = event('ASK', L.ask, 50 * SEC);
+      state.recording_health.capture = capture(now, [track('mic'), track('system', 'stalled', 40)]);
+      state.transcript.capture_warnings = [{ reason: 'system-audio-lost', started_at: ago(40 * SEC) }];
+      state.transcript.segments = segments.filter(item => item.source !== 'system' || Date.parse(item.timestamp) < now - 40 * SEC); },
     you_lost: () => { hint(); state.recording_health.capture = capture(now, [track('mic', 'stalled', 50), track('system')]); },
     // An own question sent, the answer not back yet.
     own_pending: () => { hint(); state.copilot.busy = true;

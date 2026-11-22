@@ -76,20 +76,21 @@ async function functions(browser) {
   });
   assert.equal(picks.answer.current, 'answer');
   assert.equal(picks.answer.text, 'On the first Monday after signing.');
-  assert.equal(picks.answer.label, 'Anna Petrova asks · 09:40', 'elapsed call time (D1)');
+  // The label is the words only; its age is a node of its own (G1).
+  assert.equal(picks.answer.label, 'Anna Petrova asks');
   assert.equal(picks.check.current, 'check');
-  assert.match(picks.check.label, /^Clarify · \d\d:\d\d$/);
+  assert.equal(picks.check.label, 'Clarify');
   assert.equal(picks.memo.current, 'memo');
   assert.equal(picks.memo.source, 'From the memo, question 2');
   assert.deepEqual(picks.memo.detail, ['Example LLC']);
   assert.equal(picks.memo.label, 'Ask');
   assert.deepEqual(picks.memo.earlier, ['signal', 'check', 'answer']);
   assert.equal(picks.own.current, 'own');
-  assert.match(picks.own.label, /^Answer to your question · \d\d:\d\d$/);
+  assert.equal(picks.own.label, 'Answer to your question');
   assert.equal(picks.ownQuestion, 'What did Anna say?');
   assert.deepEqual(picks.own.earlier, ['signal', 'check', 'answer']);
-  assert.match(picks.askLabel, /^Ask · \d\d:\d\d$/);
-  assert.match(picks.riskLabel, /^Say · /);
+  assert.equal(picks.askLabel, 'Ask');
+  assert.equal(picks.riskLabel, 'Say');
   assert.deepEqual(picks.none, { current: null, earlier: [] });
 
   // A journal hint: its source is the first line after the hint line, the rest goes to the detail.
@@ -97,8 +98,8 @@ async function functions(browser) {
     text: 'Say the date slips.\nSource: Anna, 12:31\nThe memo has no date.', evidence: 'we wait for the committee', speaker: 'Anna Petrova' }] })[0]);
   // The label says the verb once: a line that starts with it loses it (ruling 8).
   assert.equal(parts.text, 'The date slips.');
-  assert.match(parts.label, /^Say · \d\d:\d\d$/, 'no call start known: the wall clock, as no call clock shows either');
-  assert.equal(parts.source, 'Source: Anna, 12:31');
+  assert.equal(parts.label, 'Say');
+  assert.equal(parts.source, 'Anna, 12:31', 'one form of source line, no prefix (G5)');
   assert.deepEqual(parts.detail, ['The memo has no date.', 'we wait for the committee', 'Anna Petrova']);
   const fallback = await run(() => hintCandidates({ journal: [{ category: 'ASK', created_at: new Date().toISOString(),
     text: 'Ask who signs?', evidence: 'a committee decides' }] })[0]);
@@ -106,7 +107,7 @@ async function functions(browser) {
   assert.deepEqual(fallback.detail, []);
   const marked = await run(() => hintCandidates({ journal: [{ category: 'RISK', created_at: new Date().toISOString(),
     text: '**Say the date slips.**\n**Source:** `memo`' }] })[0]);
-  assert.deepEqual([marked.text, marked.source], ['The date slips.', 'Source: memo']);
+  assert.deepEqual([marked.text, marked.source], ['The date slips.', 'memo']);
   // The verb sets the label (ruling 6), and the line shows whole (B1).
   const verbs = await run(() => ['Спросите, кто подписывает?', 'Скажите: старт в понедельник.', 'Ask whether the regional offices that join the pilot later keep the same price and start conditions',
     'Asking around is fine.', 'Уточните сроки.'].map(line => {
@@ -172,7 +173,7 @@ async function functions(browser) {
   assert.equal(fixtures.silent.you.speaking, true);
   const lost = await run(({ other, you, now }) => ({ other: heartbeat(other, now).other, you: heartbeat(you, now).you }),
     { other: build('other_lost', 'en', now).state, you: build('you_lost', 'en', now).state, now });
-  assert.deepEqual(lost.other, { state: 'not_heard', since: now - 40 * SEC, speaking: true });
+  assert.deepEqual(lost.other, { state: 'not_heard', since: now - 40 * SEC, speaking: false }); // nothing heard from them since
   assert.equal(lost.you.state, 'not_heard');
   assert.equal(lost.you.since, now - 50 * SEC);
 
@@ -292,7 +293,7 @@ async function interactions(browser) {
   // A fresh hint: the label with its time, one source line, Where this comes from opens the rest and stays open.
   let page = await callPage(browser, 'hint');
   assert.equal(await text(page, '#call-name'), 'Pilot review');
-  assert.match(await text(page, '#call-slot .say'), /^Ask · \d\d:\d\d$/);
+  assert.match(await text(page, '#call-slot .say'), /^Ask · (?:just now|только что)$/);
   assert.equal(await text(page, '#call-slot .hint'), 'Who signs off the purchase?');
   const why = await page.$eval('#call-slot .why', node => ({ height: node.getBoundingClientRect().height,
     line: parseFloat(getComputedStyle(node).lineHeight), text: node.textContent }));
@@ -323,7 +324,7 @@ async function interactions(browser) {
 
   // A question put to the person: who asks and when, the question in regular weight, the reply as the hint.
   page = await callPage(browser, 'answer');
-  assert.match(await text(page, '#call-slot .say'), /^Anna Petrova asks · \d\d:\d\d$/);
+  assert.match(await text(page, '#call-slot .say'), /^Anna Petrova asks · (?:just now|только что)$/);
   assert.equal(await text(page, '#call-slot .heard-q'), 'When can you start the pilot?');
   assert.equal(await page.$eval('#call-slot .heard-q', node => getComputedStyle(node).fontWeight), '400');
   assert.equal(await text(page, '#call-slot .hint'), 'We can start on the first Monday after the contract is signed.');
@@ -331,7 +332,7 @@ async function interactions(browser) {
 
   // A question heard, the answer not ready: the question and the usual wait.
   page = await callPage(browser, 'heard');
-  assert.match(await text(page, '#call-slot .say'), /^Anna Petrova asks · \d\d:\d\d$/);
+  assert.match(await text(page, '#call-slot .say'), /^Anna Petrova asks · (?:just now|только что)$/);
   assert.equal(await text(page, '#call-slot .heard-q'), 'How long does the setup take on our side?');
   assert.match(await text(page, '#call-slot .heard-wait'), /usually a few seconds/);
   assert.equal(await page.locator('#call-slot .hint').count(), 0);
@@ -347,12 +348,12 @@ async function interactions(browser) {
 
   // A long hint keeps its verb label and shows whole: nothing to open (ruling 6, B1).
   page = await callPage(browser, 'long_hint');
-  assert.match(await text(page, '#call-slot .say'), /^Ask · \d\d:\d\d$/);
+  assert.match(await text(page, '#call-slot .say'), /^Ask · (?:just now|только что)$/);
   assert.equal(await text(page, '#call-slot .hint'),
     'Will the regional offices that join the pilot later keep the same price and the same start conditions as the first two?');
   await page.context().close();
   page = await callPage(browser, 'long_hint', { lang: 'ru', data: 'ru' });
-  assert.match(await text(page, '#call-slot .say'), /^Спросите · \d\d:\d\d$/);
+  assert.match(await text(page, '#call-slot .say'), /^Спросите · (?:just now|только что)$/);
   assert.match(await text(page, '#call-slot .hint'), /^Сохранятся ли/);
   await page.context().close();
 
@@ -395,9 +396,9 @@ async function interactions(browser) {
   assert.deepEqual(page.errors, []);
   await page.context().close();
 
-  // The other side not heard: since when, the sound output first, How to fix on the guide's audio step.
+  // The other side not heard: for how long, the sound output first, How to fix on the guide's audio step.
   page = await callPage(browser, 'other_lost', { at: Date.now() });
-  assert.equal(await text(page, '#call-problem .problem h3'), 'The other side has not been heard since 12:00');
+  assert.match(await text(page, '#call-problem .problem h3'), /^The other side has not been heard for 4\d s$/);
   assert.match(await text(page, '#call-problem .problem p'), /^You are heard\./);
   assert.equal(await text(page, '#call-problem button.primary'), 'Choose where to listen to the call from');
   await page.click('#call-problem button.primary');
@@ -415,7 +416,7 @@ async function interactions(browser) {
 
   // Your microphone not heard: the microphone settings.
   page = await callPage(browser, 'you_lost');
-  assert.match(await text(page, '#call-problem .problem h3'), /^You have not been heard since \d\d:\d\d$/);
+  assert.match(await text(page, '#call-problem .problem h3'), /^You have not been heard for 5\d s$/);
   await page.click('#call-problem button.primary');
   await expectPost(page, '/api/permissions/open', { which: 'microphone' });
   await page.context().close();
@@ -616,15 +617,15 @@ async function callBar(browser) {
     await page.context().close();
   }
 
-  // The undo window: when it stopped and the seconds left; Resume, no Stop and no heartbeat.
+  // The undo window: the seconds left (G2); Resume, no Stop and no heartbeat.
   page = await callPage(browser, 'stopped', { at: Date.now() });
   const stopped = await text(page, '#call-status-text');
-  assert.match(stopped, /^Recording stopped at \d\d:\d\d\. The report opens in \d+\u00a0s\.$/);
+  assert.match(stopped, /^Recording stops in \d+\u00a0s\.$/);
   const seconds = Number(stopped.match(/in (\d+)\u00a0s/)[1]);
   // A screen reader hears the stop once, not every second (Minor 2): the bar's text is not a live region.
   assert.equal(await page.$eval('#call-status-text', node => node.getAttribute('aria-live')), null);
   const announced = await text(page, '#call-status-live');
-  assert.match(announced, /^Recording stopped at \d\d:\d\d\. The report opens in/);
+  assert.match(announced, /^Recording stops in/);
   await page.clock.runFor(2000);
   assert.ok(Number((await text(page, '#call-status-text')).match(/in (\d+)\u00a0s/)[1]) < seconds, 'the countdown falls');
   assert.equal(await text(page, '#call-status-live'), announced, 'the countdown is not announced');
@@ -655,9 +656,9 @@ async function callBar(browser) {
   await expectPost(page, '/api/recording/stop', { meeting_id: 'm1' });
   await page.context().close();
 
-  // Stopped for good (a recorder that cannot pause): the time only, no Resume, no Stop.
+  // Stopped for good (a recorder that cannot pause): no Resume, no Stop.
   page = await callPage(browser, 'stopped_final');
-  assert.match(await text(page, '#call-status-text'), /^Recording stopped at \d\d:\d\d\.$/);
+  assert.equal(await text(page, '#call-status-text'), 'Recording stopped.');
   assert.equal(await visible(page, '#call-status-action'), false);
   assert.equal(await visible(page, '#call-stop'), false);
   await page.context().close();
@@ -711,7 +712,7 @@ async function callBar(browser) {
 
   // RU at 400 px: the number and «с» never part.
   page = await callPage(browser, 'stopped', { width: 400, lang: 'ru', data: 'ru' });
-  assert.match(await text(page, '#call-status-text'), /Через \d+\u00a0сек откроется отчет\.$/); // D4
+  assert.match(await text(page, '#call-status-text'), /^Запись остановится через \d+\u00a0сек\.$/); // D4, G2
   await page.context().close();
 
   // No capture marker and nobody heard yet: silence is never "not heard".
@@ -954,8 +955,8 @@ async function fixWave(browser) {
     const page = await callPage(browser, 'waiting', { lang: 'ru' });
     assert.match(await text(page, '#call-slot .waiting'), /^Слушаю разговор\. Подсказка появится здесь/);
     const copy = await page.evaluate(() => ['call.open_chat', 'call.you_lost', 'call.other_lost'].map(key => [translations.ru[key], translations.en[key]]));
-    assert.deepEqual(copy, [['Все вопросы и ответы', 'All questions and answers'], ['Вас не слышно с {time}', 'You have not been heard since {time}'],
-      ['Собеседника не слышно с {time}', 'The other side has not been heard since {time}']]);
+    assert.deepEqual(copy, [['Все вопросы и ответы', 'All questions and answers'], ['Вас не слышно {time}', 'You have not been heard for {time}'],
+      ['Собеседника не слышно {time}', 'The other side has not been heard for {time}']]);
     for (const lang of ['ru', 'en']) assert.doesNotMatch(build('earlier_open', lang).state.journal.map(item => item.text).join(' '), /контекст|background/);
     await page.context().close();
     const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../copilot/web/app.js'), 'utf8');
@@ -994,18 +995,10 @@ async function fixWave(browser) {
     assert.equal(await visible(page, '#getting-started'), true, `${lang}: the link opens the guide`);
     await page.context().close();
   }
-  // D1: every time in Call is elapsed call time, the top-bar clock (the call began 12:40 before `at`).
+  // D1, replaced by G1: one clock per job (polish below); the paused retry is still a count of minutes.
   {
     const at = Date.now();
-    let page = await callPage(browser, 'hint', { at });
-    assert.equal(await text(page, '#call-slot .say'), 'Ask · 12:35');
-    await page.context().close();
-    page = await callPage(browser, 'other_lost', { at });
-    assert.equal(await text(page, '#call-problem .problem h3'), 'The other side has not been heard since 12:00');
-    await page.context().close();
-    page = await callPage(browser, 'stopped', { at });
-    assert.match(await text(page, '#call-status-text'), /^Recording stopped at 12:30\. /);
-    await page.context().close();
+    let page;
     page = await callPage(browser, 'paused_ai', { at });
     assert.match(await text(page, '#call'), /next try in 5\u00a0min\./);
     await page.context().close();
@@ -1055,16 +1048,15 @@ async function fixWave(browser) {
     await page.context().close();
   }
   // B6: in Earlier, a heard question says who asked, in quotes, and our answer sits under its own label.
-  for (const [lang, asked, label] of [['en', 'Anna Petrova asked: “When can you start the pilot?”', /^Answer · \d\d:\d\d$/],
+  for (const [lang, asked, label] of [['en', 'Anna Petrova asked: “When can you start the pilot?”', 'Answer · 2 min ago'],
     // RU keeps the present tense: a past verb would guess the speaker's gender from a name.
-    ['ru', 'Анна Петрова спрашивает: «Когда вы сможете начать пилот?»', /^Ответ · \d\d:\d\d$/]]) {
+    ['ru', 'Анна Петрова спрашивает: «Когда вы сможете начать пилот?»', 'Ответ · 2\u00a0мин назад']]) {
     const page = await callPage(browser, 'earlier_open', { lang, data: lang });
     await page.click('#call-earlier-open');
     const item = page.locator('#call-earlier li', { hasText: asked });
     assert.equal(await item.count(), 1, lang);
-    assert.deepEqual(await item.locator('p').allTextContents().then(lines => [lines[0], lines[1].replace(/\d\d:\d\d/, '00:00'), lines[2]]),
-      [asked, label.source.includes('Answer') ? 'Answer · 00:00' : 'Ответ · 00:00', build('earlier_open', lang).state.journal[1].reply], lang);
-    assert.match(await item.locator('p.say').textContent(), label);
+    assert.deepEqual(await item.locator('p').allTextContents().then(lines => lines.slice(0, 3)),
+      [asked, label, build('earlier_open', lang).state.journal[1].reply], lang);
     // The question shows once: no source line repeating it under the answer.
     const question = build('earlier_open', lang).state.journal[1].text;
     assert.equal((await item.locator('p').allTextContents()).filter(line => line.trim() === question).length, 0, `${lang}: question once`);
@@ -1144,12 +1136,155 @@ async function fixWave(browser) {
     const feed = await page.locator('#call').innerText();
     assert.doesNotMatch(feed, /Recording\. A hint|is heard|not heard|Ask who signs/, `${fixture}: ${feed}`);
     assert.equal(await page.locator('#call-problem > *').count(), 0, `${fixture}: no problem card`);
-    assert.equal(await text(page, '#call-slot'), 'The recording is stopped. No more hints for this call.', fixture);
+    // One plain line (G2, G3): hints paused in the undo window, the recording saved after the final stop.
+    assert.equal(await text(page, '#call-slot p'), fixture === 'stopped' ? 'Hints are paused.' : 'The recording is saved.', fixture);
     assert.equal(await page.locator('#call-question').isEnabled(), true);
     await page.fill('#call-question', 'What did Anna say about the budget?');
     await page.press('#call-question', 'Enter');
     await expectPost(page, '/api/chat', { question: 'What did Anna say about the budget?' });
     assert.deepEqual(page.errors, []);
+    await page.context().close();
+  }
+}
+
+// Section G, critique 2: one clock per job, the end of the call, the panels and Earlier.
+async function polish(browser) {
+  const ru = (fixture, options = {}) => callPage(browser, fixture, { lang: 'ru', data: 'ru', ...options });
+  const at = Date.parse('2026-11-26T15:47:50Z');
+  // G1: the bar has the elapsed timer; an item in the feed or Earlier says how old it is; lost audio says for how
+  // long; the transcript is stamped in elapsed time. No other time shows anywhere in Call.
+  {
+    const page = await ru('hint', { at });
+    assert.equal(await text(page, '#call-slot .say'), 'Спросите · только что');
+    const bar = await page.locator('.topbar').innerText();
+    assert.deepEqual(bar.match(/\d+:\d\d/g), ['12:40'], bar);
+    assert.doesNotMatch(await page.locator('#call').innerText(), /\d:\d\d/);
+    await page.click('#call-transcript-open');
+    assert.deepEqual(await page.locator('#transcript .utterance time').allTextContents(), ['11:50', '12:00', '12:20', '12:34']);
+    assert.deepEqual(await page.locator('#transcript .speaker-name-button').allTextContents(), ['Вы', 'Анна Петрова', 'Вы', 'Анна Петрова']);
+    await page.context().close();
+  }
+  for (const [lang, labels] of [['ru', ['Уточните · 1\u00a0мин назад', 'Ответ · 2\u00a0мин назад', 'Скажите · 3\u00a0мин назад']],
+    ['en', ['Clarify · 1 min ago', 'Answer · 2 min ago', 'Say · 3 min ago']]]) {
+    const page = await callPage(browser, 'earlier_open', { lang, data: lang, at });
+    await page.click('#call-earlier-open');
+    const shown = await page.locator('#call-earlier .say').allTextContents();
+    for (const label of labels) assert.ok(shown.includes(label), `${lang}: ${label} in ${shown.join(' | ')}`);
+    assert.doesNotMatch(await page.locator('#call').innerText(), /\d:\d\d/, lang);
+    // The age keeps counting between polls, in place: the item is not rebuilt.
+    const item = await page.$('#call-earlier li:last-child .say');
+    const before = await item.textContent();
+    await page.clock.fastForward(60 * SEC);
+    assert.equal(await item.evaluate(node => node.isConnected), true, `${lang}: kept`);
+    assert.notEqual(await item.textContent(), before, `${lang}: the age moved on`);
+    await page.context().close();
+  }
+  for (const [lang, fixture, title] of [['ru', 'other_lost', /^Собеседника не слышно 4\d\u00a0сек$/], ['en', 'other_lost', /^The other side has not been heard for 4\d s$/],
+    ['ru', 'you_lost', /^Вас не слышно 5\d\u00a0сек$/], ['en', 'you_lost', /^You have not been heard for 5\d s$/]]) {
+    const page = await callPage(browser, fixture, { lang, data: lang, at });
+    assert.match(await text(page, '#call-problem .problem h3'), title, `${lang} ${fixture}`);
+    assert.doesNotMatch(await page.locator('#call').innerText(), /\d:\d\d/, `${lang} ${fixture}`);
+    await page.context().close();
+  }
+  // The other side's lost sound comes before the hint shown, never after it (P3-6).
+  {
+    const { state } = build('other_lost', 'ru');
+    const lost = Date.parse(state.transcript.capture_warnings[0].started_at);
+    assert.ok(state.journal.every(item => Date.parse(item.created_at) < lost), 'hints older than the loss');
+    assert.ok(state.transcript.segments.filter(item => item.source === 'system').every(item => Date.parse(item.timestamp) < lost));
+  }
+  // The fixtures carry no clock time.
+  for (const name of NAMES) for (const lang of ['en', 'ru']) {
+    assert.doesNotMatch(JSON.stringify(build(name, lang).state.journal.map(item => [item.text, item.reply, item.evidence])), /\b\d\d:\d\d\b/, `${name} ${lang}`);
+  }
+  // G2: the undo window says once that the recording stops and offers to go on; the feed does not repeat the bar.
+  for (const [lang, bar, feed] of [['ru', /^Запись остановится через \d+\u00a0сек\.$/, 'Подсказки на паузе.'],
+    ['en', /^Recording stops in \d+\u00a0s\.$/, 'Hints are paused.']]) {
+    const page = await callPage(browser, 'stopped', { lang, data: lang, at });
+    assert.match(await text(page, '#call-status-text'), bar, lang);
+    assert.equal(await text(page, '#call-status-action'), lang === 'ru' ? 'Продолжить запись' : 'Resume recording');
+    assert.equal(await text(page, '#call-slot'), feed, lang);
+    assert.doesNotMatch(await page.locator('#call').innerText(), /больше не будет|No more hints|\d:\d\d/, lang);
+    await page.context().close();
+  }
+  // G3: the final stop says the recording is saved and opens this meeting's results.
+  for (const [lang, bar, saved, button] of [['ru', 'Запись остановлена.', 'Запись сохранена.', 'Открыть итоги звонка'],
+    ['en', 'Recording stopped.', 'The recording is saved.', 'Open the call results']]) {
+    const page = await callPage(browser, 'stopped_final', { lang, data: lang, at });
+    assert.equal(await text(page, '#call-status-text'), bar, lang);
+    assert.equal(await text(page, '#call-slot p'), saved, lang);
+    assert.equal(await text(page, '#call-slot button'), button, lang);
+    await page.click('#call-slot button');
+    assert.equal(await page.evaluate(() => document.body.dataset.view), 'after', lang);
+    assert.equal(await visible(page, '#call-status-action'), false, `${lang}: no way back to a stopped call`);
+    await page.context().close();
+  }
+  // G4: a panel sits in the feed's column on the feed's background; RU says Вы and Расшифровка; the board's
+  // headings are plain words and it shows no zero counters. The After view keeps its own board.
+  {
+    const page = await ru('board_open', { at });
+    const column = () => page.evaluate(() => {
+      const pane = [...document.querySelectorAll('.transcript-pane, .copilot-pane')].find(node => node.getClientRects().length);
+      const box = pane.getBoundingClientRect();
+      const color = node => getComputedStyle(node).backgroundColor;
+      return { left: box.left, right: box.right, pane: color(pane), workspace: color(document.querySelector('main.workspace')),
+        feed: color(document.body) };
+    });
+    await page.click('#call-board-open');
+    let shown = await column();
+    assert.ok(shown.left >= 130 && shown.right <= 1310, JSON.stringify(shown));
+    assert.equal(shown.pane, 'rgba(0, 0, 0, 0)');
+    assert.equal(shown.workspace, shown.feed);
+    const board = await page.locator('#call-board').innerText();
+    assert.deepEqual(await page.locator('#call-board .board-column-header h3').allTextContents(),
+      ['Спросить у клиента', 'Вопросы к вам', 'Риски и возражения', 'Проверка фактов']);
+    for (const line of await page.locator('#call-board .board-column-header p').allTextContents()) assert.doesNotMatch(line, /(^|\s)0\s/, line);
+    assert.doesNotMatch(board, /стенограм/i);
+    assert.doesNotMatch(board, /Подготовка/, 'a tag every card shares is left out');
+    const heights = await page.$$eval('#call-board .board-column-header', nodes => nodes.map(node => Math.round(node.getBoundingClientRect().height)));
+    assert.equal(new Set(heights).size, 1, `the column rules line up: ${heights}`);
+    await page.click('#call-back');
+    await page.click('#call-transcript-open');
+    shown = await column();
+    assert.ok(shown.left >= 240 && shown.right <= 1200, JSON.stringify(shown));
+    assert.equal(shown.pane, 'rgba(0, 0, 0, 0)');
+    const names = await page.evaluate(() => [getComputedStyle(document.getElementById('speaker-edit')).color, getComputedStyle(document.body).color]);
+    assert.equal(names[0], names[1], 'Имена is a normal button, not a disabled-looking one');
+    await page.context().close();
+  }
+  // G5: Earlier lists only lines to say, a question once, one form of source line, and wraps at 400 px.
+  for (const lang of ['ru', 'en']) {
+    const page = await callPage(browser, 'earlier_open', { lang, data: lang, at, width: 400 });
+    await page.click('#call-more');
+    await page.click('#call-more-earlier');
+    const lines = await page.locator('#call-earlier .earlier-hint').allTextContents();
+    assert.ok(lines.includes(lang === 'ru' ? 'Старт в марте или в апреле?' : 'Does the start fall in March or in April?'), lines.join(' | '));
+    assert.equal((await page.locator('#call-earlier').innerText()).split(build('earlier_open', lang).state.journal[1].text).length - 1, 1, `${lang}: question once`);
+    for (const source of await page.locator('#call-earlier .why').allTextContents()) {
+      assert.doesNotMatch(source, /^(Основание|Источник|Evidence|Source):/, source);
+    }
+    const clipped = await page.$$eval('#call-earlier .why', nodes => nodes.filter(node => node.scrollWidth > node.clientWidth + 1).length);
+    assert.equal(clipped, 0, `${lang}: wrapped, not cut`);
+    await page.context().close();
+  }
+  // The live slot's source line has no prefix either.
+  {
+    const page = await ru('hint', { at });
+    assert.equal(await text(page, '#call-slot .why'), 'Анна упомянула комитет, но без имени.');
+    await page.context().close();
+  }
+  // The last phrase heard never opens on half a word at 400 px.
+  for (const lang of ['ru', 'en']) {
+    const page = await callPage(browser, 'hint', { lang, data: lang, at, width: 400 });
+    const phrase = build('hint', lang).state.transcript.segments.at(-1).text;
+    const shown = await page.evaluate(() => {
+      const words = document.querySelector('#call-heard .heard-words');
+      return { text: words.textContent, cut: words.scrollWidth > words.clientWidth + 1 };
+    });
+    assert.equal(shown.cut, false, `${lang}: fits`);
+    const rest = shown.text.replace(/^…/, '');
+    assert.ok(phrase.endsWith(rest), `${lang}: ${shown.text}`);
+    assert.ok(rest === phrase || phrase[phrase.length - rest.length - 1] === ' ', `${lang}: starts on a word: ${shown.text}`);
     await page.context().close();
   }
 }
@@ -1169,6 +1304,7 @@ async function expectPost(page, path, body) {
     await narrow(browser);
     await everyFixture(browser);
     await fixWave(browser);
+    await polish(browser);
     console.log('call UI checks passed');
   } finally {
     await browser.close();

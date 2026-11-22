@@ -147,7 +147,10 @@ const translations = {
     "call.asked_plain": "Собеседник спрашивает: «{question}»",
     "call.answer": "Ответ",
     "call.own": "Ответ на ваш вопрос",
-    "call.at": "{label} · {time}",
+    "call.just_now": "только что",
+    "call.min_ago": "{n}\u00a0мин назад",
+    "call.for_sec": "{n}\u00a0сек",
+    "call.for_min": "{n}\u00a0мин",
     "call.from_memo": "Из мемо, вопрос {n}",
     "call.where": "Откуда подсказка",
     "call.where_hide": "Свернуть",
@@ -155,16 +158,22 @@ const translations = {
     "call.heard_later": "Ответ появится позже: первые минуты автоматической записи ИИ не разбирает.",
     "call.waiting_heard": "Слушаю разговор. Подсказка появится здесь, когда будет что сказать или спросить.",
     "call.waiting": "Запись идет. Подсказка появится здесь, когда будет что сказать или спросить.",
-    "call.stopped": "Запись остановлена. Подсказок по этому звонку больше не будет.",
+    "call.stopped": "Подсказки на паузе.",
+    "call.saved": "Запись сохранена.",
+    "call.open_results": "Открыть итоги звонка",
+    "call.board_mine": "Спросить у клиента",
+    "call.board_incoming": "Вопросы к вам",
+    "call.board_empty_incoming": "Здесь появятся вопросы собеседника из расшифровки.",
+    "call.transcript_empty": "Жду расшифровку",
     "call.stop_pending": "Запись на паузе. Подсказок по этому звонку больше не будет.",
     "call.waiting_help": "Свой вопрос можно задать внизу. Весь разговор текстом в «Расшифровке», вопросы и риски на «Доске».",
     "call.paused": "Подсказки на паузе: ИИ не ответил.",
     "call.paused_retry": "Запись идет, следующая попытка через {n}\u00a0мин.",
     "call.paused_next": "Запись идет, следующая попытка будет со следующим анализом.",
-    "call.other_lost": "Собеседника не слышно с {time}",
+    "call.other_lost": "Собеседника не слышно {time}",
     "call.other_lost_now": "Собеседника не слышно",
     "call.other_lost_text": "Вас слышно. Подсказки по словам собеседника вернутся, когда звук появится.",
-    "call.you_lost": "Вас не слышно с {time}",
+    "call.you_lost": "Вас не слышно {time}",
     "call.you_lost_now": "Вас не слышно",
     "call.you_lost_text": "Собеседника слышно. Ваши слова не попадут в расшифровку, пока микрофон не вернется.",
     "action.sound_output": "Выбрать, откуда слушать звонок",
@@ -230,8 +239,8 @@ const translations = {
     "action.stop": "Остановить запись",
     "action.stop_short": "Остановить",
     "action.resume": "Продолжить запись",
-    "status.stopped": "Запись остановлена на {time}. Через {n}\u00a0сек откроется отчет.",
-    "status.stopped_final": "Запись остановлена на {time}.",
+    "status.stopped": "Запись остановится через {n}\u00a0сек.",
+    "status.stopped_final": "Запись остановлена.",
     "status.error.meeting_changed": "Звонок уже сменился, обновите страницу",
     "status.error.too_late": "Запись уже остановлена",
     "status.error.stop_failed": "Запись не остановилась, откройте программу записи",
@@ -515,7 +524,10 @@ const translations = {
     "call.asked_plain": "The other side asked: “{question}”",
     "call.answer": "Answer",
     "call.own": "Answer to your question",
-    "call.at": "{label} · {time}",
+    "call.just_now": "just now",
+    "call.min_ago": "{n} min ago",
+    "call.for_sec": "{n} s",
+    "call.for_min": "{n} min",
     "call.from_memo": "From the memo, question {n}",
     "call.where": "Where this comes from",
     "call.where_hide": "Hide",
@@ -523,16 +535,22 @@ const translations = {
     "call.heard_later": "The answer comes later: the AI skips the first minutes of an automatic recording.",
     "call.waiting_heard": "Listening. A hint appears here when there is something to say or ask.",
     "call.waiting": "Recording. A hint appears here when there is something to say or ask.",
-    "call.stopped": "The recording is stopped. No more hints for this call.",
+    "call.stopped": "Hints are paused.",
+    "call.saved": "The recording is saved.",
+    "call.open_results": "Open the call results",
+    "call.board_mine": "To ask the client",
+    "call.board_incoming": "Asked of you",
+    "call.board_empty_incoming": "Questions the other side asks appear here.",
+    "call.transcript_empty": "Waiting for the transcript",
     "call.stop_pending": "The recording is paused. No more hints for this call.",
     "call.waiting_help": "You can ask your own question below. The whole conversation is in Transcript, questions and risks are on the Board.",
     "call.paused": "Hints paused: the AI did not answer.",
     "call.paused_retry": "Recording continues, next try in {n}\u00a0min.",
     "call.paused_next": "Recording continues, the next try comes with the next analysis.",
-    "call.other_lost": "The other side has not been heard since {time}",
+    "call.other_lost": "The other side has not been heard for {time}",
     "call.other_lost_now": "The other side is not heard",
     "call.other_lost_text": "You are heard. Hints on what the other side says come back once their sound does.",
-    "call.you_lost": "You have not been heard since {time}",
+    "call.you_lost": "You have not been heard for {time}",
     "call.you_lost_now": "You are not heard",
     "call.you_lost_text": "The other side is heard. Your words are not transcribed until the microphone is back.",
     "action.sound_output": "Choose where to listen to the call from",
@@ -598,8 +616,8 @@ const translations = {
     "action.stop": "Stop recording",
     "action.stop_short": "Stop",
     "action.resume": "Resume recording",
-    "status.stopped": "Recording stopped at {time}. The report opens in {n}\u00a0s.",
-    "status.stopped_final": "Recording stopped at {time}.",
+    "status.stopped": "Recording stops in {n}\u00a0s.",
+    "status.stopped_final": "Recording stopped.",
     "status.error.meeting_changed": "The call has changed, reload the page",
     "status.error.too_late": "The recording has already stopped",
     "status.error.stop_failed": "The recording did not stop, open the recorder",
@@ -1693,7 +1711,8 @@ function readableAnswer(text) {
 function speakerLabel(segment) {
   if (segment.speaker_id === "unassigned") return t("speakers.pending");
   if (segment.speaker_identity === "manual") return segment.speaker_label || segment.speaker;
-  if (segment.source === "microphone") return t("speaker.me");
+  // Call says "Вы" for the person everywhere, the heartbeat included (G4).
+  if (segment.source === "microphone") return t(document.body.dataset.view === "call" ? "call.you" : "speaker.me");
   const label = segment.speaker_label || segment.speaker;
   if (label && !/^(Собеседник|Спикер)\s*\d*$/.test(label)) return label;
   // Call audio with no separated voice is everyone else (owner decision 2026-10-21).
@@ -1845,7 +1864,9 @@ function renderTranscript(transcript) {
     elements.liveStatus.lastChild.textContent = t("status.no_fresh");
   }
 
-  const signature = `${transcript.meeting_id}:${transcript.updated_at}:${transcript.segments.length}:${transcript.translation_revision || 0}:${transcript.speaker_revision || 0}`;
+  // In Call the transcript is stamped in elapsed call time, the bar's clock (G1); elsewhere in clock time.
+  const start = document.body.dataset.view === "call" ? callStartIso({ ...window.appState, transcript }) : "";
+  const signature = `${transcript.meeting_id}:${transcript.updated_at}:${transcript.segments.length}:${transcript.translation_revision || 0}:${transcript.speaker_revision || 0}:${start}`;
   if (signature === transcriptSignature) return;
   transcriptSignature = signature;
 
@@ -1868,7 +1889,7 @@ function renderTranscript(transcript) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.append(
-      textNode("strong", "", transcript.error ? t("transcript.failed") : t("transcript.empty_title")),
+      textNode("strong", "", transcript.error ? t("transcript.failed") : t(start ? "call.transcript_empty" : "transcript.empty_title")),
       textNode(
         "span",
         "",
@@ -1909,7 +1930,7 @@ function renderTranscript(transcript) {
       }
       if (segment.spans_boundary) body.append(textNode("small", "boundary-provenance", t("meeting.crossing")));
       if (segment.boundary_unassigned) body.append(textNode("small", "boundary-provenance", t("meeting.unassigned")));
-      speaker.append(textNode("time", "", localTime(segment.timestamp)));
+      speaker.append(textNode("time", "", (start && callClock(start, Date.parse(segment.timestamp))) || localTime(segment.timestamp)));
       row.append(speaker, body);
       fragment.append(row);
     }
@@ -2398,6 +2419,9 @@ function renderCallPlan(plan) {
   }
 }
 
+// "0 открыто · 2 закрыто" -> "2 закрыто": every counter template puts the number first.
+const nonZero = (text) => text.split(" · ").filter((part) => !/^0\s/u.test(part)).join(" · ");
+
 function renderCallBoard(plan, journal) {
   currentJournal = journal;
   const call = document.body.dataset.view === "call";
@@ -2472,15 +2496,23 @@ function renderCallBoard(plan, journal) {
     section.className = `board-column ${lane}`;
     const header = document.createElement("header");
     header.className = "board-column-header";
-    header.append(textNode("h3", "", t(`board.${lane}`)), textNode("p", "", t("board.count", {
+    // In Call the headings are plain words and a zero counter is not shown (G4).
+    const count = t("board.count", {
       open: group.filter((item) => item.status !== "resolved").length,
       closed: group.filter((item) => item.status === "resolved").length,
-    })));
+    });
+    header.append(textNode("h3", "", t(call && lane !== "risks" ? `call.board_${lane}` : `board.${lane}`)));
+    header.append(textNode("p", "", call ? nonZero(count) : count));
     const list = document.createElement("div");
     list.className = "board-list";
     list.dataset.boardList = lane;
     const shown = group.filter((item) => statuses.has(item.status));
-    if (!group.length) list.append(textNode("p", "board-empty", t(`board.empty.${lane}`)));
+    const subtypeOf = (item) => (lane === "incoming" ? (item.category === "INCOMING_QUESTION" ? "to_me" : "general")
+      : lane === "risks" ? (item.category === "OBJECTION" ? "objection" : "risk")
+      : item.origin === "plan" ? "prepared" : "live");
+    // In Call a tag every card of the column shares says nothing, so it is left out (G4).
+    const sameTag = call && new Set(group.map(subtypeOf)).size === 1;
+    if (!group.length) list.append(textNode("p", "board-empty", t(call && lane === "incoming" ? "call.board_empty_incoming" : `board.empty.${lane}`)));
     else if (!statuses.size) list.append(textNode("p", "board-empty", t("board.filter_none")));
     else if (!shown.length) list.append(textNode("p", "board-empty", t("board.filter_empty")));
     for (const item of shown) {
@@ -2496,10 +2528,7 @@ function renderCallBoard(plan, journal) {
       heading.append(textNode("p", "", mainText));
       const controls = document.createElement("div");
       controls.className = "board-item-controls";
-      const subtype = lane === "incoming" ? (item.category === "INCOMING_QUESTION" ? "to_me" : "general")
-        : lane === "risks" ? (item.category === "OBJECTION" ? "objection" : "risk")
-        : item.origin === "plan" ? "prepared" : "live";
-      controls.append(textNode("span", "board-item-type", t(`board.${subtype}`)));
+      if (!sameTag) controls.append(textNode("span", "board-item-type", t(`board.${subtypeOf(item)}`)));
       if (item.source === "meeting_chat") controls.append(textNode("span", "board-item-type", uiLanguage === "ru" ? "Из чата аудитории" : "Audience chat"));
       const select = document.createElement("select");
       select.setAttribute("aria-label", `${mainText}: ${t("board.tab")}`);
@@ -3359,15 +3388,16 @@ factColumn.className = "board-column facts";
 
 function renderFactChecks(state) {
   const items = state?.items || [];
-  const signature = `${uiLanguage}:${factsExpanded}:${activeTranscript?.meeting_id || ""}:${JSON.stringify(state || {})}`;
+  const call = document.body.dataset.view === "call";
+  const signature = `${call}:${uiLanguage}:${factsExpanded}:${activeTranscript?.meeting_id || ""}:${JSON.stringify(state || {})}`;
   if (signature === factSignature) return;
   factSignature = signature;
   const header = document.createElement("header");
   header.className = "board-column-header";
   const count = (status) => items.filter((item) => item.status === status).length;
-  header.append(textNode("h3", "", t("fact.title")), textNode("p", "", t("fact.count", {
-    confirmed: count("confirmed"), unclear: count("unclear"), refuted: count("refuted"),
-  })));
+  const counts = t("fact.count", { confirmed: count("confirmed"), unclear: count("unclear"), refuted: count("refuted") });
+  header.append(textNode("h3", "", t("fact.title")));
+  header.append(textNode("p", "", call ? nonZero(counts) : counts));
   const list = document.createElement("div");
   list.className = "board-list";
   list.dataset.boardList = "facts";
