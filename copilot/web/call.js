@@ -2,6 +2,7 @@
 // Transcript, journal and AI text are untrusted: every value goes in through textContent.
 const HINT_FRESH_MS = 30000; // an event hint stays current this long
 const OWN_FRESH_MS = 60000; // the answer to the person's own question stays current this long
+const CALL_ANALYSIS_MS = 5000; // hints this close to the newest one come from the same analysis
 const CALL_HINT_WORDS = 12; // a longer hint line shows whole, one step smaller (B1)
 const CALL_HINT_SPLIT = /\n|(?:Основание|Источник|Evidence|Source):/u; // the split of the board's main line
 const callWords = text => text.split(/\s+/).filter(word => /[\p{L}\p{N}]/u.test(word));
@@ -27,8 +28,9 @@ function callTime(at, kind) {
 }
 function callTimes(now = Date.now()) {
   for (const node of document.querySelectorAll("[data-time]")) {
-    const seconds = Math.max(0, Math.floor((now - Number(node.dataset.at)) / 1000));
-    const minutes = Math.floor(seconds / 60);
+    const left = node.dataset.time === "left"; // seconds until dataset.at (the undo window, L3)
+    const seconds = Math.max(0, left ? Math.ceil((Number(node.dataset.at) - now) / 1000) : Math.floor((now - Number(node.dataset.at)) / 1000));
+    const minutes = left ? 0 : Math.floor(seconds / 60);
     const text = node.dataset.time === "age" ? (minutes ? t("call.min_ago", { n: minutes }) : t("call.just_now"))
       : minutes ? t("call.for_min", { n: minutes }) : t("call.for_sec", { n: seconds });
     if (node.textContent !== text) node.textContent = text;
@@ -138,7 +140,12 @@ function pickHint(state, now) {
   const hints = hintCandidates(state);
   const events = hints.filter(hint => hint.kind !== "memo" && hint.at !== null).sort((a, b) => b.at - a.at);
   const fresh = events.filter(hint => now - hint.at <= (hint.kind === "own" ? OWN_FRESH_MS : HINT_FRESH_MS));
-  const current = fresh.sort((a, b) => a.tier - b.tier)[0] || hints.find(hint => hint.kind === "memo") || null;
+  // The slot picks among the latest analysis only, so the current hint is never older than what Earlier lists (L2).
+  const latest = fresh.filter(hint => fresh[0].at - hint.at <= CALL_ANALYSIS_MS);
+  const event = latest.sort((a, b) => a.tier - b.tier)[0];
+  const memo = hints.find(hint => hint.kind === "memo");
+  // The memo question stands as of the latest analysis that found nothing newer: never older than Earlier either.
+  const current = event || (memo ? { ...memo, since: Math.max(memo.since ?? -Infinity, ...events.map(hint => hint.at)) } : null);
   // A hint that says the current one again (an ASK repeating the memo question) is not listed under it.
   return { current, earlier: events.filter(hint => hint !== current && !(current && callSame(hint.text, current.text))).slice(0, 20) };
 }
@@ -189,6 +196,8 @@ const callWhereOpen = new Set(); // keys of the hints whose source is open
 const callSignatures = {};
 
 const callHintKey = hint => `${hint.kind}|${hint.at}|${hint.text}`;
+const callAsked = hint => hint.speaker ? t("call.asked", { name: hint.speaker, question: hint.question })
+  : t("call.asked_plain", { question: hint.question });
 function callButton(className, label, onClick) {
   const button = textNode("button", className, label);
   button.type = "button";
@@ -234,10 +243,12 @@ function callSlot(state, current, now, stopped = null) {
   // The undo window: hints pause, the bar says when the recording stops (G2). The final stop: saved, and the
   // way to this meeting's results (G3).
   if (stopped) return { type: "stopped", final: stopped === "stopped_final",
+    until: stopped === "stopped" ? callAt(state?.recording_control?.stopping?.until) : null,
     text: t({ stop_failed: "call.stop_pending", stopped: "call.stopped", stopped_final: "call.saved" }[stopped]) };
+  // Who asked, in quotes, then Answer over the line, as in Earlier (B6, K3).
   if (current?.kind === "answer") {
-    return { type: "answer", key: callHintKey(current), label: current.label, at: current.at, question: current.question, text: current.text,
-      full: current.full, source: "", detail: [] };
+    return { type: "answer", key: callHintKey(current), label: t("call.answer"), at: current.at, asked: callAsked(current),
+      text: current.text, full: current.full, source: "", detail: [] };
   }
   const heard = state?.heard_question;
   if (heard?.text) {
@@ -255,8 +266,15 @@ function callSlot(state, current, now, stopped = null) {
 }
 
 function callSlotNodes(slot) {
-  const nodes = [callSay("say", slot.label || "", slot.at)];
+  const nodes = [...(slot.asked ? [textNode("p", "heard-q", slot.asked)] : []), callSay("say", slot.label || "", slot.at)];
   if (slot.type === "stopped") {
+    // The undo window says what comes next, counting down in place (L3); the bar already says it stopped.
+    if (slot.until !== null && slot.until !== undefined) {
+      const [before, after = ""] = t("call.saving").split("{time}");
+      const line = textNode("p", "waiting", before);
+      line.append(callTime(slot.until, "left"), after);
+      return [line];
+    }
     if (!slot.final) return [textNode("p", "waiting", slot.text)];
     // The last screen of the call has one way on: this meeting's results (G3).
     const actions = document.createElement("div");
@@ -378,8 +396,7 @@ function renderCall(state) {
 
   // A heard question says who asked, in quotes; our answer sits under its own label, so it never reads as hers (B6).
   const earlier = pick.earlier.map(hint => (hint.kind === "answer"
-    ? { asked: hint.speaker ? t("call.asked", { name: hint.speaker, question: hint.question }) : t("call.asked_plain", { question: hint.question }),
-      label: t("call.answer"), at: hint.at, text: hint.text, source: hint.source }
+    ? { asked: callAsked(hint), label: t("call.answer"), at: hint.at, text: hint.text, source: hint.source }
     : { label: hint.label, at: hint.at, text: hint.text, source: hint.source }));
   const open = $("call-earlier-open");
   // Open, it says how to close it (H5); More's item presses the same button and says the same.
@@ -429,31 +446,49 @@ function renderCallBar(state, now) {
   const line = phrase ? t("call.last_phrase").replace("{text}", () => phrase) : ""; // a function: "$&" in speech stays as said
   // The label stays whole and the words are cut from the start, so the newest ones show in a narrow bar (E3).
   const heard = $("call-heard");
-  heard.hidden = !line;
   if (heard.dataset.line !== line) {
     heard.dataset.line = line;
+    heard.dataset.phrase = phrase;
     const [label] = t("call.last_phrase").split("{text}");
     const words = document.createElement("span");
     words.className = "heard-words";
-    const shown = textNode("bdi", "", phrase);
-    words.append(shown);
+    words.append(textNode("bdi", "", phrase));
     heard.replaceChildren(textNode("span", "", label), words);
-    // Whole words only: they drop from the start until the line fits, so it never opens on half a word (G5).
-    let rest = phrase.replace(/^…/u, "");
-    while (words.scrollWidth > words.clientWidth + 1 && /\s/u.test(rest)) {
-      rest = rest.replace(/^\S+\s+/u, "");
-      shown.textContent = `…${rest}`;
-    }
+    callFitHeard();
   }
 }
-// A new width fits the last phrase again on the next tick.
-addEventListener("resize", () => delete $("call-heard").dataset.line);
+// Whole words only: they drop from the start until the line fits, so it never opens on half a word (G5, L4). Fewer
+// than three words left is a bare fragment: the line shows nothing. Run again whenever the bar's width changes.
+function callFitHeard() {
+  const heard = $("call-heard");
+  const phrase = heard.dataset.phrase || "";
+  const words = heard.querySelector(".heard-words");
+  heard.hidden = !phrase || !words;
+  if (heard.hidden) return;
+  const shown = words.firstChild;
+  let rest = phrase.replace(/^…/u, "");
+  shown.textContent = phrase;
+  while (words.scrollWidth > words.clientWidth + 1 && /\s/u.test(rest)) {
+    rest = rest.replace(/^\S+\s+/u, "");
+    shown.textContent = `…${rest}`;
+  }
+  const cut = shown.textContent !== phrase;
+  heard.hidden = words.scrollWidth > words.clientWidth + 1 || (cut && rest.split(/\s+/u).length < 3);
+}
+// After a resize the bar settles (its buttons shorten) before the line is fitted again; the clock's tick fits a line
+// the bar squeezed later.
+addEventListener("resize", () => requestAnimationFrame(callFitHeard));
+function callHeardSqueezed() {
+  const words = $("call-heard").querySelector(".heard-words");
+  return !$("call-heard").hidden && words && words.scrollWidth > words.clientWidth + 1;
+}
 // The clock ticks every second; while stopped the whole bar does, for the countdown.
 setInterval(() => {
   if (window.appState === undefined) return;
   if (currentStatus().kind === "stopped") renderShell();
   else renderCallBar(window.appState, Date.now());
   callTimes();
+  if (callHeardSqueezed()) callFitHeard();
 }, 1000);
 
 // A source with nothing else to open shows Where this comes from only when its line is cut. Measured after every

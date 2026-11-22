@@ -162,6 +162,7 @@ const translations = {
     "call.waiting": "Запись идет. Подсказка появится здесь, когда будет что сказать или спросить.",
     "call.stopped": "Запись остановлена.",
     "call.saved": "Запись сохранена.",
+    "call.saving": "Через {time} запись сохранится, и можно будет открыть итоги.",
     "call.open_results": "Открыть итоги звонка",
     "call.board_mine": "Спросить у клиента",
     "call.board_incoming": "Вопросы к вам",
@@ -532,7 +533,7 @@ const translations = {
     "call.own": "Answer to your question",
     "call.just_now": "just now",
     "call.min_ago": "{n} min ago",
-    "call.for_sec": "{n} s",
+    "call.for_sec": "{n}\u00a0sec", // the bar says "sec" too (H1, L3)
     "call.for_min": "{n} min",
     "call.from_memo": "From the memo, question {n}",
     "call.source": "Source: {text}",
@@ -545,6 +546,7 @@ const translations = {
     "call.waiting": "Recording. A hint appears here when there is something to say or ask.",
     "call.stopped": "Recording stopped.",
     "call.saved": "The recording is saved.",
+    "call.saving": "The recording is saved in {time}, then you can open the call results.",
     "call.open_results": "Open the call results",
     "call.board_mine": "To ask the client",
     "call.board_incoming": "Asked of you",
@@ -2445,9 +2447,10 @@ function renderCallBoard(plan, journal) {
   const entries = (plan?.items || []).map((item) => ({ ...item, origin: "plan",
     lane: item.kind === "question" ? "mine" : "risks", category: item.kind === "objection" ? "OBJECTION" : "RISK" }));
   for (const item of journal) {
-    const lane = item.category === "ASK" ? "mine"
+    // A contradiction is a clarification to ask the client, never a risk (L5).
+    const lane = ["ASK", "CONTRADICTION"].includes(item.category) ? "mine"
       : ["INCOMING_QUESTION", "OPEN_QUESTION"].includes(item.category) ? "incoming"
-      : ["RISK", "OBJECTION", "CONTRADICTION"].includes(item.category) ? "risks" : "";
+      : ["RISK", "OBJECTION"].includes(item.category) ? "risks" : "";
     if (lane) entries.push({ ...item, origin: "journal", lane, status: item.status || "open" });
   }
   // In Call the board has no status filter, and a live hint that repeats a prepared item of its own lane shows once

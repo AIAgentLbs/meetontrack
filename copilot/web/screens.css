@@ -245,7 +245,8 @@ body[data-view="call"] :is(#transcript-show, #swap-panels) { display: none; }
 .say { font-size: 13px; font-weight: 700; color: var(--accent-strong); margin-bottom: 4px; }
 .hint { font-size: var(--say-size); line-height: 1.35; font-weight: 700; max-width: 26em; text-wrap: balance; overflow-wrap: anywhere; }
 .hint.long { font-size: calc(var(--say-size) * 0.86); }
-.heard-q { font-size: 20px; line-height: 1.4; font-weight: 400; max-width: 34em; overflow-wrap: anywhere; }
+/* The question above a line to say: always one clear step smaller than it, 20 px at most (L5). */
+.heard-q { font-size: min(20px, calc(var(--say-size) * 0.8)); line-height: 1.4; font-weight: 400; max-width: 34em; overflow-wrap: anywhere; }
 .heard-q + .hint { margin-top: 12px; }
 .heard-wait { margin-top: 10px; color: var(--muted); font-size: 14px; }
 /* The answer to your own question: reading size, six lines at most; the whole answer is in the chat. */
