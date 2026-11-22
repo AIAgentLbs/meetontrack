@@ -66,7 +66,9 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
   const stopping = control.stopping;
   // The deferred stop was not acknowledged: the server retries it, the bar says so and offers Stop again (A3).
   if (stopping?.failed && stopping.meeting_id === meeting) {
-    return { kind: "stop_failed", text: t("status.error.stop_failed"), action: action("open_recorder") };
+    // A recorder that does not know sessions is never sent a bare stop: it needs an update (P2).
+    return { kind: "stop_failed", text: t(control.outdated ? "status.error.recorder_outdated" : "status.error.stop_failed"),
+      action: action("open_recorder") };
   }
   // The undo window: Stopped and the call's clock frozen at the stop; the one countdown is in the feed, and Resume
   // takes Stop's own place (N2, N3).
@@ -123,7 +125,8 @@ const STATUS_POSTS = {
 };
 // The server's own codes for Stop and Resume, in plain words (F6); anything else goes through plainError.
 // A recorder that did not answer gets the bar's existing Open the recorder.
-const STATUS_ERRORS = { meeting_changed: null, too_late: null, stop_failed: "open_recorder", resume_failed: "open_recorder" };
+const STATUS_ERRORS = { meeting_changed: null, too_late: null, stop_failed: "open_recorder", recorder_outdated: "open_recorder",
+  resume_failed: "open_recorder" };
 const STATUS_ERROR_MS = 8000; // a Stop or Resume error stays this long at least, so it can be read on stage
 const MAC = /Mac/.test(navigator.platform);
 const RECORD_KEY = MAC ? "⌘⇧R" : "Alt+Shift+R";

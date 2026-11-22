@@ -47,6 +47,7 @@ class RecordingControl:
         # state poll never waits for a recorder command (fix wave I3).
         self.lock = threading.Lock()
         self.stopping, self.last_stop = None, None
+        self.outdated = False  # the recorder rejected --session: it needs an update (P2)
         try:
             saved = json.loads(path.read_text(encoding="utf-8"))
             if saved.get("version") == 1:
@@ -67,10 +68,17 @@ class RecordingControl:
             return False
         if session and done.returncode not in (0, REFUSED) and UNKNOWN_SESSION.search(
                 f"{getattr(done, 'stdout', '') or ''}{getattr(done, 'stderr', '') or ''}"):
-            # M2: mid-upgrade, an older recorder has no sessions; the bare verb is exactly what it did before J1.
-            log.warning("the recorder does not know --session (an older version): sending the bare `record %s`", verb)
-            return self._command(verb, None)
+            # P2: an older recorder has no sessions. It is never sent the bare verb, which could land on a call
+            # that began meanwhile: no answer, and the page asks to update the recorder.
+            log.warning("the recorder does not know --session (an older version): not sent `record %s`", verb)
+            self.outdated = True
+            return False
+        if done.returncode == 0:
+            self.outdated = False
         return True if done.returncode == 0 else None if done.returncode == REFUSED else False
+
+    def _failed(self) -> RuntimeError:
+        return RuntimeError("recorder_outdated" if self.outdated else "stop_failed")
 
     def _save(self, stopping: dict | None | bool = True) -> None:
         """Writes the state; `stopping` other than True writes that instead of the one in memory."""
@@ -105,7 +113,7 @@ class RecordingControl:
                 # The deferred stop keeps failing: Stop pressed again tries it now, for this recording only.
                 # Unknown (an unreadable live file) still sends it: the recorder judges the session (K1).
                 if self._same(pending) is not False and self._command("stop", pending.get("session")) is False:
-                    raise RuntimeError("stop_failed")
+                    raise self._failed()
                 self._ended(pending)
                 self._save()
                 return {"stopped_at": pending["stopped_at"], "until": None}
@@ -131,7 +139,7 @@ class RecordingControl:
             if stopped is None:
                 raise ValueError("meeting_changed")
             if not stopped:
-                raise RuntimeError("stop_failed")  # a paused recorder keeps its pending stop in memory
+                raise self._failed()  # a paused recorder keeps its pending stop in memory
             self.last_stop, self.stopping = {"meeting_id": meeting_id, "stopped_at": stopped_at}, None
             try:
                 self._save()
@@ -206,4 +214,4 @@ class RecordingControl:
 
     def snapshot(self) -> dict:
         stopping, last_stop = self.stopping, self.last_stop
-        return {"stopping": stopping and dict(stopping), "last_stop": last_stop and dict(last_stop)}
+        return {"stopping": stopping and dict(stopping), "last_stop": last_stop and dict(last_stop), "outdated": self.outdated}

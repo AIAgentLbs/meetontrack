@@ -3369,7 +3369,7 @@ class Handler(BaseHTTPRequestHandler):
                         self._json({"ok": True})
                 except ValueError as exc:  # meeting_changed, too_late
                     self._json({"ok": False, "error": str(exc)}, HTTPStatus.CONFLICT)
-                except RuntimeError as exc:  # stop_failed, resume_failed; no system text reaches the page
+                except RuntimeError as exc:  # stop_failed, recorder_outdated, resume_failed; no system text reaches the page
                     self._json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
             elif path == "/api/agenda/skip-recording":
                 limits = {"event_id": 1024, "start": 64, "end": 64, "title": 300}

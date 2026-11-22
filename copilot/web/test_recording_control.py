@@ -180,7 +180,7 @@ class RecordingControlTests(unittest.TestCase):
         control = self.control(run)
         with self.assertRaisesRegex(RuntimeError, "stop_failed"):
             control.stop("m1")
-        self.assertEqual(control.snapshot(), {"stopping": None, "last_stop": None})
+        self.assertEqual(control.snapshot(), {"stopping": None, "last_stop": None, "outdated": False})
         self.assertFalse(self.path.exists())
 
     def test_stale_meeting_refused(self):
@@ -211,7 +211,7 @@ class RecordingControlTests(unittest.TestCase):
     def test_unreadable_file_starts_empty(self):
         self.path.parent.mkdir(parents=True)
         self.path.write_text("{broken")
-        self.assertEqual(self.control(Recorder()).snapshot(), {"stopping": None, "last_stop": None})
+        self.assertEqual(self.control(Recorder()).snapshot(), {"stopping": None, "last_stop": None, "outdated": False})
 
     def test_resume_and_tick_race(self):
         # Resume took the pending stop first: the tick at the window's edge sends nothing.
@@ -488,8 +488,9 @@ class RecordingControlTests(unittest.TestCase):
         ticker.join(5)
         self.assertIsNone(control.snapshot()["stopping"])
 
-    def test_an_older_recorder_without_sessions_gets_the_bare_verb_once(self):
-        # M2: mid-upgrade the recorder may not know --session; it has no sessions, so the bare verb is the old behaviour.
+    def test_an_older_recorder_is_never_sent_a_bare_verb(self):
+        # P2 (replaces M2): a command without its session could land on a call that began meanwhile. An older
+        # recorder that rejects --session is reported as outdated, and the pending stop is kept.
         def old(argv, **kwargs):
             seen.append(list(argv[1:]))
             if "--session" in argv:
@@ -497,18 +498,31 @@ class RecordingControlTests(unittest.TestCase):
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         seen = []
         control = self.control(old)
-        with self.assertLogs("recording_control", "WARNING") as logs:
-            self.assertIsNotNone(control.stop("m1")["until"])
-        self.assertEqual(seen, [["record", "pause", "--session", "m1"], ["record", "pause"]])
-        self.assertIn("--session", logs.output[0])
-        # Any other failure is not retried bare: that would drop the session check on a recorder that has it.
-        seen.clear()
-        self.path.unlink()  # a fresh server: the first control's pending stop is not this one's
-        failing = self.control(lambda argv, **kwargs: seen.append(list(argv[1:])) or SimpleNamespace(
-            returncode=1, stdout="", stderr="Capture command failed"))
-        with self.assertRaisesRegex(RuntimeError, "stop_failed"):
-            failing.stop("m1")
+        with self.assertLogs("recording_control", "WARNING") as logs, self.assertRaisesRegex(RuntimeError, "recorder_outdated"):
+            control.stop("m1")
         self.assertEqual(seen, [["record", "pause", "--session", "m1"], ["record", "stop", "--session", "m1"]])
+        self.assertIn("--session", logs.output[0])
+        self.assertTrue(control.snapshot()["outdated"])
+        # A pending stop whose deferred stop meets an outdated recorder stays pending, and the page says why.
+        seen.clear()
+        self.path.unlink(missing_ok=True)
+        works = {"old": False}
+        control = self.control(lambda argv, **kwargs: old(argv) if works["old"] else (seen.append(list(argv[1:])) or
+                                                                                      SimpleNamespace(returncode=0, stdout="", stderr="")))
+        control.stop("m1")
+        works["old"] = True
+        self.now[0] = T0 + 31
+        with self.assertLogs("recording_control", "WARNING"):
+            control.tick()
+        snap = control.snapshot()
+        self.assertEqual((snap["stopping"]["meeting_id"], snap["stopping"]["failed"], snap["outdated"]), ("m1", 1, True))
+        self.assertTrue(seen and all("--session" in argv for argv in seen), seen)
+        # Any other failure stays the plain stop error.
+        self.path.unlink(missing_ok=True)
+        failing = self.control(lambda argv, **kwargs: SimpleNamespace(returncode=1, stdout="", stderr="Capture command failed"))
+        with self.assertRaisesRegex(RuntimeError, "^stop_failed$"):
+            failing.stop("m1")
+        self.assertFalse(failing.snapshot()["outdated"])
 
     def test_stop_again_with_an_unreadable_live_file_lets_the_recorder_judge(self):
         # K1: unknown is not "ended": the stop goes out with the session, and the recorder decides.

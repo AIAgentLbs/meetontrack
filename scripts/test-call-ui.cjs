@@ -1540,6 +1540,21 @@ async function round4(browser) {
     await expectPost(page, '/api/recording/resume', { meeting_id: 'm1' });
     await page.context().close();
   }
+  // P2: an older recorder that does not know sessions is never sent a bare verb; the bar asks to update it, on the
+  // press and while the pending stop keeps failing.
+  for (const lang of ['ru', 'en']) {
+    const said = lang === 'ru' ? 'Запись не остановилась. Обновите программу записи' : 'The recording did not stop. Update the recorder';
+    let page = await callPage(browser, 'hint', { lang, data: lang });
+    page.api.responses['/api/recording/stop'] = { status: 500, json: { ok: false, error: 'recorder_outdated' } };
+    await page.click('#call-stop');
+    await page.waitForFunction(text => document.getElementById('call-status-text').textContent === text, said);
+    await page.context().close();
+    page = await callPage(browser, 'stop_failed', { lang, data: lang });
+    page.api.fixture.state.recording_control.outdated = true;
+    await refresh(page);
+    assert.equal(await text(page, '#call-status-text'), said, lang);
+    await page.context().close();
+  }
   // P1: repeated Stop input never resumes. The Stop shortcut never presses Resume, and for 1.5 s after Stop the shared
   // button ignores clicks, so a double-click across the state refresh sends Stop once and nothing else.
   {
