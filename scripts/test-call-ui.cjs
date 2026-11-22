@@ -643,6 +643,17 @@ async function callBar(browser) {
   assert.doesNotMatch(await page.locator('.topbar').innerText(), /too_late/);
   await page.context().close();
 
+  // The deferred stop keeps failing (A3): the bar says so with Open the recorder, and Stop is offered again.
+  page = await callPage(browser, 'stop_failed');
+  assert.equal(await text(page, '#call-status-text'), 'The recording did not stop, open the recorder');
+  assert.equal(await page.$eval('#call-status-text', node => node.className), 'status-text fail');
+  assert.equal(await text(page, '#call-status-action'), 'Open the recorder');
+  assert.equal(await visible(page, '#call-stop'), true);
+  assert.doesNotMatch(await page.locator('.topbar').innerText(), /Resume/);
+  await page.click('#call-stop');
+  await expectPost(page, '/api/recording/stop', { meeting_id: 'm1' });
+  await page.context().close();
+
   // Stopped for good (a recorder that cannot pause): the time only, no Resume, no Stop.
   page = await callPage(browser, 'stopped_final');
   assert.match(await text(page, '#call-status-text'), /^Recording stopped at \d\d:\d\d\.$/);

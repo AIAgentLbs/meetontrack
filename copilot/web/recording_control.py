@@ -18,6 +18,9 @@ from typing import Callable
 from private_dirs import private_dir
 
 
+RETRY_SECONDS = 5  # a deferred stop the recorder did not acknowledge is sent again this often
+
+
 def _iso(seconds: float) -> str:
     return datetime.fromtimestamp(seconds).astimezone().isoformat(timespec="seconds")
 
@@ -74,7 +77,14 @@ class RecordingControl:
         with self.lock:
             pending = self.stopping
             if pending and pending.get("meeting_id") == meeting_id:
-                return {"stopped_at": pending["stopped_at"], "until": pending["until"]}
+                if not pending.get("failed"):
+                    return {"stopped_at": pending["stopped_at"], "until": pending["until"]}
+                # The deferred stop keeps failing: Stop pressed again tries it now, for this recording only.
+                if self._same(pending) and not self._command("stop"):
+                    raise RuntimeError("stop_failed")
+                self._ended(pending)
+                self._save()
+                return {"stopped_at": pending["stopped_at"], "until": None}
             session = self.session(meeting_id)
             if not session:  # the poll still shows this call, the recorder has moved on
                 raise ValueError("meeting_changed")
@@ -102,7 +112,7 @@ class RecordingControl:
             raise ValueError("meeting_changed")
         with self.lock:
             pending = self.stopping
-            if (not pending or pending.get("meeting_id") != meeting_id
+            if (not pending or pending.get("meeting_id") != meeting_id or pending.get("failed")
                     or self.clock() >= datetime.fromisoformat(pending["until"]).timestamp()):
                 raise ValueError("too_late")
             if not self._same(pending):  # that recording ended and another may run: resume nothing
@@ -132,10 +142,14 @@ class RecordingControl:
             pending = self.stopping
             if not pending or self.clock() < datetime.fromisoformat(pending["until"]).timestamp():
                 return
-            same_call = self._same(pending)
-            self._ended(pending)
-            if same_call:  # the recording may have ended by itself and the next call begun
-                self._command("stop")  # a failure means it already ended: nothing to undo
+            # The recording may have ended by itself and the next call begun: then there is nothing to stop.
+            if self._same(pending) and not self._command("stop"):
+                # Not acknowledged (the app busy, or not running): kept pending and tried again in 5 s, so
+                # last_stop never claims a stop that did not happen; the page shows the failure meanwhile.
+                self.stopping = {**pending, "failed": int(pending.get("failed") or 0) + 1,
+                                 "until": _iso(self.clock() + RETRY_SECONDS)}
+            else:
+                self._ended(pending)
             self._save()
 
     def loop(self, stop_event: threading.Event) -> None:

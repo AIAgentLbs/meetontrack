@@ -311,6 +311,49 @@ class RecordingControlTests(unittest.TestCase):
         control.stop("m1")
         self.now[0] = T0 + 31
         control.tick()
+        self.assertIsNone(control.snapshot()["last_stop"])
+        self.assertEqual(control.snapshot()["stopping"]["failed"], 1)
+
+    def test_failed_deferred_stop_is_retried_until_acknowledged(self):
+        run = Recorder({STOP: 1})
+        control = self.control(run)
+        stopped_at = control.stop("m1")["stopped_at"]
+        self.now[0] = T0 + 31
+        control.tick()
+        self.assertEqual(run.calls, [PAUSE, STOP])
+        pending = control.snapshot()["stopping"]
+        self.assertEqual((pending["failed"], seconds(pending["until"])), (1, T0 + 36))
+        self.assertIsNone(control.snapshot()["last_stop"])
+        self.assertEqual(json.loads(self.path.read_text())["stopping"]["failed"], 1)  # a restart keeps retrying
+        self.now[0] = T0 + 34
+        control.tick()
+        self.assertEqual(run.calls, [PAUSE, STOP])
+        self.now[0] = T0 + 36
+        control.tick()
+        self.assertEqual(run.calls, [PAUSE, STOP, STOP])
+        self.assertEqual(control.snapshot()["stopping"]["failed"], 2)
+        run.codes[STOP] = 0
+        self.now[0] = T0 + 41
+        control.tick()
+        self.assertEqual(run.calls, [PAUSE, STOP, STOP, STOP])
+        self.assertIsNone(control.snapshot()["stopping"])
+        self.assertEqual(control.snapshot()["last_stop"], {"meeting_id": "m1", "stopped_at": stopped_at})
+
+    def test_stop_pressed_again_after_a_failed_deferred_stop_stops_now(self):
+        run = Recorder({STOP: 1})
+        control = self.control(run)
+        control.stop("m1")
+        self.now[0] = T0 + 31
+        control.tick()
+        with self.assertRaisesRegex(RuntimeError, "stop_failed"):
+            control.stop("m1")
+        self.assertEqual(control.snapshot()["stopping"]["failed"], 1)
+        with self.assertRaisesRegex(ValueError, "too_late"):  # the undo window is over
+            control.resume("m1")
+        run.codes[STOP] = 0
+        self.assertEqual(control.stop("m1")["until"], None)
+        self.assertEqual(run.calls, [PAUSE, STOP, STOP, STOP])
+        self.assertIsNone(control.snapshot()["stopping"])
         self.assertEqual(control.snapshot()["last_stop"]["meeting_id"], "m1")
 
     def test_loop_ticks_until_the_event(self):

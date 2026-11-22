@@ -145,6 +145,11 @@ on both platforms.
   otherwise 409 `{"ok": false, "error": "too_late"}`. A `meeting_id` other
   than the live one answers 409 `meeting_changed`, and no recorder command
   runs.
+- A deferred `record stop` the recorder does not acknowledge stays pending
+  with `failed: n` and is sent again every 5 s; `last_stop` is set only once a
+  stop succeeds. While `failed` is set the bar says the recording did not stop
+  and offers Open the recorder and Stop, which tries the stop at once; Resume
+  answers `too_late` (fix wave A3).
 - A failed recorder command answers 500 `{"ok": false, "error":
   "stop_failed" | "resume_failed"}`; a failed resume keeps the pending stop.
   The cleared pending stop is written before `record resume` runs, so a

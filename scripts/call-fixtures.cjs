@@ -121,6 +121,9 @@ function build(name, lang = 'en', now = Date.now()) {
       state.fact_checks.items = [refuted(60 * SEC)]; },
     // Stop pressed 10 s ago: the recorder is paused, the stop lands in 20 s.
     stopped: () => { hint(); state.recording_control.stopping = { meeting_id: 'm1', stopped_at: ago(10 * SEC), until: iso(now + 20 * SEC) }; },
+    // The deferred stop was not acknowledged: it is retried every 5 s, and the bar says so.
+    stop_failed: () => { hint(); state.recording_control.stopping = { meeting_id: 'm1', stopped_at: ago(40 * SEC),
+      until: iso(now + 3 * SEC), failed: 2 }; },
     // A recorder without pause stopped at once; the call still reads live until the recorder's last write ages out.
     stopped_final: () => { hint(); state.recording_control.last_stop = { meeting_id: 'm1', stopped_at: ago(4 * SEC) }; },
     more_open: hint,
@@ -142,7 +145,7 @@ function build(name, lang = 'en', now = Date.now()) {
 }
 
 const NAMES = ['hint', 'answer', 'heard', 'memo_question', 'waiting', 'paused_ai', 'other_lost', 'you_lost', 'own_pending',
-  'own_answer', 'earlier_open', 'stopped', 'stopped_final', 'more_open', 'transcript_open', 'board_open', 'long_hint',
+  'own_answer', 'earlier_open', 'stopped', 'stop_failed', 'stopped_final', 'more_open', 'transcript_open', 'board_open', 'long_hint',
   'windows_no_tracks', 'silent_partner'];
 // name -> {state, agenda, permissions}, rebuilt on every read so the times stay relative to now.
 const states = Object.defineProperties({}, Object.fromEntries(NAMES.map(name => [name, { enumerable: true, get: () => build(name) }])));

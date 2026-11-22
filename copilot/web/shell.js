@@ -64,6 +64,10 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
   const control = state?.recording_control || {};
   const meeting = state?.transcript?.meeting_id;
   const stopping = control.stopping;
+  // The deferred stop was not acknowledged: the server retries it, the bar says so and offers Stop again (A3).
+  if (stopping?.failed && stopping.meeting_id === meeting) {
+    return { kind: "stop_failed", text: t("status.error.stop_failed"), action: action("open_recorder") };
+  }
   if (stopping && stopping.meeting_id === meeting) {
     const n = Math.max(0, Math.ceil((Date.parse(stopping.until) - now) / 1000));
     return { kind: "stopped", text: t("status.stopped", { time: homeClock(stopping.stopped_at), n }), action: action("resume", false) };
