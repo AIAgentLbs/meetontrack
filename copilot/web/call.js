@@ -174,7 +174,8 @@ function lastPhrase(state) {
 
 // The feed: the call's name, a problem when a side is not heard, the one slot, the paused note and the earlier
 // hints. Each part is rebuilt only when what it shows changes, so focus and an open source line survive the poll.
-let callPending = null; // {question, at, queued}: the person's own question, its answer not back yet; queued: not sent yet
+let callPending = null; // {question, at, queued, meeting}: the person's own question, its answer not back yet; queued: not sent yet
+let callAskNote = null; // a line under the feed about the Ask field: one question already waits, or the call changed (J3)
 let callAskError = null; // {question, text, at}: the last Ask failed, shown in the feed for a while (B3, I1)
 let callEarlierOpen = false;
 const callWhereOpen = new Set(); // keys of the hints whose source is open
@@ -340,9 +341,16 @@ function renderCall(state) {
   const lost = $("call-problem").querySelector("[data-time]");
   if (lost) lost.dataset.at = problem.since;
 
-  // A question queued behind an analysis goes out once nothing else holds the line.
-  if (callPending?.queued && !requestBusy && !state?.copilot?.busy && window.callAsk(callPending.question)) {
+  // A question queued behind an analysis goes out once nothing else holds the line, and only for the call it was
+  // asked in: after a change of call it comes back to the field, unsent (J3).
+  if (callPending?.queued && callPending.meeting !== transcript.meeting_id) {
+    const field = $("call-question");
+    if (!field.value.trim()) field.value = callPending.question;
+    callPending = null;
+    callAskNote = t("call.ask_changed");
+  } else if (callPending?.queued && !requestBusy && !state?.copilot?.busy && window.callAsk(callPending.question)) {
     callPending = { question: callPending.question, at: Date.now() };
+    callAskNote = null;
   }
   // The analysis failed: hints pause until the next try, five minutes after it (F3).
   const analysis = state?.copilot?.analysis;
@@ -356,9 +364,10 @@ function renderCall(state) {
   const pausedSlot = paused && slot.type === "waiting";
   callPart("call-slot", pausedSlot ? { type: "paused", text: t("call.paused"), retry: paused } : slot, callSlotNodes);
   callFitWhere();
-  const note = paused && !pausedSlot ? `${t("call.paused")} ${paused}` : null;
+  const note = callAskNote ? { text: callAskNote } : paused && !pausedSlot ? { text: `${t("call.paused")} ${paused}`, check: true } : null;
   $("call-note").hidden = !note;
-  callPart("call-note", note, text => [`${text} `, callButton("ql", t("call.check_ai"), () => $("getting-started-open").click())]);
+  callPart("call-note", note, note => note.check
+    ? [`${note.text} `, callButton("ql", t("call.check_ai"), () => $("getting-started-open").click())] : [note.text]);
 
   // A heard question says who asked, in quotes; our answer sits under its own label, so it never reads as hers (B6).
   const earlier = pick.earlier.map(hint => (hint.kind === "answer"
@@ -499,11 +508,18 @@ addEventListener("DOMContentLoaded", () => {
     const field = $("call-question");
     const question = field.value.trim();
     if (!question) return;
+    // One question waits at a time: a second stays in the field and the feed says why (J3).
+    if (callPending?.queued) {
+      callAskNote = t("call.ask_waiting");
+      renderCall(window.appState);
+      return;
+    }
+    callAskNote = null;
     // An analysis holds the line: the question waits in the slot and goes out when it ends (B3).
     const sent = window.callAsk(question);
     if (!sent && !requestBusy) return;
     callAskError = null;
-    callPending = { question, at: Date.now(), queued: !sent };
+    callPending = { question, at: Date.now(), queued: !sent, meeting: window.appState?.transcript?.meeting_id };
     field.value = "";
     renderCall(window.appState);
   });

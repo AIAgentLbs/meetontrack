@@ -1303,6 +1303,36 @@ async function polish(browser) {
 
 // Sections H, I and J: critique 3, the re-review and Codex on the fix wave.
 async function round3(browser) {
+  // J3: a queued question belongs to its meeting; a second one never overwrites the first.
+  {
+    const page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru' });
+    await page.evaluate(() => { requestBusy = true; });
+    await page.fill('#call-question', 'Кто подписывает?');
+    await page.press('#call-question', 'Enter');
+    await page.fill('#call-question', 'Какой бюджет?');
+    await page.press('#call-question', 'Enter');
+    assert.equal(await page.inputValue('#call-question'), 'Какой бюджет?', 'the second stays in the field');
+    assert.equal(await text(page, '#call-note'), 'Один вопрос уже ждет ответа.');
+    assert.equal(await text(page, '#call-slot .heard-q'), 'Кто подписывает?');
+    await page.evaluate(() => { requestBusy = false; });
+    await refresh(page);
+    await expectPost(page, '/api/chat', { question: 'Кто подписывает?' });
+    assert.equal(posts(page, '/api/chat').length, 1);
+    await page.context().close();
+  }
+  {
+    const page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru' });
+    await page.evaluate(() => { requestBusy = true; });
+    await page.fill('#call-question', 'Кто подписывает?');
+    await page.press('#call-question', 'Enter');
+    page.api.fixture.state.transcript.meeting_id = 'm2';
+    await page.evaluate(() => { requestBusy = false; });
+    await refresh(page);
+    assert.deepEqual(posts(page, '/api/chat'), [], 'never sent against the next call');
+    assert.equal(await text(page, '#call-note'), 'Вопрос не отправлен: звонок сменился.');
+    assert.equal(await page.inputValue('#call-question'), 'Кто подписывает?');
+    await page.context().close();
+  }
   // I4: Chat is reachable from Menu in Call (not on Home), and the Call transcript's error says "расшифровку".
   {
     const page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru' });
