@@ -63,7 +63,7 @@ async function fit(page, width) {
             await page.waitForFunction(lang => document.documentElement.lang === lang
               && document.body.dataset.view === 'after' && !document.getElementById('after').hidden
               && document.querySelector('#after-send .after-headline')?.textContent, lang, { timeout: 5000 });
-            if (state === 'refining') await page.clock.pauseAt(await page.evaluate(() => Date.now() + 50));
+            if (state === 'refining') await page.clock.pauseAt(await page.evaluate(() => Date.now() + 500));
             if (OPENERS[state]) await page.locator(OPENERS[state]).first().click();
             const before = await fit(page, width);
             const shots = [];
