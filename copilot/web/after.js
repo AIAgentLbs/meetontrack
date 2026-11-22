@@ -107,4 +107,277 @@ function afterSend(after) {
   };
 }
 
-function renderAfter(_state) {} // the view itself: Task 6
+// ---- The view ----
+// window.afterData = {id, seq, data}: the last /api/after answer (data null for a 404) and the meeting it asked for.
+// Every POST names that same id: the server's cache that makes Hold instant is keyed by it.
+const AFTER_POLL_MS = 3000;
+const AFTER_SAVE_MS = 1000;
+const AFTER_FIELDS = { summary: "after-summary", next_steps: "after-next" };
+const AFTER_TAGS = { answered: "ok", confirmed: "ok", no_answer: "open", differs: "diff", risk: "kind", objection: "kind" };
+const AFTER_LANES = { ask: "call.board_mine", asked: "call.board_incoming", risks: "after.col_risks", facts: "after.col_facts" };
+let afterRequest = null;
+let afterAsked = null; // the meeting the view last asked about: a failed first answer waits for the next poll, never loops
+let afterSeq = 0;
+let afterSignature = "";
+let afterError = "";
+const afterBusy = new Set(); // focus keys of the controls whose POST is in flight: a second press posts nothing
+const afterOpen = new Set(); // lanes whose answered or confirmed rows are shown
+const afterDirty = new Set(); // fields typed in and not saved yet
+const afterKeep = {}; // field -> the first request seq that already carries its saved text
+const afterTimers = {};
+
+// One GET at a time; a 503 or a dropped answer keeps the last payload.
+function afterFetch() {
+  const id = window.appState?.transcript?.meeting_id;
+  if (!id) return Promise.resolve();
+  afterRequest ||= (async () => {
+    const seq = ++afterSeq;
+    try {
+      const response = await fetch(`/api/after?meeting_id=${encodeURIComponent(id)}`, { cache: "no-store", signal: AbortSignal.timeout(8000) });
+      if (response.status === 404) window.afterData = { id, seq, data: null };
+      else if (response.ok) window.afterData = { id, seq, data: await response.json() };
+    } catch {}
+  })().finally(() => {
+    afterRequest = null;
+    if (document.body.dataset.view === "after") renderAfter(window.appState);
+  });
+  return afterRequest;
+}
+// After a POST: a fresh answer, never one asked for before the change.
+async function afterRefresh() {
+  await afterRequest;
+  await afterFetch();
+}
+setInterval(() => document.body.dataset.view === "after" && void afterFetch(), AFTER_POLL_MS);
+
+// The server's codes are not for people: busy has its own line, any other refusal is the generic one.
+const afterFailed = error => (error.message === "busy" ? t("after.busy") : error.status ? t("error.generic") : plainError(error));
+
+async function afterPost(key, path, body = {}) {
+  if (afterBusy.has(key) || !window.afterData?.data) return;
+  afterBusy.add(key);
+  afterError = "";
+  try {
+    await post(path, { meeting_id: window.afterData.id, ...body });
+  } catch (error) {
+    afterError = afterFailed(error);
+  }
+  afterBusy.delete(key);
+  renderAfter(window.appState);
+  await afterRefresh();
+}
+
+// A field is saved 1 s after the last key. Until then, and while it has focus, no answer writes into it.
+function afterInput(field) {
+  afterDirty.add(field);
+  clearTimeout(afterTimers[field]);
+  afterTimers[field] = setTimeout(() => void afterSave(field), AFTER_SAVE_MS);
+}
+async function afterSave(field) {
+  const node = $(AFTER_FIELDS[field]);
+  const text = node.value;
+  if (!window.afterData?.data) return;
+  try {
+    await post("/api/after/edit", { meeting_id: window.afterData.id, field, text });
+    afterKeep[field] = afterSeq + 1;
+    if (node.value === text) afterDirty.delete(field);
+  } catch (error) {
+    afterError = afterFailed(error);
+    afterTimers[field] = setTimeout(() => void afterSave(field), AFTER_POLL_MS); // kept, and tried again
+  }
+  await afterRefresh();
+}
+
+function afterButton(label, className, key, onClick) {
+  const button = textNode("button", className, label);
+  button.type = "button";
+  button.dataset.focus = key;
+  // Nothing to act on before the report exists (a 404). A press in flight stays enabled, so focus stays on it.
+  button.disabled = !window.afterData?.data;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+// "«quote», speaker, time": a part that is missing leaves no empty comma behind.
+function afterQuote(row) {
+  if (!row.quote) return "";
+  if (row.tag === "differs" && row.speaker && row.at) return t("after.differs_call", { speaker: row.speaker, time: row.at, quote: row.quote });
+  return t("after.quote", { quote: row.quote, speaker: row.speaker, time: row.at }).replace(/, (?=, |$)/gu, "");
+}
+
+function afterRow(row) {
+  const item = document.createElement("li");
+  item.className = `bitem${row.removed ? " removed" : ""}`;
+  const toggle = removed => () => void afterPost(`row:${row.key}`, "/api/after/remove", { key: row.key, removed });
+  if (row.removed) {
+    item.append(textNode("span", "", `${t("after.removed")} `),
+      afterButton(t("after.bring_back"), "ql", `row:${row.key}`, toggle(false)));
+    return item;
+  }
+  item.append(textNode("p", `tag ${AFTER_TAGS[row.tag] || "kind"}`, t(`after.tag.${row.tag}`)));
+  const quote = afterQuote(row);
+  // A differing row is two quotes, what was said and what it differs from; any other row is its text.
+  if (row.tag !== "differs" || !quote) item.append(textNode("p", "btext", row.text));
+  if (quote) item.append(textNode("p", "bquote", quote));
+  if (row.tag === "differs" && row.other) item.append(textNode("p", "bquote", row.other));
+  const meta = document.createElement("p");
+  meta.className = "bmeta";
+  const said = quote ? "" : [row.speaker, row.at].filter(Boolean).join(", ");
+  const note = [row.memo ? t("after.from_memo") : "", said].filter(Boolean).join(" · ");
+  if (note) meta.append(textNode("span", "", `${note} · `));
+  meta.append(afterButton(t("after.remove"), "ql", `row:${row.key}`, toggle(true)));
+  item.append(meta);
+  return item;
+}
+
+function afterLane(lane) {
+  const column = document.createElement("div");
+  column.className = "bcol";
+  column.append(textNode("h4", "", t(AFTER_LANES[lane.lane])));
+  const list = document.createElement("ul");
+  list.append(...lane.rows.map(afterRow));
+  column.append(list);
+  if (lane.folded.length) {
+    const open = afterOpen.has(lane.lane);
+    const fold = afterButton(t(lane.lane === "facts" ? "after.confirmed_n" : "after.answered_n", { n: lane.folded.length }),
+      "ql fold", `fold:${lane.lane}`, () => {
+        if (afterOpen.has(lane.lane)) afterOpen.delete(lane.lane);
+        else afterOpen.add(lane.lane);
+        renderAfter(window.appState);
+      });
+    fold.disabled = false;
+    fold.setAttribute("aria-expanded", String(open));
+    fold.setAttribute("aria-controls", `after-fold-${lane.lane}`);
+    const folded = document.createElement("ul");
+    folded.id = `after-fold-${lane.lane}`;
+    folded.hidden = !open;
+    folded.append(...lane.folded.map(afterRow));
+    column.append(fold, folded);
+  } else if (!lane.rows.length) {
+    column.append(textNode("p", "bempty", t("after.empty")));
+  }
+  return column;
+}
+
+function afterSendBlock(after, send) {
+  const nodes = [textNode("p", "after-headline", send.headline)];
+  // The channel lines of the state, or, in any other state, the CRM line that waits for a record (Task 4 carry).
+  const lines = send.channels.length ? send.channels : (after?.send?.channels || []).filter(row => row.status === "needs_choice")
+    .map(row => t("after.ch.needs_choice", { channel: t(`after.channel.${row.channel}`) }));
+  if (lines.length) {
+    const list = document.createElement("ul");
+    list.className = "chan";
+    list.append(...lines.map(line => textNode("li", "", line)));
+    nodes.push(list);
+  }
+  nodes.push(...send.rules.map(rule => textNode("p", "after-rule", rule)));
+  // Recipients and Change: hidden only while there is no report yet (a 404).
+  const to = textNode("p", "to", send.recipients ? `${send.recipients} ` : "");
+  to.id = "after-to";
+  to.hidden = !after;
+  const change = afterButton(t("after.change"), "ql", "change", openDeliverySettings);
+  change.id = "after-change";
+  change.disabled = false;
+  to.append(change);
+  nodes.push(to);
+  if (afterError) nodes.push(textNode("p", "after-error fail", afterError));
+  const row = document.createElement("div");
+  row.className = "row-act";
+  for (const action of send.actions) {
+    if (action === "send_now") row.append(afterButton(t("after.send_now"), "", "send_now", () => void afterPost("send_now", "/api/after/send")));
+    if (action === "hold") row.append(afterButton(t("after.hold"), "ql", "hold", () => void afterPost("hold", "/api/after/hold")));
+    if (action === "send_again") {
+      nodes.push(textNode("p", "after-again", t("after.send_again_note")));
+      row.append(afterButton(t("after.send_again"), "", "send_again", () => void afterPost("send_again", "/api/after/send-again")));
+    }
+    if (action === "retry") {
+      // Retry resends only what failed (ruling C9).
+      const channels = after.send.channels.filter(item => item.status === "failed" && AFTER_RESEND.has(item.channel)).map(item => item.channel);
+      row.append(afterButton(t("after.retry"), "", "retry", () => void afterPost("retry", "/api/after/send-again", { channels })),
+        afterButton(t("after.channel_settings"), "ql", "settings", openDeliverySettings));
+    }
+  }
+  if (row.childElementCount) nodes.push(row);
+  return nodes;
+}
+
+// Rebuilt only when what it shows changes; focus stays on the control it was on (by its key), or the block's first.
+function afterReplace(container, nodes) {
+  const active = container.contains(document.activeElement) ? document.activeElement.dataset.focus || "" : null;
+  container.replaceChildren(...nodes);
+  if (active === null) return;
+  const again = [...container.querySelectorAll(".row-act [data-focus]"), ...container.querySelectorAll("[data-focus]")];
+  (again.find(node => node.dataset.focus === active) || again.find(node => !node.disabled))?.focus();
+}
+
+function afterFields(after) {
+  const final = Boolean(after?.summary?.final);
+  const draft = final ? "" : ` · ${t("after.draft")}`;
+  const updated = after?.send?.state === "showing" ? ` · ${t("after.updated")}` : "";
+  for (const [field, id] of Object.entries(AFTER_FIELDS)) {
+    const node = $(id);
+    const label = `${t(field === "summary" ? "after.summary" : "after.next_steps")}${draft}${field === "summary" ? updated : ""}`;
+    const tag = document.querySelector(`label[for="${id}"]`);
+    if (tag.textContent !== label) tag.textContent = label;
+    node.disabled = !window.afterData?.data;
+    const value = (after?.[field]?.lines || []).join("\n");
+    const fresh = (window.afterData?.seq || 0) >= (afterKeep[field] || 0);
+    if (fresh && !afterDirty.has(field) && document.activeElement !== node && node.value !== value) node.value = value;
+  }
+  const note = document.querySelector("#after .after-note");
+  const line = t(final ? "after.fields_note" : "after.refining");
+  if (note.textContent !== line) note.textContent = line;
+}
+
+function renderAfter(state) {
+  const transcript = state?.transcript || {};
+  const id = transcript.meeting_id;
+  if (window.afterData && window.afterData.id !== id) {
+    // Another meeting: nothing typed, opened or failed carries over.
+    window.afterData = undefined;
+    afterAsked = null;
+    for (const field of Object.keys(AFTER_FIELDS)) clearTimeout(afterTimers[field]);
+    [afterDirty, afterOpen, afterBusy].forEach(set => set.clear());
+    Object.keys(afterKeep).forEach(field => delete afterKeep[field]);
+    afterError = "";
+  }
+  if (!window.afterData && id && afterAsked !== id) {
+    afterAsked = id;
+    void afterFetch();
+  }
+  const after = window.afterData?.data || null;
+
+  const title = transcript.display_meeting || transcript.meeting || "";
+  if ($("after-title").textContent !== title) $("after-title").textContent = title;
+  const start = callStartIso(state);
+  const stop = state?.recording_control?.last_stop;
+  const stopped = Date.parse(stop?.meeting_id === id ? stop.stopped_at : transcript.ended_at || "");
+  const clock = start && !Number.isNaN(stopped) ? callClock(start, stopped) : "";
+  const meta = !start || Number.isNaN(Date.parse(start)) ? "" : [t("after.meta", { time: homeClock(start),
+    day: new Date(start).toLocaleDateString(homeLocale(), { day: "numeric", month: "long" }) }),
+  clock ? t("after.stopped", { time: clock }) : ""].filter(Boolean).join(" ");
+  if ($("after-meta").textContent !== meta) $("after-meta").textContent = meta;
+  afterFields(after);
+
+  const send = afterSend(after);
+  const board = afterBoard(state, after);
+  const signature = JSON.stringify([uiLanguage, window.afterData?.id, after, board, [...afterOpen], afterError]);
+  if (signature === afterSignature) return;
+  afterSignature = signature;
+  afterReplace($("after-send"), afterSendBlock(after, send));
+  const head = textNode("h3", "", t("after.board"));
+  head.id = "after-board-title";
+  afterReplace($("after-board"), [head, textNode("p", "board-head", [t("after.board_note"), board.memoLine].filter(Boolean).join(" ")),
+    ...board.lanes.map(afterLane)]);
+}
+
+addEventListener("DOMContentLoaded", () => {
+  for (const field of Object.keys(AFTER_FIELDS)) $(AFTER_FIELDS[field]).addEventListener("input", () => afterInput(field));
+  // The opener takes focus first: WebKit does not focus a clicked button, and Escape or Back returns to it.
+  for (const [id, panel] of [["after-transcript", "transcript"], ["after-chat", "chat"]]) {
+    $(id).addEventListener("click", event => {
+      event.currentTarget.focus();
+      openCallPanel(panel);
+    });
+  }
+});

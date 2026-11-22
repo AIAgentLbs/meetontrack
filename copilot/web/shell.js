@@ -329,6 +329,7 @@ function renderShortcuts() {
   }));
 }
 
+let shellView = "";
 function renderShell() {
   // Before the first state answer the view is unknown: show none rather than Home flashing over a live call.
   // Once the poll calls the connection failed, Home shows with the bar saying so, never a blank page.
@@ -340,15 +341,21 @@ function renderShell() {
   const view = viewFor(window.appState, manual);
   document.body.dataset.view = view;
   $("home").hidden = view !== "home";
-  // The Call view: the feed, or one panel over it (call.js openCallPanel). Another view closes the panel.
-  if (view !== "call") delete document.body.dataset.callPanel;
+  // Call and After: the view, or one panel over it (call.js openCallPanel). Another view closes the panel.
+  if (view !== shellView || !["call", "after"].includes(view)) delete document.body.dataset.callPanel;
+  shellView = view;
   // More belongs to the Call feed: left open as the call ends, it would block Home's shortcuts (E2).
   if (view !== "call" && !$("call-more-menu").hidden) toggleMenu($("call-more-menu"), $("call-more"), false);
   const panel = Boolean(document.body.dataset.callPanel);
   // Board and Transcript keep the feed's hint and the dock around them (N6); chat and notes take the whole view.
   $("call").hidden = view !== "call" || (panel && !["board", "transcript"].includes(document.body.dataset.callPanel));
+  $("after").hidden = view !== "after" || panel;
   $("call-back").hidden = !panel;
+  // In After the way back is not to a call (ruling C13).
+  const back = t(view === "after" ? "after.back" : "call.back");
+  if ($("call-back").textContent !== back) $("call-back").textContent = back;
   if (view === "call") renderCall(window.appState);
+  if (view === "after") renderAfter(window.appState);
   renderCallBar(window.appState, Date.now());
   if (view === "home") $("nav-home").setAttribute("aria-current", "page");
   else $("nav-home").removeAttribute("aria-current");
@@ -469,7 +476,7 @@ $("call-stop").addEventListener("click", event => {
 });
 $("call-stop").querySelector("kbd").textContent = STOP_KEY;
 $("menu-chat").addEventListener("click", () => openCallPanel("chat"));
-$("menu-notes").addEventListener("click", () => (document.body.dataset.view === "call" ? openCallPanel("notes")
+$("menu-notes").addEventListener("click", () => (["call", "after"].includes(document.body.dataset.view) ? openCallPanel("notes")
   : document.querySelector('[data-content-view="notes"]').click()));
 
 renderShell();

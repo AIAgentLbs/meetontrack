@@ -1701,6 +1701,44 @@ Object.assign(translations.en, {
   "after.memo_reason.error": "the check failed", "after.memo_reason.not_checked": "the memo check runs only for recent calls",
   "after.differs_memo": "{source}, memo: {memo}",
 });
+// After (after.js): the view itself.
+Object.assign(translations.ru, {
+  "after.report": "Отчет", "after.back": "Назад", "after.open_transcript": "Открыть расшифровку",
+  "after.meta": "{day}, {time}.", "after.stopped": "Запись остановлена на {time}.",
+  "after.change": "Изменить получателей", "after.send_now": "Отправить сейчас", "after.hold": "Не отправлять",
+  "after.send_again": "Отправить еще раз",
+  "after.send_again_note": "Письмо и сообщение в Telegram придут повторно, заметка в CRM останется прежней.",
+  "after.retry": "Повторить", "after.channel_settings": "Проверить настройки отправки",
+  "after.summary": "Итог", "after.next_steps": "Следующие шаги", "after.draft": "черновик",
+  "after.updated": "обновлен по итоговой расшифровке",
+  "after.refining": "Итог уточняется по итоговой расшифровке. Если начнете править, уточненная версия не заменит ваш текст.",
+  "after.fields_note": "Уйдет в отчет как написано.",
+  "after.board": "Доска", "after.board_note": "Уйдет в отчет, лишнее можно убрать.",
+  "after.col_risks": "Риски и возражения", "after.col_facts": "Проверка фактов",
+  "after.tag.no_answer": "Без ответа", "after.tag.answered": "Отвечено", "after.tag.differs": "Расходится", "after.tag.risk": "Риск",
+  "after.tag.objection": "Возражение", "after.tag.confirmed": "Подтверждено", "after.from_memo": "Из мемо",
+  "after.answered_n": "Отвечено: {n}", "after.confirmed_n": "Подтверждено: {n}",
+  "after.quote": "«{quote}», {speaker}, {time}", "after.differs_call": "{speaker}, на этом звонке, {time}: {quote}",
+  "after.remove": "Убрать", "after.removed": "Убрано из отчета.", "after.bring_back": "Вернуть", "after.empty": "Пусто",
+});
+Object.assign(translations.en, {
+  "after.report": "Report", "after.back": "Back", "after.open_transcript": "Open the transcript",
+  "after.meta": "{day}, {time}.", "after.stopped": "Recording stopped at {time}.",
+  "after.change": "Change recipients", "after.send_now": "Send now", "after.hold": "Do not send", "after.send_again": "Send again",
+  "after.send_again_note": "The e-mail and the Telegram message arrive a second time, the CRM note stays as it was.",
+  "after.retry": "Retry", "after.channel_settings": "Check the delivery settings",
+  "after.summary": "Summary", "after.next_steps": "Next steps", "after.draft": "draft",
+  "after.updated": "updated from the final transcript",
+  "after.refining": "The summary is being refined from the final transcript. If you edit it, the refined version will not replace your text.",
+  "after.fields_note": "Goes into the report as written.",
+  "after.board": "Board", "after.board_note": "Goes into the report, remove what does not belong.",
+  "after.col_risks": "Risks and objections", "after.col_facts": "Fact check",
+  "after.tag.no_answer": "No answer", "after.tag.answered": "Answered", "after.tag.differs": "Differs", "after.tag.risk": "Risk",
+  "after.tag.objection": "Objection", "after.tag.confirmed": "Confirmed", "after.from_memo": "From the memo",
+  "after.answered_n": "Answered: {n}", "after.confirmed_n": "Confirmed: {n}",
+  "after.quote": "“{quote}”, {speaker}, {time}", "after.differs_call": "{speaker}, on this call, {time}: {quote}",
+  "after.remove": "Remove", "after.removed": "Removed from the report.", "after.bring_back": "Bring back", "after.empty": "Nothing here",
+});
 
 const journalGroups = {
   notes: new Set(["NOTE"]),

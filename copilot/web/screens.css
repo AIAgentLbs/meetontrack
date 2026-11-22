@@ -157,8 +157,8 @@ body[data-view="home"] .topbar .menu #settings-open { border-top: 0; }
 #updates-notice:not([hidden]) ~ #menu-updates { display: none; }
 /* Transcript, panel and new-meeting controls belong to a call: Home has none. */
 body[data-view="home"] :is(#transcript-show, #swap-panels, #new-meeting-button) { display: none; }
-/* The Call view shows one pane at a time (the feed, or one panel): Show transcript and Swap panels have nothing to do. */
-body[data-view="call"] :is(#transcript-show, #swap-panels) { display: none; }
+/* Call and After show one pane at a time (the view, or one panel): Show transcript and Swap panels have nothing to do. */
+body:is([data-view="call"], [data-view="after"]) :is(#transcript-show, #swap-panels) { display: none; }
 
 /* Settings and getting started open over the call, under the bar: the workspace never moves. */
 .settings-panel, .getting-started {
@@ -309,40 +309,111 @@ body[data-view="call"] :is(#transcript-show, #swap-panels) { display: none; }
 #call-more-menu { top: auto; bottom: calc(100% + 6px); right: 16px; max-height: calc(100dvh - var(--bar-h) - var(--dock-h) - 12px); }
 /* Earlier, scrolled to from More, stops clear of the sticky bar and dock. */
 #call-earlier { scroll-margin: var(--bar-h) 0 var(--dock-h); }
-body[data-view="call"]:not([data-call-panel]) .workspace { display: none; }
-body[data-view="call"][data-call-panel] main.workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-body[data-view="call"][data-call-panel] :is(.transcript-pane, .copilot-pane) { grid-row: 2; grid-column: 1; border: 0; }
-body[data-view="call"][data-call-panel="transcript"] .copilot-pane,
-body[data-view="call"][data-call-panel]:not([data-call-panel="transcript"]) .transcript-pane { display: none; }
+body:is([data-view="call"], [data-view="after"]):not([data-call-panel]) .workspace { display: none; }
+body:is([data-view="call"], [data-view="after"])[data-call-panel] main.workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+body:is([data-view="call"], [data-view="after"])[data-call-panel] :is(.transcript-pane, .copilot-pane) { grid-row: 2; grid-column: 1; border: 0; }
+body:is([data-view="call"], [data-view="after"])[data-call-panel="transcript"] .copilot-pane,
+body:is([data-view="call"], [data-view="after"])[data-call-panel]:not([data-call-panel="transcript"]) .transcript-pane { display: none; }
 /* The transcript_hidden preference hides the side pane, never the panel asked for (F12); Hide has nothing to hide here. */
-body[data-view="call"][data-call-panel="transcript"] .workspace.transcript-hidden .transcript-pane { display: grid; }
-body[data-view="call"][data-call-panel="transcript"] #transcript-hide { display: none; }
+body:is([data-view="call"], [data-view="after"])[data-call-panel="transcript"] .workspace.transcript-hidden .transcript-pane { display: grid; }
+body:is([data-view="call"], [data-view="after"])[data-call-panel="transcript"] #transcript-hide { display: none; }
 /* A Call panel shows only what it was opened for (C1): no tab bars, no board chips or per-card status controls, no
    second status line under the transcript heading. The board's status is the column count; a closed card is muted. */
-body[data-view="call"] :is(#workspace-filters, .call-board .board-summary, .board-item-controls select,
+body:is([data-view="call"], [data-view="after"]) :is(#workspace-filters, .call-board .board-summary, .board-item-controls select,
   .board-item-heading .traffic-light, .transcript-tabs, .pane-header .status-strip, #transcript-meta) { display: none; }
-body[data-view="call"] .board-item.resolved .board-item-heading p { color: var(--muted); }
+body:is([data-view="call"], [data-view="after"]) .board-item.resolved .board-item-heading p { color: var(--muted); }
 /* The correct fact is what to say, not an error: plain text on the Call board (C1, H5). */
-body[data-view="call"] .call-board .fact-body .fact-actual { color: var(--text); }
+body:is([data-view="call"], [data-view="after"]) .call-board .fact-body .fact-actual { color: var(--text); }
 /* A panel sits in the feed's column on the feed's one background (G4); the board's four columns may go wider. */
-body[data-view="call"][data-call-panel] main.workspace { background: var(--page); padding-inline: max(0px, calc((100% - 880px) / 2)); }
-body[data-view="call"][data-call-panel="board"] main.workspace { padding-inline: max(0px, calc((100% - 1160px) / 2)); }
-body[data-view="call"][data-call-panel] :is(.transcript-pane, .copilot-pane) { background: none; }
-body[data-view="call"] #speaker-edit { color: var(--text); }
+body:is([data-view="call"], [data-view="after"])[data-call-panel] main.workspace { background: var(--page); padding-inline: max(0px, calc((100% - 880px) / 2)); }
+body:is([data-view="call"], [data-view="after"])[data-call-panel="board"] main.workspace { padding-inline: max(0px, calc((100% - 1160px) / 2)); }
+body:is([data-view="call"], [data-view="after"])[data-call-panel] :is(.transcript-pane, .copilot-pane) { background: none; }
+body:is([data-view="call"], [data-view="after"]) #speaker-edit { color: var(--text); }
 /* Up to 820 px a Call panel fills the window under the bar and scrolls inside itself: the board stacks its four
    columns in one scroll, never capped lists with dead space under them, and the page never grows past the window (L1, L4). */
 @media (max-width: 820px) {
-  body[data-view="call"][data-call-panel] main.workspace { flex: 1; min-height: 0; overflow: hidden; }
-  body[data-view="call"][data-call-panel] .workspace-view:has(.call-board:not([hidden])) { max-height: none; min-height: 0; }
-  body[data-view="call"] .call-board .board-list { max-height: none; overflow: visible; }
-  body[data-view="call"] .call-board .board-columns { grid-auto-rows: auto; }
+  body:is([data-view="call"], [data-view="after"])[data-call-panel] main.workspace { flex: 1; min-height: 0; overflow: hidden; }
+  body:is([data-view="call"], [data-view="after"])[data-call-panel] .workspace-view:has(.call-board:not([hidden])) { max-height: none; min-height: 0; }
+  body:is([data-view="call"], [data-view="after"]) .call-board .board-list { max-height: none; overflow: visible; }
+  body:is([data-view="call"], [data-view="after"]) .call-board .board-columns { grid-auto-rows: auto; }
 }
 /* A column with no counter keeps its rule in line with the others. */
-body[data-view="call"] .call-board .board-column-header p { min-height: 1lh; }
+body:is([data-view="call"], [data-view="after"]) .call-board .board-column-header p { min-height: 1lh; }
 /* The dock is the one ask field over the feed; the Notes and Chat panels keep their composer, for a note or a follow-up (F5). */
 body[data-view="call"]:not([data-call-panel="notes"]):not([data-call-panel="chat"]) .composer-wrap { display: none; }
 #call-back { grid-row: 1; grid-column: 1; justify-self: start; margin: 8px 16px; min-height: 32px; padding: 0; border: 0; border-radius: 0;
   background: none; color: var(--text); font-size: 15px; font-weight: 500; cursor: pointer; }
+
+/* After: the call's name, the send block beside it, the summary and next steps, then the board that goes into the
+   report. One column of reading, no cards: the send block is the one frame, board rows are separated by hairlines. */
+.after[hidden], .after [hidden] { display: none; }
+.after { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 32px 0 48px; background: var(--page); line-height: 1.5; }
+.after :where(h2, h3, h4, p, ul) { margin: 0; }
+.after ul { padding: 0; list-style: none; }
+.after .col { max-width: 1164px; margin: 0 auto; padding: 0 32px; }
+.after :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.after button {
+  font: inherit; font-size: 14px; font-weight: 600; min-height: 36px; padding: 0 14px;
+  border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface-strong); color: var(--text);
+  cursor: pointer; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+}
+.after button:disabled { cursor: default; opacity: 0.6; }
+.after button.ql { min-height: 32px; padding: 0; border: 0; border-radius: 0; background: none; font-size: inherit; font-weight: 500;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); white-space: normal; text-align: left; }
+.after-top { display: grid; gap: 20px 40px; align-items: start; }
+.after-head h2 { font-size: 24px; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere; }
+#after-meta { margin-top: 4px; color: var(--muted); font-size: 15px; }
+.after-head .to-links { display: flex; flex-wrap: wrap; gap: 0 24px; margin-top: 8px; font-size: 15px; }
+.send { display: grid; gap: 8px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px;
+  font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.after-headline { font-size: 17px; font-weight: 650; line-height: 1.4; color: var(--text); }
+.after-rule, .after-again { color: var(--muted); }
+.chan { display: grid; gap: 2px; font-size: 15px; }
+.send .to { color: var(--text); }
+.send .to button.ql { display: inline; min-height: 0; padding: 4px 0; }
+.after-error { margin-top: 2px; }
+.row-act { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin-top: 4px; }
+/* The summary and the next steps: two ordinary text fields, the look of the ask field, with one shared note. */
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 32px; margin-top: 32px; }
+.two .field { display: grid; gap: 6px; min-width: 0; }
+.two label { font-size: 15px; font-weight: 650; }
+.edit { width: 100%; min-height: 9.5em; resize: vertical; font: inherit; font-size: 15px; line-height: 1.5; padding: 10px 12px;
+  border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-strong); color: var(--text); }
+.edit:disabled { color: var(--muted); }
+.two .after-note { grid-column: 1 / -1; color: var(--muted); font-size: 14px; }
+/* The board: one heading with the line that says it goes into the report, four lanes of hairline rows. */
+.board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 28px; margin-top: 40px; padding-top: 24px;
+  border-top: 1px solid var(--line); }
+.board > :is(h3, .board-head) { grid-column: 1 / -1; }
+.board > h3 { font-size: 19px; font-weight: 650; line-height: 1.3; }
+.board-head { margin-top: 2px; color: var(--muted); font-size: 14px; }
+.bcol { min-width: 0; margin-top: 20px; }
+.bcol h4 { font-size: 15px; font-weight: 650; padding-bottom: 8px; border-bottom: 1px solid var(--line-strong); }
+.bitem { display: grid; gap: 2px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.bitem .btext { color: var(--text); font-size: 15px; }
+.bitem .bquote { color: var(--text); }
+.bitem .bquote + .bquote { margin-top: 4px; }
+.bitem .bmeta { color: var(--muted); font-size: 13px; }
+.bitem .bmeta button.ql { display: inline; min-height: 0; padding: 4px 0; font-size: 13px; }
+.bitem.removed { display: block; color: var(--muted); }
+.bitem.removed button.ql { display: inline; min-height: 0; padding: 4px 0; }
+.bcol > button.fold { margin-top: 4px; font-size: 14px; }
+.bempty { padding: 12px 0; color: var(--muted); font-size: 14px; }
+/* A status tag: a mark and a word. Answered and confirmed: a filled dot; no answer: a ring; differs: the error diamond. */
+.tag { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 650; }
+.tag::before { content: ""; flex: none; width: 8px; height: 8px; }
+.tag.ok::before { background: var(--accent); border-radius: 50%; }
+.tag.open::before { width: 9px; height: 9px; border: 2px solid var(--muted); border-radius: 50%; }
+.tag.diff { color: var(--danger); }
+.tag.diff::before { background: var(--danger); transform: rotate(45deg); }
+.tag.kind { color: var(--muted); }
+.tag.kind::before { display: none; }
+@media (min-width: 1101px) {
+  .after-top { grid-template-columns: minmax(0, 1fr) minmax(0, 560px); }
+}
+@media (max-width: 1100px) {
+  .board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* Window narrower than 1100 px: no key labels in the bar; the memo button keeps ↵, filled or outlined. */
 @media (max-width: 1100px) {
@@ -352,7 +423,7 @@ body[data-view="call"]:not([data-call-panel="notes"]):not([data-call-panel="chat
 /* Up to 820 px other views scroll the page as a whole (styles.css); Call keeps the window: the feed or the panel scrolls
    inside it, and the dock never moves (N5). */
 @media (max-width: 820px) {
-  body[data-view="call"] { display: flex; height: 100dvh; overflow: hidden; }
+  body[data-view="call"], body[data-view="after"][data-call-panel] { display: flex; height: 100dvh; overflow: hidden; }
 }
 /* Board or Transcript open (N6): the current hint stays above the panel, compact, and the dock stays under it. */
 body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcript"]) .call { display: contents; }
@@ -399,7 +470,12 @@ body[data-view="call"]:is([data-call-panel="board"], [data-call-panel="transcrip
   .topbar .menu { right: 16px; }
   /* One column: time and time left on one line, then title, who, the digest. */
   .home { padding: 24px 0 32px; }
-  .home .col, .call .col { padding: 0 16px; }
+  .home .col, .call .col, .after .col { padding: 0 16px; }
+  .after { padding: 24px 0 32px; }
+  .after-head h2 { font-size: 21px; }
+  .two, .board { grid-template-columns: minmax(0, 1fr); }
+  .two { margin-top: 24px; }
+  .board { margin-top: 32px; }
   .dock-row { display: none; }
   #call-more { display: inline-flex; }
   .feed { padding: 24px 0 28px; }

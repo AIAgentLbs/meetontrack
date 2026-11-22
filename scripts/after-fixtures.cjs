@@ -94,7 +94,8 @@ function build(name, lang = 'en', now = Date.now()) {
       { id: 'q3', text: L.questions[2], status: 'open', quote: '', speaker: '', at: '' }],
     differs: [{ key: 'differs:0123456789ab', memo: L.memoStart, quote: L.march, speaker: L.anna, at: at(33 * MIN + 40 * SEC) }] };
   const payload = (sendState, extra = {}, { final = false, channels = waiting('waiting'), summary = L.summary } = {}) => ({
-    ok: true, meeting_id: 'm1', title: L.review, started_at: iso(start), ended_at: stoppedAt, duration_seconds: 2530,
+    // The report's own identity, not the id the page asks with: every POST must name the latter.
+    ok: true, meeting_id: 'report-m1', title: L.review, started_at: iso(start), ended_at: stoppedAt, duration_seconds: 2530,
     send: { state: sendState, send_at: null, send_now: false, channels },
     summary: { lines: summary, edited: false, final }, next_steps: { lines: L.next, edited: false, final },
     removed: [], removed_journal: [], memo_check: memoCheck, ...extra });
@@ -138,7 +139,7 @@ function build(name, lang = 'en', now = Date.now()) {
 // name -> {state, after, agenda, permissions}, rebuilt on every read so the times stay relative to now.
 const states = Object.defineProperties({}, Object.fromEntries(NAMES.map(name => [name, { enumerable: true, get: () => build(name) }])));
 
-// A page with the fixture: page.api is the route's recorder (posts, afterPolls), page.errors the script errors.
+// A page with the fixture: page.api is the route's recorder (posts, afterPolls, afterGets), page.errors the script errors.
 // `just_stopped` opens After by hand, as the Call bar's Open the call results does.
 async function open(browser, { fixture, width = 1440, height = 900, scheme = 'light', lang = 'ru', data: dataLang = 'en', at = null }) {
   const origin = 'http://after-ui.test';
@@ -147,6 +148,7 @@ async function open(browser, { fixture, width = 1440, height = 900, scheme = 'li
   data.state.preferences.interface_language = lang;
   const api = await route(context, data, origin);
   api.afterPolls = 0;
+  api.afterGets = []; // the meeting_id each GET /api/after asked for
   // Registered after `route`, so it answers first; everything else falls back to it.
   await context.route(`${origin}/api/after**`, async request => {
     const url = new URL(request.request().url());
@@ -158,6 +160,7 @@ async function open(browser, { fixture, width = 1440, height = 900, scheme = 'li
       return request.fulfill({ json: url.pathname === '/api/after/edit' ? { ok: true, send_at: iso(Date.now() + 30 * SEC) } : { ok: true } });
     }
     if (url.pathname !== '/api/after') return request.fallback();
+    api.afterGets.push(url.searchParams.get('meeting_id'));
     const list = Array.isArray(api.fixture.after) ? api.fixture.after : [api.fixture.after];
     const answer = list[Math.min(api.afterPolls++, list.length - 1)];
     return answer ? request.fulfill({ json: answer }) : request.fulfill({ status: 404, json: { ok: false, error: 'not_found' } });
