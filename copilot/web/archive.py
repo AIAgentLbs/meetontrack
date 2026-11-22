@@ -1448,6 +1448,9 @@ class MeetingArchive:
                         # Report generation may have completed while we prepared
                         # the retry. Re-check next scan instead of resending it.
                         continue
+                    if not self.after.gate(path.parent.name, ready_epoch)["open"]:
+                        self.after.blocked(path.parent.name, ready_epoch)
+                        continue  # A Hold pressed since the check above wins.
                     meta.update(self.deliver(detail, meta, previous=meta))
                     meta.setdefault("delivery_started_at", now.isoformat(timespec="seconds"))
                     meta["delivery_checked_at"] = now.isoformat(timespec="seconds")

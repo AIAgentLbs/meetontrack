@@ -35,6 +35,16 @@ class AfterStateTests(unittest.TestCase):
         (folder / "after.json").write_text("[", encoding="utf-8")
         self.assertEqual(self.after.read("m2"), self.defaults())
 
+    def test_wrong_types_read_as_defaults(self):
+        folder = self.root / "m3"
+        folder.mkdir()
+        (folder / "after.json").write_text(
+            '{"held": "yes", "changed_at": "x", "send_now_at": true, "resent_at": [1], '
+            '"summary": 5, "next_steps": "Call back.", "removed": ["journal:j1", 7, null]}', encoding="utf-8")
+        state = self.after.read("m3")
+        self.assertEqual(state, {**self.defaults(), "next_steps": "Call back.", "removed": ["journal:j1"]})
+        self.assertTrue(self.after.gate("m3", None)["open"])  # never raises inside the delivery path
+
     def test_gate_order(self):
         t = self.clock.now
         self.assertEqual(self.after.gate("m1", None), {"open": True, "reason": "", "send_at": None})

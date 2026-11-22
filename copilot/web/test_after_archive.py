@@ -130,6 +130,23 @@ class AfterArchiveTests(unittest.TestCase):
         self.due_retry()
         self.assertEqual(self.sent, 1)
 
+    def test_hold_pressed_while_retry_prepares_wins(self):
+        start = self.now
+        self.archive.generate_report("m1")
+        self.now = start + 31
+        real = self.archive.report_gate
+
+        def gate(identity):
+            self.archive.after.hold("m1")  # pressed after retry checked the gate, before it sends
+            return real(identity)
+
+        with patch.object(self.archive, "report_gate", side_effect=gate):
+            self.due_retry()
+        self.assertEqual(self.sent, 0)
+        self.archive.after.send_now("m1")
+        self.archive.retry_pending_deliveries()
+        self.assertEqual(self.sent, 1)
+
     def test_removed_item_left_out(self):
         self.archive.after.remove("m1", "journal:j1", True)
         self.assertNotIn("j1", [item.get("id") for item in self.archive.report_detail("m1")["journal"]])
