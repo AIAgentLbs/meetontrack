@@ -373,7 +373,7 @@ function renderCall(state) {
     if (!field.value.trim()) field.value = callPending.question;
     callPending = null;
     callAskNote = t("call.ask_changed");
-  } else if (callPending?.queued && !requestBusy && !state?.copilot?.busy && window.callAsk(callPending.question)) {
+  } else if (callPending?.queued && !requestBusy && !state?.copilot?.busy && window.callAsk(callPending.question, callPending.meeting)) {
     callPending = { question: callPending.question, at: Date.now() };
     callAskNote = null;
   }
@@ -572,9 +572,11 @@ addEventListener("DOMContentLoaded", () => {
   });
 });
 // A failed Ask (app.js sendQuestion): the feed says so, and the question goes back into an empty field to try again.
-window.callAskFailed = (question, text) => {
+// changed: the server refused it for another call (M4), which is the J3 note, not an error.
+window.callAskFailed = (question, text, changed = false) => {
   if (callPending?.question === question) callPending = null;
-  callAskError = { question, text, at: Date.now() };
+  if (changed) callAskNote = t("call.ask_changed");
+  else callAskError = { question, text, at: Date.now() };
   const field = $("call-question");
   if (!field.value.trim()) field.value = question;
   if (document.body.dataset.view === "call") renderCall(window.appState);

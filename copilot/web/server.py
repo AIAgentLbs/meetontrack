@@ -3512,6 +3512,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, **result})
             elif path == "/api/chat":
                 snap = ARCHIVE.annotate_speakers(FRAMES.annotate(TRANSCRIPT.snapshot()))
+                # A question asked for one call (the Call view sends which) is never answered with the next one (M4).
+                asked_for = payload.get("meeting_id")
+                if asked_for is not None and asked_for != snap["meeting_id"]:
+                    self._json({"ok": False, "error": "meeting_changed"}, HTTPStatus.CONFLICT)
+                    return
                 question = str(payload.get("question", ""))
                 transcript = self._transcript_text(snap)
                 visual = FRAMES.visual_context(snap["meeting_id"])

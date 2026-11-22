@@ -109,6 +109,17 @@ class LogicalServerTests(unittest.TestCase):
         self.assertEqual(len(self.session.snapshot("physical")["messages"]), 2)
         self.assertEqual(self.session.snapshot(result["meeting_id"])["messages"], [])
 
+    def test_a_question_for_another_meeting_is_refused_with_a_code(self):
+        # M4: a question queued during one call never reaches the AI with the next call's transcript.
+        conn = http.client.HTTPConnection("127.0.0.1", self.httpd.server_port, timeout=3)
+        with patch.object(self.session, "ask", side_effect=AssertionError("must not ask")) as asked:
+            conn.request("POST", "/api/chat", json.dumps({"question": "Who signs?", "meeting_id": "earlier-call"}),
+                         {"Content-Type": "application/json"})
+            response = conn.getresponse()
+            self.assertEqual((response.status, json.loads(response.read())), (409, {"ok": False, "error": "meeting_changed"}))
+            asked.assert_not_called()
+        conn.close()
+
     def test_old_analysis_status_cannot_overwrite_new_meeting(self):
         self.session.bind_meeting("physical")
         self.session.bind_meeting("second")

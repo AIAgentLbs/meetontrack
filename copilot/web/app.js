@@ -3551,7 +3551,8 @@ async function post(path, payload) {
 
 // True when the question went out; false when it did not (empty, or another request holds the line):
 // the Call view's ask field keeps its text then (F4).
-function ask(question) {
+// meeting: the call a queued Call question was asked in; the server refuses it for another one (M4).
+function ask(question, meeting) {
   const clean = question.trim();
   if (!clean || requestBusy) return false;
   requestBusy = true;
@@ -3569,18 +3570,19 @@ function ask(question) {
   elements.chat.scrollTop = elements.chat.scrollHeight;
   chatPinnedToLatest = true;
   updateChatLatestButton();
-  void sendQuestion(clean);
+  void sendQuestion(clean, meeting);
   return true;
 }
 window.callAsk = ask;
 
-async function sendQuestion(clean) {
+async function sendQuestion(clean, meeting) {
   try {
-    await post("/api/chat", { question: clean });
+    await post("/api/chat", { question: clean, ...(meeting ? { meeting_id: meeting } : {}) });
   } catch (error) {
-    elements.help.textContent = plainError(error);
+    const changed = error?.message === "meeting_changed";
+    elements.help.textContent = changed ? t("call.ask_changed") : plainError(error);
     elements.help.classList.add("error");
-    window.callAskFailed?.(clean, plainError(error));
+    window.callAskFailed?.(clean, plainError(error), changed);
   } finally {
     requestBusy = false;
     await state();

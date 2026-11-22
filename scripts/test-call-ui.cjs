@@ -456,7 +456,8 @@ async function interactions(browser) {
   assert.equal(await text(page, '#call-slot .heard-q'), 'What did Anna say about the budget?');
   assert.deepEqual(posts(page, '/api/chat'), []);
   release({ status: 200, json: { ok: true, skipped: true } });
-  await expectPost(page, '/api/chat', { question: 'What did Anna say about the budget?' });
+  // Queued, so it names its call (M4).
+  await expectPost(page, '/api/chat', { question: 'What did Anna say about the budget?', meeting_id: page.api.fixture.state.transcript.meeting_id });
   await page.context().close();
 
   // The answer to your own question, and the link to all questions and answers.
@@ -1098,7 +1099,7 @@ async function fixWave(browser) {
     assert.deepEqual(posts(page, '/api/chat'), []);
     await page.evaluate(() => { requestBusy = false; });
     await refresh(page);
-    await expectPost(page, '/api/chat', { question: 'What did Anna say about the budget?' });
+    await expectPost(page, '/api/chat', { question: 'What did Anna say about the budget?', meeting_id: page.api.fixture.state.transcript.meeting_id });
     await page.context().close();
   }
   {
@@ -1441,7 +1442,7 @@ async function round3(browser) {
     assert.equal(await text(page, '#call-slot .heard-q'), 'Кто подписывает?');
     await page.evaluate(() => { requestBusy = false; });
     await refresh(page);
-    await expectPost(page, '/api/chat', { question: 'Кто подписывает?' });
+    await expectPost(page, '/api/chat', { question: 'Кто подписывает?', meeting_id: page.api.fixture.state.transcript.meeting_id });
     assert.equal(posts(page, '/api/chat').length, 1);
     await page.context().close();
   }
@@ -1500,9 +1501,26 @@ async function round3(browser) {
   }
 }
 
-// Section L: critique 4 (30/40), and section K3.
+// Section L: critique 4 (30/40), and sections K3 and M.
 async function round4(browser) {
   const plain = value => String(value).replace(/\u00a0/g, ' ').trim();
+  // M4: the queued question names its call; the server refusing it (the call changed in between) is the J3 note,
+  // never an error, and the question goes back into the field.
+  {
+    const page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru' });
+    page.api.responses['/api/chat'] = { status: 409, json: { ok: false, error: 'meeting_changed' } };
+    await page.evaluate(() => { requestBusy = true; });
+    await page.fill('#call-question', 'Кто подписывает?');
+    await page.press('#call-question', 'Enter');
+    await page.evaluate(() => { requestBusy = false; });
+    await refresh(page);
+    await expectPost(page, '/api/chat', { question: 'Кто подписывает?', meeting_id: page.api.fixture.state.transcript.meeting_id });
+    await page.waitForFunction(() => document.getElementById('call-note')?.textContent);
+    assert.equal(await text(page, '#call-note'), 'Вопрос не отправлен: звонок сменился.');
+    assert.equal(await page.inputValue('#call-question'), 'Кто подписывает?');
+    assert.doesNotMatch(await page.locator('#call').innerText(), /meeting_changed|Не удалось/);
+    await page.context().close();
+  }
   // L1 (P1): at 400 px the board stacks its four columns and the pane scrolls to each heading; an empty column says
   // so in one line. L4: no pane makes the page taller than the window, and nothing shows under the dock.
   {
