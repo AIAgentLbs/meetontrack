@@ -1106,6 +1106,7 @@ const checks = {
           }
           await page.setViewportSize({ width: 1440, height: 900 });
           await page.emulateMedia({ colorScheme: 'light' });
+          await frames(page); // the bar's short-text media query re-renders on the next frame, not at once
           await checks[fixture](page, lang);
           assert.deepEqual(scriptErrors(page), []);
         } catch (error) {
