@@ -94,7 +94,7 @@ function hintCandidates(state) {
     const open = item.status !== "resolved";
     if (item.category === "INCOMING_QUESTION" && item.reply && open) {
       const speaker = String(item.speaker || "").trim();
-      const label = speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
+      const label = callAsks(speaker);
       const parts = callParts(item.reply, item);
       // A source that only repeats the question is left out: the question shows once (B6).
       if (callSame(parts.raw, String(item.text || ""))) parts.source = "";
@@ -125,13 +125,12 @@ function hintCandidates(state) {
   const next = questions.findIndex(item => item.status !== "resolved");
   if (next >= 0) {
     const line = callLine(questions[next].text);
-    const label = state.call_plan.source_label;
     // Its age, like every hint (H3): since the question before it was closed, or since the call began.
     const closed = questions.slice(0, next).map(item => callAt(item.updated_at)).filter(at => at !== null);
     const since = closed.length ? Math.max(...closed) : callAt(state?.transcript?.started_at);
-    // The memo and its company on the one source line: no Where this comes from that only repeats it (H2).
+    // Where the question comes from, in the person's words: the preparation and its number, no company (H2, N6).
     hints.push({ kind: "memo", tier: 4, at: null, since, label: callVerbLabel(line), question: "", ...callCut(line.rest),
-      source: [t("call.from_memo", { n: next + 1 }), label].filter(Boolean).join(" · "), detail: [] });
+      source: t("call.from_memo", { n: next + 1 }), detail: [] });
   }
   return hints;
 }
@@ -221,8 +220,11 @@ const callWhereOpen = new Set(); // keys of the hints whose source is open
 const callSignatures = {};
 
 const callHintKey = hint => `${hint.kind}|${hint.at}|${hint.text}`;
-const callAsked = hint => hint.speaker ? t("call.asked", { name: hint.speaker, question: hint.question })
-  : t("call.asked_plain", { question: hint.question });
+// "<name> asks" has one form everywhere (N6): this label with the age, then the question in regular weight.
+const callAsks = speaker => speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
+// A question put to the person: who asks and when, the question, then Answer over the reply (K3, N6).
+const callAskedNodes = (asks, question, at, answer) => [callSay("say", asks, at), textNode("p", "heard-q", question),
+  textNode("p", "say answer-say", answer)];
 function callButton(className, label, onClick) {
   const button = textNode("button", className, label);
   button.type = "button";
@@ -272,13 +274,13 @@ function callSlot(state, current, now, stopped = null, clock = "") {
     text: t({ stop_failed: "call.stop_pending", stopped: "call.stopped", stopped_final: "call.saved" }[stopped]) };
   // Who asked, in quotes, then Answer over the line, as in Earlier (B6, K3).
   if (current?.kind === "answer") {
-    return { type: "answer", key: callHintKey(current), label: t("call.answer"), at: current.at, asked: callAsked(current),
+    return { type: "answer", key: callHintKey(current), label: t("call.answer"), at: current.at, asks: callAsks(current.speaker), asked: current.question,
       text: current.text, full: current.full, source: current.source, detail: current.detail };
   }
   const heard = state?.heard_question;
   if (heard?.text) {
     const speaker = String(heard.speaker || "").trim();
-    const label = speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
+    const label = callAsks(speaker);
     const later = analysisSkipped !== null && analysisSkipped === state?.transcript?.meeting_id;
     return { type: "heard", label, at: callAt(heard.at), question: String(heard.text), later };
   }
@@ -291,7 +293,7 @@ function callSlot(state, current, now, stopped = null, clock = "") {
 }
 
 function callSlotNodes(slot) {
-  const nodes = [...(slot.asked ? [textNode("p", "heard-q", slot.asked)] : []), callSay("say", slot.label || "", slot.at)];
+  const nodes = slot.asked ? callAskedNodes(slot.asks, slot.asked, slot.at, slot.label) : [callSay("say", slot.label || "", slot.at)];
   if (slot.type === "stopped") {
     // The undo window says what comes next, counting down in place (L3); the bar already says it stopped.
     if (slot.until !== null && slot.until !== undefined) {
@@ -424,7 +426,7 @@ function renderCall(state) {
 
   // A heard question says who asked, in quotes; our answer sits under its own label, so it never reads as hers (B6).
   const earlier = pick.earlier.map(hint => (hint.kind === "answer"
-    ? { asked: callAsked(hint), label: t("call.answer"), at: hint.at, text: hint.text, source: hint.source }
+    ? { asks: callAsks(hint.speaker), asked: hint.question, label: t("call.answer"), at: hint.at, text: hint.text, source: hint.source }
     : { label: hint.label, at: hint.at, text: hint.text, source: hint.source }));
   const open = $("call-earlier-open");
   // Open, it says how to close it (H5); More's item presses the same button and says the same.
@@ -440,8 +442,8 @@ function renderCall(state) {
     const items = document.createElement("ul");
     items.append(...list.map(hint => {
       const item = document.createElement("li");
-      if (hint.asked) item.append(textNode("p", "earlier-q", hint.asked));
-      item.append(callSay("say", hint.label, hint.at), textNode("p", "earlier-hint", hint.text));
+      item.append(...(hint.asked ? callAskedNodes(hint.asks, hint.asked, hint.at, hint.label) : [callSay("say", hint.label, hint.at)]),
+        textNode("p", "earlier-hint", hint.text));
       if (hint.source) item.append(textNode("p", "why", hint.source));
       return item;
     }));

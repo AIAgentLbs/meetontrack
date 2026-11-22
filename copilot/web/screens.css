@@ -259,6 +259,8 @@ body[data-view="call"] :is(#transcript-show, #swap-panels) { display: none; }
 /* The question above a line to say: always one clear step smaller than it, 20 px at most (L5). */
 .heard-q { font-size: min(20px, calc(var(--say-size) * 0.8)); line-height: 1.4; font-weight: 400; max-width: 34em; overflow-wrap: anywhere; }
 .heard-q + .hint { margin-top: 12px; }
+/* Answer under a question put to the person: 24 px from the question, close over the reply (N6, critique P2-4). */
+.answer-say { margin-top: 24px; }
 .heard-wait { margin-top: 10px; color: var(--muted); font-size: 14px; }
 /* The answer to your own question: reading size, six lines at most; the whole answer is in the chat. */
 .own-answer { margin-top: 12px; font-size: 18px; line-height: 1.45; max-width: 38em; overflow-wrap: anywhere;
@@ -286,7 +288,6 @@ body[data-view="call"] :is(#transcript-show, #swap-panels) { display: none; }
 /* An earlier source line wraps: at 400 px a cut would end it on half a word (G5). */
 .earlier .why { margin-top: 4px; white-space: normal; overflow-wrap: anywhere; }
 .earlier-hint { overflow-wrap: anywhere; }
-.earlier-q { margin-bottom: 8px; overflow-wrap: anywhere; }
 .earlier-empty { padding: 16px 0; color: var(--muted); }
 .dock { flex-shrink: 0; border-top: 1px solid var(--line); background: var(--surface); padding: 16px 0 20px; position: relative; }
 .dock .col { display: grid; gap: 12px; }

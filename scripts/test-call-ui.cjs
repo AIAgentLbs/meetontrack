@@ -86,7 +86,7 @@ async function functions(browser) {
   assert.deepEqual(picks.newer.earlier, ['check', 'answer']);
   assert.equal(picks.check.label, 'Say'); // a correction, not a question: Clarify stands only over a question (H3)
   assert.equal(picks.memo.current, 'memo');
-  assert.equal(picks.memo.source, 'From the memo, question 2 · Example LLC'); // one line, nothing to open (H2)
+  assert.equal(picks.memo.source, 'From the preparation, question 2'); // one line, nothing to open (H2)
   assert.deepEqual(picks.memo.detail, []);
   assert.equal(picks.memo.label, 'Ask');
   assert.deepEqual(picks.memo.earlier, ['signal', 'check', 'answer']);
@@ -131,7 +131,7 @@ async function functions(browser) {
   const fixtureHint = await run(state => pickHint(state, Date.now()).current.kind, build('hint').state);
   assert.equal(fixtureHint, 'signal');
   const fixtureMemo = await run(state => pickHint(state, Date.now()), build('memo_question').state);
-  assert.equal(fixtureMemo.current.source, 'From the memo, question 2 · Example LLC');
+  assert.equal(fixtureMemo.current.source, 'From the preparation, question 2');
   // The ASK that says the memo question again is not listed under it (ruling 8).
   assert.deepEqual(fixtureMemo.earlier.map(hint => hint.kind), ['answer', 'signal']);
 
@@ -324,10 +324,11 @@ async function interactions(browser) {
   assert.deepEqual(page.errors, []);
   await page.context().close();
 
-  // A question put to the person: who asked, in regular weight, then Answer and when over the reply (K3).
+  // A question put to the person, as a heard one (N6): who asks and when, the question in regular weight, then Answer
+  // over the reply (K3).
   page = await callPage(browser, 'answer');
-  assert.match(await text(page, '#call-slot .say'), /^Answer · (?:just now|только что)$/);
-  assert.equal(await text(page, '#call-slot .heard-q'), 'Anna Petrova asked: “When can you start the pilot?”');
+  assert.deepEqual(await page.locator('#call-slot .say').allTextContents(), ['Anna Petrova asks · just now', 'Answer']);
+  assert.equal(await text(page, '#call-slot .heard-q'), 'When can you start the pilot?');
   assert.equal(await page.$eval('#call-slot .heard-q', node => getComputedStyle(node).fontWeight), '400');
   assert.equal(await text(page, '#call-slot .hint'), 'We can start on the first Monday after the contract is signed.');
   await page.context().close();
@@ -344,7 +345,7 @@ async function interactions(browser) {
   page = await callPage(browser, 'memo_question');
   assert.equal(await text(page, '#call-slot .hint'), 'Who signs off the purchase?');
   // Its source sits in Where this comes from, like every hint's (N1). Its age shows (H3).
-  assert.equal(await whereText(page), 'From the memo, question 2 · Example LLC');
+  assert.equal(await whereText(page), 'From the preparation, question 2');
   // Dated by the latest analysis that found nothing newer, so never older than Earlier (L2).
   assert.match(await text(page, '#call-slot .say'), /^Ask · 1 min ago$/);
   await page.context().close();
@@ -482,7 +483,7 @@ async function interactions(browser) {
   const current = await text(page, '#call-slot .hint');
   assert.ok(!(await page.locator('#call-earlier li .earlier-hint').allTextContents()).includes(current), 'no duplicate of the current hint');
   assert.equal(await page.locator('#call-earlier li').count(), count);
-  assert.equal(await page.locator('#call-earlier li .say').count(), count);
+  assert.equal(await page.locator('#call-earlier li .say:first-child').count(), count); // each opens on its label
   await refresh(page);
   assert.equal(await visible(page, '#call-earlier'), true, 'Earlier stays open across the poll');
   await open.click();
@@ -1053,18 +1054,19 @@ async function fixWave(browser) {
     await page.context().close();
   }
   // B6: in Earlier, a heard question says who asked, in quotes, and our answer sits under its own label.
-  for (const [lang, asked, label] of [['en', 'Anna Petrova asked: “When can you start the pilot?”', 'Answer · 2 min ago'],
+  // N6: the same pattern as the slot: who asks and when, the question, then Answer over the reply.
+  for (const [lang, asks, asked, label] of [['en', 'Anna Petrova asks · 2 min ago', 'When can you start the pilot?', 'Answer'],
     // RU keeps the present tense: a past verb would guess the speaker's gender from a name.
-    ['ru', 'Анна Петрова спрашивает: «Когда вы сможете начать пилот?»', 'Ответьте · 2\u00a0мин назад']]) { // H3: a verb
+    ['ru', 'Анна Петрова спрашивает · 2\u00a0мин назад', 'Когда вы сможете начать пилот?', 'Ответьте']]) { // H3: a verb
     const page = await callPage(browser, 'earlier_open', { lang, data: lang });
     await page.click('#call-earlier-open');
     const item = page.locator('#call-earlier li', { hasText: asked });
     assert.equal(await item.count(), 1, lang);
-    assert.deepEqual(await item.locator('p').allTextContents().then(lines => lines.slice(0, 3)),
-      [asked, label, build('earlier_open', lang).state.journal[1].reply], lang);
+    assert.deepEqual(await item.locator('p').allTextContents().then(lines => lines.slice(0, 4)),
+      [asks, asked, label, build('earlier_open', lang).state.journal[1].reply], lang);
     // The question shows once: no source line repeating it under the answer.
     const question = build('earlier_open', lang).state.journal[1].text;
-    assert.equal((await item.locator('p').allTextContents()).filter(line => line.trim() === question).length, 0, `${lang}: question once`);
+    assert.equal((await item.locator('p').allTextContents()).filter(line => line.trim() === question).length, 1, `${lang}: question once`);
     await page.context().close();
   }
   // B5: the server skipped the automatic analysis (the start of an automatic recording): a heard question is not
@@ -1174,8 +1176,9 @@ async function polish(browser) {
       ['Анна Петрова', 'Анна Петрова', 'Вы', 'Анна Петрова', 'Вы', 'Анна Петрова']);
     await page.context().close();
   }
-  for (const [lang, labels] of [['ru', ['Уточните · 1\u00a0мин назад', 'Ответьте · 2\u00a0мин назад', 'Скажите · 3\u00a0мин назад']],
-    ['en', ['Clarify · 1 min ago', 'Answer · 2 min ago', 'Say · 3 min ago']]]) {
+  // A question put to the person carries its age on who asks (N6).
+  for (const [lang, labels] of [['ru', ['Уточните · 1\u00a0мин назад', 'Анна Петрова спрашивает · 2\u00a0мин назад', 'Скажите · 3\u00a0мин назад']],
+    ['en', ['Clarify · 1 min ago', 'Anna Petrova asks · 2 min ago', 'Say · 3 min ago']]]) {
     const page = await callPage(browser, 'earlier_open', { lang, data: lang, at });
     await page.click('#call-earlier-open');
     const shown = await page.locator('#call-earlier .say').allTextContents();
@@ -1297,7 +1300,7 @@ async function polish(browser) {
     assert.match(board, /Источник/);
     await page.context().close();
     page = await ru('memo_question', { at });
-    assert.equal(await whereText(page), 'Из мемо, вопрос 2 · ООО Пример');
+    assert.equal(await whereText(page), 'Из подготовки, вопрос 2');
     await page.context().close();
   }
   // The last phrase heard never opens on half a word at 400 px.
@@ -1337,7 +1340,7 @@ async function round3(browser) {
   {  // N1 supersedes "no link that only repeats the line": the memo's source is in the one disclosure too.
     const page = await callPage(browser, 'memo_question', { lang: 'ru', data: 'ru' });
     assert.equal(await text(page, '#call-slot .why-acts button'), 'Откуда это');
-    assert.equal(await whereText(page), 'Из мемо, вопрос 2 · ООО Пример');
+    assert.equal(await whereText(page), 'Из подготовки, вопрос 2');
     await page.context().close();
   }
   {
@@ -1353,7 +1356,8 @@ async function round3(browser) {
     const page = await callPage(browser, 'earlier_open', { lang: 'ru', data: 'ru' });
     await page.click('#call-earlier-open');
     const items = await page.locator('#call-earlier li').evaluateAll(nodes => nodes.map(node => ({
-      label: node.querySelector('.say').firstChild.textContent, text: node.querySelector('.earlier-hint').textContent })));
+      // The label over the line itself: the last one (a question put to the person has who asks above it, N6).
+      label: [...node.querySelectorAll('.say')].at(-1).firstChild.textContent, text: node.querySelector('.earlier-hint').textContent })));
     for (const item of items) {
       assert.match(item.label, /^(Спросите|Скажите|Ответьте|Уточните)$/, JSON.stringify(item));
       if (item.label === 'Уточните') assert.match(item.text, /\?$/, JSON.stringify(item));
@@ -1671,12 +1675,18 @@ async function round4(browser) {
     }
     await page.context().close();
   }
-  // K3: the current answer carries the Answer label like every hint, under who asked, as in Earlier.
+  // K3, N6 (critique P2-4): one pattern for "<name> asks": the label with its age, the question in regular weight, a
+  // 24 px gap, then Answer close over the reply.
   {
     const page = await callPage(browser, 'answer', { lang: 'ru', data: 'ru' });
-    assert.deepEqual(await page.locator('#call-slot > p').evaluateAll(nodes => nodes.slice(0, 3).map(node => node.textContent)),
-      ['Анна Петрова спрашивает: «Когда вы сможете начать пилот?»', 'Ответьте · только что',
+    assert.deepEqual(await page.locator('#call-slot > p').evaluateAll(nodes => nodes.slice(0, 4).map(node => node.textContent)),
+      ['Анна Петрова спрашивает · только что', 'Когда вы сможете начать пилот?', 'Ответьте',
         'Можем начать в первый понедельник после подписания договора.']);
+    const [, question, label, reply] = await page.locator('#call-slot > p').evaluateAll(nodes => nodes.slice(0, 4)
+      .map(node => node.getBoundingClientRect().toJSON()));
+    assert.ok(Math.abs(label.top - question.bottom - 24) <= 2, `24 px under the question: ${label.top - question.bottom}`);
+    assert.ok(reply.top - label.bottom < label.top - question.bottom, 'the label sits closer to the reply');
+    assert.equal(await page.$eval('#call-slot .heard-q', node => getComputedStyle(node).fontWeight), '400');
     await page.context().close();
   }
   // L2: the slot picks among the latest analysis only; Earlier never holds anything newer than the current hint.
