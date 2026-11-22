@@ -289,6 +289,11 @@ body[data-view="call"][data-call-panel]:not([data-call-panel="transcript"]) .tra
 /* The transcript_hidden preference hides the side pane, never the panel asked for (F12); Hide has nothing to hide here. */
 body[data-view="call"][data-call-panel="transcript"] .workspace.transcript-hidden .transcript-pane { display: grid; }
 body[data-view="call"][data-call-panel="transcript"] #transcript-hide { display: none; }
+/* A Call panel shows only what it was opened for (C1): no tab bars, no board chips or per-card status controls, no
+   second status line under the transcript heading. The board's status is the column count; a closed card is muted. */
+body[data-view="call"] :is(#workspace-filters, .call-board .board-summary, .board-item-controls select,
+  .board-item-heading .traffic-light, .transcript-tabs, .pane-header .status-strip, #transcript-meta) { display: none; }
+body[data-view="call"] .board-item.resolved .board-item-heading p { color: var(--muted); }
 /* The dock is the one ask field over the feed; the Notes and Chat panels keep their composer, for a note or a follow-up (F5). */
 body[data-view="call"]:not([data-call-panel="notes"]):not([data-call-panel="chat"]) .composer-wrap { display: none; }
 #call-back { grid-row: 1; grid-column: 1; justify-self: start; margin: 8px 20px; min-height: 32px; padding: 0; border: 0; border-radius: 0;

@@ -2398,7 +2398,8 @@ function renderCallPlan(plan) {
 
 function renderCallBoard(plan, journal) {
   currentJournal = journal;
-  const signature = `${uiLanguage}:${[...boardStatuses]}:${activeTranscript?.meeting_id}:${JSON.stringify(plan)}:${JSON.stringify(journal)}`;
+  const call = document.body.dataset.view === "call";
+  const signature = `${call}:${uiLanguage}:${[...boardStatuses]}:${activeTranscript?.meeting_id}:${JSON.stringify(plan)}:${JSON.stringify(journal)}`;
   if (signature === callBoardSignature) return;
   callBoardSignature = signature;
   const scrolls = Object.fromEntries([...elements.callBoard.querySelectorAll("[data-board-list]")]
@@ -2410,6 +2411,15 @@ function renderCallBoard(plan, journal) {
       : ["INCOMING_QUESTION", "OPEN_QUESTION"].includes(item.category) ? "incoming"
       : ["RISK", "OBJECTION", "CONTRADICTION"].includes(item.category) ? "risks" : "";
     if (lane) entries.push({ ...item, origin: "journal", lane, status: item.status || "open" });
+  }
+  // In Call the board has no status filter, and a live hint that repeats a prepared question shows once (C1).
+  const statuses = call ? new Set(BOARD_STATUSES) : boardStatuses;
+  if (call) {
+    const prepared = entries.filter((item) => item.origin === "plan").map((item) => callLine(item.text).rest);
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const item = entries[index];
+      if (item.origin === "journal" && prepared.some((text) => callSame(text, callLine(item.text).rest))) entries.splice(index, 1);
+    }
   }
   const fragment = document.createDocumentFragment();
   const summary = document.createElement("div");
@@ -2467,9 +2477,9 @@ function renderCallBoard(plan, journal) {
     const list = document.createElement("div");
     list.className = "board-list";
     list.dataset.boardList = lane;
-    const shown = group.filter((item) => boardStatuses.has(item.status));
+    const shown = group.filter((item) => statuses.has(item.status));
     if (!group.length) list.append(textNode("p", "board-empty", t(`board.empty.${lane}`)));
-    else if (!boardStatuses.size) list.append(textNode("p", "board-empty", t("board.filter_none")));
+    else if (!statuses.size) list.append(textNode("p", "board-empty", t("board.filter_none")));
     else if (!shown.length) list.append(textNode("p", "board-empty", t("board.filter_empty")));
     for (const item of shown) {
       const card = document.createElement("article");

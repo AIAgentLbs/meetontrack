@@ -57,6 +57,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.deepEqual(saved, [{interface_language: 'en'}]);
     await page.locator('#settings-close').click();
 
+    // Outside the Call view the panels keep their tab bars (C1 changes the Call view only).
+    assert.equal(await page.locator('#workspace-filters').isVisible(), true, 'the After view keeps the board tab bar');
+    assert.equal(await page.locator('.transcript-tabs').isVisible(), true, 'the After view keeps the transcript tabs');
+
     // Transcript: one click hides it, the other panel takes the width, the menu brings it back.
     assert.equal(await hide.textContent(), 'Hide');
     await page.locator('#menu-button').click();

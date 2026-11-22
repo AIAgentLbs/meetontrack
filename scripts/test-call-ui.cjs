@@ -490,10 +490,10 @@ async function interactions(browser) {
     assert.equal(await visible(page, '#question'), composer, `${panel}: #question`);
     assert.equal(await visible(page, '#note-button'), composer, `${panel}: #note-button`);
   }
-  // Switching tabs inside a panel keeps F5: the panel follows the tab.
+  // The panel follows the tab it shows, so F5 holds when the tab changes underneath (C1 hides the tab bar in Call).
   for (const [panel, tab, composer] of [['board', 'notes', true], ['board', 'chat', true], ['chat', 'board', false], ['notes', 'plan', false]]) {
     await page.evaluate(panel => openCallPanel(panel), panel);
-    await page.click(`[data-content-view="${tab}"]`);
+    await page.evaluate(tab => document.querySelector(`[data-content-view="${tab}"]`).click(), tab);
     assert.equal(await page.evaluate(() => document.body.dataset.callPanel), tab, `${panel} -> ${tab}`);
     assert.equal(await visible(page, '#question'), composer, `${panel} -> ${tab}: #question`);
     assert.equal(await visible(page, '#note-button'), composer, `${panel} -> ${tab}: #note-button`);
@@ -511,13 +511,14 @@ async function interactions(browser) {
   const names = await page.evaluate(() => ['#call-transcript-open', '#transcript-heading', '[data-transcript-view="transcript"]']
     .map(selector => document.querySelector(selector).textContent.trim()));
   assert.deepEqual(names, ['Transcript', 'Transcript', 'Transcript']);
+  assert.equal(await visible(page, '.transcript-tabs'), false, 'Call shows the heading once, no tab (C1)');
   assert.deepEqual(await page.evaluate(() => ['call.transcript', 'transcript.heading', 'transcript.tab'].map(key => translations.ru[key])),
     ['Расшифровка', 'Расшифровка', 'Расшифровка']);
   await page.context().close();
 
   // Transcript and Board open as panels over the feed; Escape and Back to the call return to the opener.
   for (const [fixture, opener, target, heading] of [['transcript_open', '#call-transcript-open', '.transcript-pane', '#transcript-heading'],
-    ['board_open', '#call-board-open', '#call-board', 'button[board]']]) {
+    ['board_open', '#call-board-open', '#call-board', '#call-board']]) {
     page = await callPage(browser, fixture);
     assert.equal(await visible(page, '.workspace'), false, 'the feed hides the workspace');
     for (const close of ['Escape', '#call-back']) {
@@ -816,7 +817,7 @@ async function narrow(browser) {
   assert.equal(await visible(page, '#call-more-menu'), false);
   // Transcript and Board open their panels; Escape returns to the feed with focus on More (F2).
   for (const [item, target, heading] of [['#call-more-transcript', '.transcript-pane', '#transcript-heading'],
-    ['#call-more-board', '#call-board', 'button[board]']]) {
+    ['#call-more-board', '#call-board', '#call-board']]) {
     await more.click();
     await page.click(item);
     assert.equal(await visible(page, target), true, item);
@@ -884,6 +885,42 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // C1: in Call a panel shows only what it was opened for. Board: the four columns, no tab bar, no chips, no
+  // per-card pill or dropdown, no red, and the current hint once. Transcript: one heading, no Frames tab.
+  {
+    const page = await callPage(browser, 'board_open', { lang: 'ru', data: 'ru' });
+    await page.click('#call-board-open');
+    assert.equal(await page.locator('#call-board .board-column').count(), 4);
+    for (const hidden of ['#workspace-filters', '#call-board .board-summary', '#call-board select', '#call-board .traffic-light'])
+      assert.equal(await visible(page, hidden), false, hidden);
+    const mine = await page.locator('#call-board .board-column.mine .board-item > .board-item-heading p').allTextContents();
+    assert.equal(mine.filter(line => /подписывает закупку/i.test(line)).length, 1, `one copy of the current hint: ${mine}`);
+    const danger = await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--danger').trim());
+    const red = await page.evaluate(danger => {
+      const probe = document.createElement('i'); probe.style.color = danger; document.body.append(probe);
+      const rgb = getComputedStyle(probe).color; probe.remove();
+      return [...document.querySelectorAll('#call-board *')].filter(node => node.checkVisibility() && node.children.length === 0
+        && node.textContent.trim() && getComputedStyle(node).color === rgb).map(node => node.textContent.trim());
+    }, danger);
+    assert.deepEqual(red, [], 'no text in the error colour');
+    assert.equal(await focused(page), '#call-board');
+    // Chat and Notes stay reachable from Menu.
+    await page.keyboard.press('Escape');
+    await page.click('#menu-button');
+    await page.click('#menu-notes');
+    assert.equal(await page.evaluate(() => document.body.dataset.callPanel), 'notes');
+    assert.equal(await visible(page, '#journal'), true);
+    assert.equal(await visible(page, '#workspace-filters'), false);
+    await page.context().close();
+  }
+  {
+    const page = await callPage(browser, 'transcript_open', { lang: 'ru', data: 'ru' });
+    await page.click('#call-transcript-open');
+    const header = await page.locator('.transcript-pane .pane-header').innerText();
+    assert.equal(header.match(/Расшифровка/g).length, 1, header);
+    assert.doesNotMatch(header, /Кадры|Последняя реплика/);
+    await page.context().close();
+  }
   // B6: in Earlier, a heard question says who asked, in quotes, and our answer sits under its own label.
   for (const [lang, asked, label] of [['en', 'Anna Petrova asked: “When can you start the pilot?”', /^Answer · \d\d:\d\d$/],
     // RU keeps the present tense: a past verb would guess the speaker's gender from a name.

@@ -390,11 +390,14 @@ function openCallPanel(panel) {
     if (!wasOpen) callOpener = active === body ? null : active.closest("#call-more-menu") ? $("call-more") : active;
     body.dataset.callPanel = panel;
     if (panel !== "transcript") document.querySelector(`[data-content-view="${panel}"]`).click();
+    if (panel === "board") renderCallBoard(currentCallPlan, currentJournal); // the Call form of the board (C1)
   } else {
     delete body.dataset.callPanel;
   }
   renderShell();
-  if (panel) (panel === "transcript" ? $("transcript-heading") : document.querySelector(`[data-content-view="${panel}"]`)).focus();
+  // The tab bar is hidden in Call (C1): focus goes to the panel itself.
+  const target = { transcript: "transcript-heading", board: "call-board", chat: "chat", notes: "journal", plan: "call-plan" }[panel];
+  if (target) { $(target).tabIndex = -1; $(target).focus(); }
   else if (wasOpen) returnFocus(callOpener);
 }
 
