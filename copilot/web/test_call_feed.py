@@ -106,6 +106,11 @@ class AnalysisReplyTests(unittest.TestCase):
         [item] = self.capture("c", "general", "The pilot budget is set in January.")
         self.assertNotIn("reply", item)
 
+    def test_rule_asks_for_lines_said_to_the_client_not_notes(self):
+        # G5: "Анна назвала старт в марте, в мемо апрель" is a note to self; the line to say is the question.
+        self.assertIn("CONTRADICTION начинай с уточняющего вопроса", SPEAKABLE_RULE)
+        self.assertIn("а не заметку для себя", SPEAKABLE_RULE)
+
     def test_analysis_question_has_rule(self):
         empty = SimpleNamespace(snapshot=lambda *a: [], claims=lambda *a: [], ACTIONABLE=set())
         with mock.patch.object(server, "JOURNAL", empty), mock.patch.object(server, "FACT_CHECKS", empty), \
