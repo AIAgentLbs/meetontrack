@@ -1721,8 +1721,16 @@ async function round4(browser) {
   }
   // N1 (P1): every hint in the slot has one source component: Where this comes from, closed, holding the source; or,
   // with no source, one muted line that says so. Nothing else under the line to say.
+  // P8: while the answer is prepared, nothing is said yet to source: no Where this comes from until the answer comes.
+  {
+    const page = await callPage(browser, 'heard', { lang: 'ru', data: 'ru' });
+    assert.match(await text(page, '#call-slot'), /Готовлю ответ/);
+    assert.equal(await page.locator('#call-slot .why, #call-slot .why-acts').count(), 0);
+    assert.doesNotMatch(await page.locator('#call-slot').innerText(), /Откуда это/);
+    await page.context().close();
+  }
   for (const [fixture, expected] of [['hint', 'open'], ['memo_question', 'open'], ['long_hint', 'open'], ['answer', 'none'],
-    ['heard', 'transcript'], ['own_answer', 'chat']]) {
+    ['own_answer', 'chat']]) {
     const page = await callPage(browser, fixture, { lang: 'ru', data: 'ru' });
     const parts = await page.$$eval('#call-slot > *', nodes => nodes.filter(node => node.getClientRects().length)
       .map(node => ({ cls: node.className, text: node.textContent.trim() })));

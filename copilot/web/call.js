@@ -335,8 +335,7 @@ function callSlotNodes(slot) {
   if (slot.type === "waiting") return [textNode("p", "waiting", slot.text), textNode("p", "heard-wait", t("call.waiting_help"))];
   if (slot.question) nodes.push(textNode("p", "heard-q", slot.question));
   if (slot.type === "pending" || slot.type === "heard") nodes.push(textNode("p", "heard-wait", t(slot.later ? "call.heard_later" : "call.heard_wait")));
-  // A heard question comes from the transcript: Where this comes from opens it (N1).
-  if (slot.type === "heard") nodes.push(callWhereLink(() => openCallPanel("transcript")));
+  // A heard question has no answer yet, so nothing to source: Where this comes from comes with the answer (P8).
   if (slot.type === "ask_error") nodes.push(textNode("p", "heard-wait fail", slot.text));
   if (slot.type === "own") {
     nodes.push(textNode("p", "own-answer", readableAnswer(slot.text)), callWhereLink(() => openCallPanel("chat")));
