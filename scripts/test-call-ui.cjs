@@ -1540,6 +1540,41 @@ async function round4(browser) {
     await expectPost(page, '/api/recording/resume', { meeting_id: 'm1' });
     await page.context().close();
   }
+  // P1: repeated Stop input never resumes. The Stop shortcut never presses Resume, and for 1.5 s after Stop the shared
+  // button ignores clicks, so a double-click across the state refresh sends Stop once and nothing else.
+  {
+    const stopping = page => { page.api.fixture.state.recording_control.stopping = { meeting_id: 'm1', stopped_at: new Date().toISOString(),
+      until: new Date(Date.now() + 20000).toISOString() }; };
+    let page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru' });
+    const key = await page.evaluate(() => (MAC ? 'Meta+Shift+E' : 'Alt+Shift+E'));
+    await page.keyboard.press(key);
+    await expectPost(page, '/api/recording/stop', { meeting_id: 'm1' });
+    stopping(page);
+    await refresh(page);
+    assert.equal(await page.locator('#call-stop').getAttribute('data-mode'), 'resume');
+    await page.keyboard.press(key);
+    await page.waitForTimeout(200);
+    assert.deepEqual(posts(page, '/api/recording/resume'), [], 'the shortcut never resumes');
+    await page.context().close();
+
+    page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru' });
+    let release;
+    page.api.responses['/api/recording/stop'] = new Promise(resolve => { release = resolve; });
+    await page.click('#call-stop');
+    stopping(page);
+    await refresh(page); // the refresh lands between the clicks: the button already reads Resume
+    await page.click('#call-stop', { force: true });
+    release({ status: 200, json: { ok: true } });
+    await page.waitForTimeout(300);
+    await page.click('#call-stop', { force: true });
+    await page.waitForTimeout(200);
+    assert.deepEqual(posts(page, '/api/recording/resume'), [], 'a double-click never resumes');
+    assert.equal(posts(page, '/api/recording/stop').length, 1);
+    await page.waitForTimeout(1600);
+    await page.click('#call-stop');
+    await expectPost(page, '/api/recording/resume', { meeting_id: 'm1' }); // a deliberate later click does
+    await page.context().close();
+  }
   // O1: a fact check in Earlier keeps what was said apart from what it is checked against; the client's words are never
   // labelled a source. RU names the speaker without a past verb, which would guess a gender from the name (H3).
   for (const [lang, line] of [['ru', 'Анна Петрова: «Наш пилот в прошлом году охватил все региональные офисы.» · По example.com'],

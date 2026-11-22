@@ -212,7 +212,7 @@ function renderStatus(view) {
   stop.dataset.mode = status.resume ? "resume" : "stop";
   stop.setAttribute("aria-label", t(status.resume ? "action.resume" : "action.stop"));
   stop.hidden = !status.resume && (!isLive(window.appState) || status.kind === "stopped");
-  stop.disabled = homeBusy.has(`status|${stop.dataset.mode}`);
+  stop.disabled = homeBusy.has("status|stop") || homeBusy.has("status|resume"); // across the mode change too (P1)
   // R34: the bar owns a call that is not being recorded, and How to fix sits beside its button.
   $("call-status-help").hidden = status.kind !== "not_recording";
   $("menu-notes").hidden = view === "home";
@@ -253,7 +253,8 @@ const shortcuts = [
     control: () => (currentStatus().action?.id === "start" ? $("call-status-action") : null) },
   { label: "action.stop", kbd: STOP_KEY, combo: true,
     match: event => event.code === "KeyE" && event.shiftKey && (MAC ? event.metaKey && !event.altKey : event.altKey && !event.metaKey),
-    control: () => ($("call-stop").hidden ? null : $("call-stop")) },
+    // Stop only: the same button reads Resume in the undo window, and the shortcut never presses it (P1).
+    control: () => ($("call-stop").hidden || $("call-stop").dataset.mode === "resume" ? null : $("call-stop")) },
   { label: "call.ask_label", kbd: "/", shift: true, focus: true, match: event => event.key === "/",
     control: () => ($("call-question").getClientRects().length ? $("call-question") : null) },
   { label: "shell.key.join", kbd: "J", match: event => event.code === "KeyJ", control: () => homeControl('.actions a.ql[target="_blank"]') },
@@ -428,7 +429,15 @@ $("call-status-action").addEventListener("click", event => {
   } catch {}
   renderShell();
 });
-$("call-stop").addEventListener("click", event => statusAction(event.currentTarget, event.currentTarget.dataset.mode === "resume" ? "resume" : "stop"));
+// For 1.5 s after Stop the button ignores clicks: a double-click across the state refresh never resumes (P1).
+const STOP_GUARD_MS = 1500;
+let stopPressedAt = 0;
+$("call-stop").addEventListener("click", event => {
+  const resume = event.currentTarget.dataset.mode === "resume";
+  if (resume && Date.now() - stopPressedAt < STOP_GUARD_MS) return;
+  if (!resume) stopPressedAt = Date.now();
+  statusAction(event.currentTarget, resume ? "resume" : "stop");
+});
 $("call-stop").querySelector("kbd").textContent = STOP_KEY;
 $("menu-chat").addEventListener("click", () => openCallPanel("chat"));
 $("menu-notes").addEventListener("click", () => (document.body.dataset.view === "call" ? openCallPanel("notes")
