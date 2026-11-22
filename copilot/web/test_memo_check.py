@@ -225,6 +225,10 @@ class MemoCheckReportTests(unittest.TestCase):
         self.assertEqual(self.calls, 0)
         self.assertEqual(self.report()["memo_check"], memo_check.NOT_CHECKED)
         self.assertNotIn("delivery_on_request", self.report())
+        # What the After screen reads: the final reason from report.json, not "waiting".
+        from after_state import after_payload
+        self.archive.memo_plan = lambda detail: PLAN
+        self.assertEqual(after_payload(self.archive, "m1", {}, self.now)["memo_check"], memo_check.NOT_CHECKED)
         self.assertNotIn("memo-check", self.page())
 
     def test_checker_error_does_not_hold_report(self):
