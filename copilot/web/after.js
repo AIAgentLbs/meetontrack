@@ -62,7 +62,7 @@ function afterBoard(state, after) {
     const said = String(item.quote || item.claim || "");
     put("facts", row(`fact:${item.id}`, item.claim || said, item.status === "refuted" ? "differs" : "confirmed", { quote: said,
       speaker: String(item.segment?.speaker || item.segment?.speaker_label || ""), at: item.timestamp || item.checked_at,
-      other: String(item.fact || "") }, true), item.status === "confirmed");
+      other: item.fact ? t("after.differs_fact", { fact: item.fact }) : "" }, true), item.status === "confirmed");
   }
   // What was said against what the memo says: `other` is the memo's whole line, with where the memo came from.
   const source = String(state?.call_plan?.source_label || "");
@@ -121,6 +121,7 @@ let afterRequest = null;
 let afterAsked = null; // the meeting the view last asked about: a failed first answer waits for the next poll, never loops
 let afterSeq = 0;
 let afterSignature = "";
+let afterSendSignature = "";
 let afterError = "";
 const afterBusy = new Set(); // focus keys of the controls whose POST is in flight: a second press posts nothing
 const afterOpen = new Set(); // lanes whose answered or confirmed rows are shown
@@ -155,12 +156,21 @@ setInterval(() => document.body.dataset.view === "after" && void afterFetch(), A
 // The server's codes are not for people: busy has its own line, any other refusal is the generic one.
 const afterFailed = error => (error.message === "busy" ? t("after.busy") : error.status ? t("error.generic") : plainError(error));
 
-async function afterPost(key, path, body = {}) {
+// A send sends what is on screen: typed text not saved yet goes first, and a save that fails sends nothing.
+async function afterFlush() {
+  for (const field of [...afterDirty]) {
+    clearTimeout(afterTimers[field]);
+    if (!(await afterSave(field))) return false;
+  }
+  return true;
+}
+
+async function afterPost(key, path, body = {}, flush = false) {
   if (afterBusy.has(key) || !window.afterData?.data) return;
   afterBusy.add(key);
   afterError = "";
   try {
-    await post(path, { meeting_id: window.afterData.id, ...body });
+    if (!flush || (await afterFlush())) await post(path, { meeting_id: window.afterData.id, ...body });
   } catch (error) {
     afterError = afterFailed(error);
   }
@@ -178,16 +188,21 @@ function afterInput(field) {
 async function afterSave(field) {
   const node = $(AFTER_FIELDS[field]);
   const text = node.value;
-  if (!window.afterData?.data) return;
+  if (!window.afterData?.data) return false;
+  let saved = false;
   try {
     await post("/api/after/edit", { meeting_id: window.afterData.id, field, text });
     afterKeep[field] = afterSeq + 1;
     if (node.value === text) afterDirty.delete(field);
+    afterError = "";
+    saved = true;
   } catch (error) {
     afterError = afterFailed(error);
+    clearTimeout(afterTimers[field]);
     afterTimers[field] = setTimeout(() => void afterSave(field), AFTER_POLL_MS); // kept, and tried again
   }
   await afterRefresh();
+  return saved;
 }
 
 function afterButton(label, className, key, onClick) {
@@ -204,7 +219,9 @@ function afterButton(label, className, key, onClick) {
 function afterQuote(row) {
   if (!row.quote) return "";
   if (row.tag === "differs" && row.speaker && row.at) return t("after.differs_call", { speaker: row.speaker, time: row.at, quote: row.quote });
-  return t("after.quote", { quote: row.quote, speaker: row.speaker, time: row.at }).replace(/, (?=, |$)/gu, "");
+  // The quote's own full stop would sit before the closing mark and the comma: "year.”," reads as a typo.
+  const quote = row.quote.replace(/\.$/u, "");
+  return t("after.quote", { quote, speaker: row.speaker, time: row.at }).replace(/, (?=, |$)/gu, "");
 }
 
 function afterRow(row) {
@@ -286,16 +303,16 @@ function afterSendBlock(after, send) {
   const row = document.createElement("div");
   row.className = "row-act";
   for (const action of send.actions) {
-    if (action === "send_now") row.append(afterButton(t("after.send_now"), "", "send_now", () => void afterPost("send_now", "/api/after/send")));
+    if (action === "send_now") row.append(afterButton(t("after.send_now"), "", "send_now", () => void afterPost("send_now", "/api/after/send", {}, true)));
     if (action === "hold") row.append(afterButton(t("after.hold"), "ql", "hold", () => void afterPost("hold", "/api/after/hold")));
     if (action === "send_again") {
       nodes.push(textNode("p", "after-again", t("after.send_again_note")));
-      row.append(afterButton(t("after.send_again"), "", "send_again", () => void afterPost("send_again", "/api/after/send-again")));
+      row.append(afterButton(t("after.send_again"), "", "send_again", () => void afterPost("send_again", "/api/after/send-again", {}, true)));
     }
     if (action === "retry") {
       // Retry resends only what failed (ruling C9).
       const channels = after.send.channels.filter(item => item.status === "failed" && AFTER_RESEND.has(item.channel)).map(item => item.channel);
-      row.append(afterButton(t("after.retry"), "", "retry", () => void afterPost("retry", "/api/after/send-again", { channels })),
+      row.append(afterButton(t("after.retry"), "", "retry", () => void afterPost("retry", "/api/after/send-again", { channels }, true)),
         afterButton(t("after.channel_settings"), "ql", "settings", openDeliverySettings));
     }
   }
@@ -363,10 +380,17 @@ function renderAfter(state) {
 
   const send = afterSend(after);
   const board = afterBoard(state, after);
-  const signature = JSON.stringify([uiLanguage, window.afterData?.id, after, board, [...afterOpen], afterError]);
+  // The send block and the board change apart: a board change or a cached (stale) answer leaves the send block as it is,
+  // and the live line speaks only when the headline itself changes.
+  const sendSignature = JSON.stringify([uiLanguage, window.afterData?.id, send, after?.send, Boolean(after), afterError]);
+  if (sendSignature !== afterSendSignature) {
+    afterSendSignature = sendSignature;
+    afterReplace($("after-send"), afterSendBlock(after, send));
+  }
+  if ($("after-said").textContent !== send.headline) $("after-said").textContent = send.headline;
+  const signature = JSON.stringify([uiLanguage, window.afterData?.id, board, [...afterOpen]]);
   if (signature === afterSignature) return;
   afterSignature = signature;
-  afterReplace($("after-send"), afterSendBlock(after, send));
   const head = textNode("h3", "", t("after.board"));
   head.id = "after-board-title";
   afterReplace($("after-board"), [head, textNode("p", "board-head", [t("after.board_note"), board.memoLine].filter(Boolean).join(" ")),

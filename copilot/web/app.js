@@ -1669,7 +1669,7 @@ Object.assign(translations.ru, {
   "after.memo_reason.timeout": "ИИ не ответил вовремя", "after.memo_reason.ai_no_answer": "ИИ не дал ответа",
   "after.memo_reason.ai_needs_choice": "ИИ не выбран в настройках", "after.memo_reason.too_long": "звонок слишком длинный для сверки",
   "after.memo_reason.error": "сверка не удалась", "after.memo_reason.not_checked": "сверка идет только для недавних звонков",
-  "after.differs_memo": "{source}, мемо: {memo}",
+  "after.differs_memo": "{source}, мемо: {memo}", "after.differs_fact": "Проверка: {fact}",
 });
 Object.assign(translations.en, {
   "after.send.draft": "The report goes by itself once the final transcript is ready, usually in 2-3 minutes.",
@@ -1699,7 +1699,7 @@ Object.assign(translations.en, {
   "after.memo_reason.timeout": "the AI did not answer in time", "after.memo_reason.ai_no_answer": "the AI gave no answer",
   "after.memo_reason.ai_needs_choice": "no AI is chosen in settings", "after.memo_reason.too_long": "the call is too long to check",
   "after.memo_reason.error": "the check failed", "after.memo_reason.not_checked": "the memo check runs only for recent calls",
-  "after.differs_memo": "{source}, memo: {memo}",
+  "after.differs_memo": "{source}, memo: {memo}", "after.differs_fact": "Fact check: {fact}",
 });
 // After (after.js): the view itself.
 Object.assign(translations.ru, {

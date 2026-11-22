@@ -28,7 +28,7 @@ async function functions(browser) {
   assert.deepEqual(risks.rows.map(row => row.tag), ['risk', 'objection']);
   assert.equal(risks.rows[0].text, 'The start slips if the committee does not meet this Thursday.', 'the first line, whole');
   assert.deepEqual(facts.rows.map(row => [row.key, row.tag]), [['fact:fc-1', 'differs'], ['differs:0123456789ab', 'differs']]);
-  assert.equal(facts.rows[0].other, 'Last year the pilot covered two offices out of five.');
+  assert.equal(facts.rows[0].other, 'Fact check: Last year the pilot covered two offices out of five.', 'the correct fact is labelled');
   assert.match(facts.rows[1].other, /Example LLC/);
   assert.match(facts.rows[1].other, /The pilot starts in April\./);
   assert.equal(facts.rows[1].quote, 'We plan to start in March.');
@@ -131,6 +131,14 @@ const text = (page, selector) => page.locator(selector).first().innerText();
 const visible = (page, selector) => page.locator(selector).first().isVisible();
 const focusedId = page => page.evaluate(() => document.activeElement?.id || '');
 const posts = (page, path) => page.api.posts.filter(post => post.path === path);
+// Waits, in this process, until a recorded request makes the check true (never a fixed sleep).
+async function until(check, label, ms = 5000) {
+  for (const end = Date.now() + ms; !check(); await new Promise(resolve => setTimeout(resolve, 20))) {
+    if (Date.now() > end) throw new Error(`timed out: ${label}`);
+  }
+}
+// The page has an answer of at least this many GETs drawn and none in flight.
+const drawn = (page, polls) => page.waitForFunction(seq => afterRequest === null && window.afterData?.seq >= seq, polls);
 
 // A page on After with its send block drawn from the first /api/after answer.
 async function afterPage(browser, fixture, options = {}) {
@@ -208,14 +216,14 @@ async function interactions(browser) {
     'Send now is secondary');
   assert.match(await page.locator('#after-send button:has-text("Do not send")').getAttribute('class'), /\bql\b/);
   await page.click('#after-send button:has-text("Send now")');
-  await page.waitForFunction(() => true);
+  await until(() => posts(page, '/api/after/send').length, 'send');
   await page.click('#after-send button:has-text("Do not send")');
-  await page.waitForTimeout(200);
+  await until(() => posts(page, '/api/after/hold').length, 'hold');
   assert.deepEqual(posts(page, '/api/after/send').map(post => post.body), [{ meeting_id: 'm1' }]);
   assert.deepEqual(posts(page, '/api/after/hold').map(post => post.body), [{ meeting_id: 'm1' }]);
   // Remove on a row posts its key; the page never sends `record` commands.
   await page.locator('#after-board li.bitem button:has-text("Remove")').first().click();
-  await page.waitForTimeout(200);
+  await until(() => posts(page, '/api/after/remove').length, 'remove');
   assert.deepEqual(posts(page, '/api/after/remove').map(post => post.body), [{ meeting_id: 'm1', key: 'memo:q2', removed: true }]);
   // The transcript and the chat open as a panel; the meta line says when the recording stopped.
   assert.match(await text(page, '#after-meta'), /Recording stopped at 42:10\./);
@@ -239,17 +247,65 @@ async function interactions(browser) {
   await page.keyboard.type('Pilot starts in March.');
   assert.equal(posts(page, '/api/after/edit').length, 0, 'not before the pause');
   await page.clock.runFor(1100);
-  await page.waitForFunction(() => true);
-  await page.waitForTimeout(100);
+  await until(() => posts(page, '/api/after/edit').length, 'edit');
   assert.deepEqual(posts(page, '/api/after/edit').map(post => post.body), [{ meeting_id: 'm1', field: 'summary', text: 'Pilot starts in March.' }]);
   await page.clock.runFor(3500);
-  await page.waitForFunction(() => true);
-  await page.waitForTimeout(200);
-  assert.ok(page.api.afterPolls >= 2, 'the refined summary came');
+  await until(() => page.api.afterPolls >= 3, 'the refined summary came');
+  await drawn(page, 3);
   assert.equal(await page.inputValue('#after-summary'), 'Pilot starts in March.');
   assert.equal(await focusedId(page), 'after-summary');
   assert.equal(await page.$eval('#after-summary', node => node.selectionStart), 'Pilot starts in March.'.length);
   sameMeeting(page);
+  await page.context().close();
+
+  // Send now sends what is on screen: a pending edit is saved first, then the send goes (I1).
+  for (const [fixture, button, path] of [['showing', 'Send now', '/api/after/send'], ['edited', 'Send again', '/api/after/send-again'],
+    ['failed', 'Retry', '/api/after/send-again']]) {
+    page = await afterPage(browser, fixture);
+    await page.fill('#after-next', 'Call Anna on Monday.');
+    await page.click(`#after-send button:has-text("${button}")`);
+    await until(() => posts(page, path).length, `${button} after the flush`);
+    const order = page.api.posts.map(post => post.path).filter(item => item === '/api/after/edit' || item === path);
+    assert.deepEqual(order.slice(0, 2), ['/api/after/edit', path], `${fixture}: the edit reaches the server before ${button}`);
+    assert.equal(posts(page, '/api/after/edit')[0].body.text, 'Call Anna on Monday.');
+    await page.context().close();
+  }
+  // A save that fails sends nothing and says why; the next good save clears the line (M2).
+  page = await afterPage(browser, 'showing', { at: Date.now() });
+  page.api.responses['/api/after/edit'] = { status: 500, json: { ok: false, error: 'boom' } };
+  await page.fill('#after-summary', 'Pilot starts in March.');
+  await page.click('#after-send button:has-text("Send now")');
+  await page.locator('#after-send .after-error').waitFor();
+  assert.equal(await text(page, '#after-send .after-error'), await page.evaluate(() => t('error.generic')));
+  assert.equal(posts(page, '/api/after/send').length, 0, 'nothing is sent when the edit did not save');
+  delete page.api.responses['/api/after/edit'];
+  const tries = posts(page, '/api/after/edit').length;
+  await page.clock.runFor(3100);
+  await until(() => posts(page, '/api/after/edit').length > tries, 'the save is tried again');
+  await page.locator('#after-send .after-error').waitFor({ state: 'detached' });
+  await page.context().close();
+
+  // The send block speaks only when its headline changes: not for a board change or a cached (stale) answer (M1).
+  page = await afterPage(browser, 'draft');
+  await page.evaluate(() => {
+    window.headlineChanges = 0;
+    window.sendRebuilds = 0;
+    new MutationObserver(() => window.headlineChanges++).observe(document.getElementById('after-said'),
+      { childList: true, characterData: true, subtree: true });
+    new MutationObserver(() => window.sendRebuilds++).observe(document.getElementById('after-send'), { childList: true });
+  });
+  assert.equal(await page.getAttribute('#after-send', 'aria-live'), null, 'the block itself is not live');
+  assert.equal(await page.getAttribute('#after-said', 'aria-live'), 'polite');
+  assert.equal(await text(page, '#after-said'), await text(page, '#after-send .after-headline'));
+  page.api.fixture.after = { ...page.api.fixture.after, stale: true, removed: ['memo:q2'] };
+  await page.locator('#after-board li.bitem.removed').waitFor();
+  const before = page.api.afterPolls;
+  await until(() => page.api.afterPolls > before, 'a stale poll');
+  await drawn(page, before + 1);
+  assert.deepEqual(await page.evaluate(() => [window.headlineChanges, window.sendRebuilds]), [0, 0]);
+  page.api.fixture.after = { ...page.api.fixture.after, send: { ...page.api.fixture.after.send, state: 'held' } };
+  await page.waitForFunction(() => document.querySelector('#after-send .after-headline').textContent.startsWith('The report will not go'));
+  assert.equal(await page.evaluate(() => window.headlineChanges), 1, 'one change, heard once');
   await page.context().close();
 
   // Showing: the summary is marked as updated from the final transcript.
@@ -272,7 +328,7 @@ async function interactions(browser) {
   assert.equal(await text(page, '#after-send .after-again'),
     'The e-mail and the Telegram message arrive a second time, the CRM note stays as it was.');
   await page.click('#after-send button:has-text("Send again")');
-  await page.waitForTimeout(200);
+  await until(() => posts(page, '/api/after/send-again').length, 'send again');
   assert.deepEqual(posts(page, '/api/after/send-again').map(post => post.body), [{ meeting_id: 'm1' }]);
   sameMeeting(page);
   await page.context().close();
@@ -281,7 +337,7 @@ async function interactions(browser) {
   page = await afterPage(browser, 'failed');
   assert.deepEqual(await page.locator('#after-send .row-act button').allInnerTexts(), ['Retry', 'Check the delivery settings']);
   await page.click('#after-send button:has-text("Retry")');
-  await page.waitForTimeout(200);
+  await until(() => posts(page, '/api/after/send-again').length, 'retry');
   assert.deepEqual(posts(page, '/api/after/send-again').map(post => post.body), [{ meeting_id: 'm1', channels: ['telegram'] }]);
   await page.click('#after-send button:has-text("Check the delivery settings")');
   await page.locator('#delivery-settings').waitFor({ state: 'visible' });
@@ -298,7 +354,8 @@ async function interactions(browser) {
     afterAsked = null;
     renderAfter(window.appState);
   });
-  await page.waitForTimeout(800);
+  await until(() => failing >= 1, 'the first GET');
+  await page.waitForTimeout(800); // the one kept sleep: a loop shows only as GETs that come within a window, before the 3 s poll
   assert.ok(failing >= 1 && failing <= 2, `one failed GET, not a loop (${failing})`);
   await page.context().close();
 
@@ -317,7 +374,7 @@ async function interactions(browser) {
   assert.equal(await row.count(), 1);
   assert.match(await row.innerText(), /Removed from the report\./);
   await row.locator('button:has-text("Bring back")').click();
-  await page.waitForTimeout(200);
+  await until(() => posts(page, '/api/after/remove').length, 'bring back');
   assert.deepEqual(posts(page, '/api/after/remove').map(post => post.body), [{ meeting_id: 'm1', key: 'memo:q2', removed: false }]);
   sameMeeting(page);
   await page.context().close();
@@ -332,10 +389,12 @@ async function interactions(browser) {
   assert.equal(await fold.getAttribute('aria-expanded'), 'true');
   const q1 = page.locator('#after-board li.bitem:has-text("What budget is set for the pilot")');
   assert.equal(await q1.isVisible(), true);
-  assert.match(await q1.innerText(), /The pilot budget is approved for this year\./);
-  assert.match(await q1.innerText(), /\b05:12\b/);
+  // One closing mark, no ".”,": the quote's own full stop goes before the speaker.
+  assert.match(await q1.innerText(), /“The pilot budget is approved for this year”, Anna Petrova, 05:12/);
   // It stays open through the next poll.
-  await page.waitForTimeout(3300);
+  const polls = page.api.afterPolls;
+  await until(() => page.api.afterPolls > polls, 'next poll');
+  await drawn(page, polls + 1);
   assert.equal(await fold.getAttribute('aria-expanded'), 'true');
   await page.context().close();
 
