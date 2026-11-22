@@ -1303,6 +1303,21 @@ async function polish(browser) {
 
 // Sections H, I and J: critique 3, the re-review and Codex on the fix wave.
 async function round3(browser) {
+  // I4: Chat is reachable from Menu in Call (not on Home), and the Call transcript's error says "расшифровку".
+  {
+    const page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru' });
+    await page.click('#menu-button');
+    assert.equal(await text(page, '#menu-chat'), 'Все вопросы и ответы');
+    await page.click('#menu-chat');
+    assert.equal(await page.evaluate(() => document.body.dataset.callPanel), 'chat');
+    assert.equal(await visible(page, '#chat'), true);
+    Object.assign(page.api.fixture.state.transcript, { error: 'boom', segments: [] });
+    await page.click('#call-back');
+    await page.click('#call-transcript-open');
+    await refresh(page);
+    assert.equal(await text(page, '#transcript strong'), 'Не удалось обновить расшифровку');
+    await page.context().close();
+  }
   // I1: a failed Ask never locks the slot. A newer hint replaces it, it goes after the error hold, and a stop
   // outranks it, so "Запись сохранена" and the results button always show.
   for (const then of ['hint', 'time', 'stopped_final']) {

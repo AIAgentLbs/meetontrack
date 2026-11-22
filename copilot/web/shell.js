@@ -210,6 +210,7 @@ function renderStatus(view) {
   // R34: the bar owns a call that is not being recorded, and How to fix sits beside its button.
   $("call-status-help").hidden = status.kind !== "not_recording";
   $("menu-notes").hidden = view === "home";
+  $("menu-chat").hidden = view !== "call"; // in Call the chat tab is hidden; After keeps its tabs (C1, I4)
   const transcript = window.appState?.transcript || {};
   const title = transcript.display_meeting || transcript.meeting;
   $("menu-notes-title").textContent = title ? t("shell.notes", { title }) : t("journal.notes");
@@ -422,6 +423,7 @@ $("call-status-action").addEventListener("click", event => {
 });
 $("call-stop").addEventListener("click", event => statusAction(event.currentTarget, "stop"));
 $("call-stop").querySelector("kbd").textContent = STOP_KEY;
+$("menu-chat").addEventListener("click", () => openCallPanel("chat"));
 $("menu-notes").addEventListener("click", () => (document.body.dataset.view === "call" ? openCallPanel("notes")
   : document.querySelector('[data-content-view="notes"]').click()));
 

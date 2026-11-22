@@ -167,6 +167,7 @@ const translations = {
     "call.board_incoming": "Вопросы к вам",
     "call.board_empty_incoming": "Здесь появятся вопросы собеседника из расшифровки.",
     "call.transcript_empty": "Жду расшифровку",
+    "call.transcript_failed": "Не удалось обновить расшифровку",
     "call.stop_pending": "Запись на паузе. Подсказок по этому звонку больше не будет.",
     "call.waiting_help": "Свой вопрос можно задать внизу. Весь разговор текстом в «Расшифровке», вопросы и риски на «Доске».",
     "call.paused": "Подсказки на паузе: ИИ не ответил.",
@@ -546,6 +547,7 @@ const translations = {
     "call.board_incoming": "Asked of you",
     "call.board_empty_incoming": "Questions the other side asks appear here.",
     "call.transcript_empty": "Waiting for the transcript",
+    "call.transcript_failed": "Could not refresh the transcript",
     "call.stop_pending": "The recording is paused. No more hints for this call.",
     "call.waiting_help": "You can ask your own question below. The whole conversation is in Transcript, questions and risks are on the Board.",
     "call.paused": "Hints paused: the AI did not answer.",
@@ -1893,7 +1895,7 @@ function renderTranscript(transcript) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.append(
-      textNode("strong", "", transcript.error ? t("transcript.failed") : t(start ? "call.transcript_empty" : "transcript.empty_title")),
+      textNode("strong", "", transcript.error ? t(start ? "call.transcript_failed" : "transcript.failed") : t(start ? "call.transcript_empty" : "transcript.empty_title")),
       textNode(
         "span",
         "",
