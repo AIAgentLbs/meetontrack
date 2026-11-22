@@ -264,6 +264,7 @@ body[data-view="call"] :is(#transcript-show, #swap-panels) { display: none; }
 .earlier li { padding: 16px 0; border-bottom: 1px solid var(--line); }
 .earlier .why { margin-top: 4px; }
 .earlier-hint { overflow-wrap: anywhere; }
+.earlier-q { margin-bottom: 8px; overflow-wrap: anywhere; }
 .earlier-empty { padding: 16px 0; color: var(--muted); }
 .dock { flex-shrink: 0; border-top: 1px solid var(--line); background: var(--surface); padding: 16px 0 20px; position: relative; }
 .dock .col { display: grid; gap: 12px; }

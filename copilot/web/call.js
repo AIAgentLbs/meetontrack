@@ -65,7 +65,7 @@ function hintCandidates(state) {
     if (item.category === "INCOMING_QUESTION" && item.reply && open) {
       const speaker = String(item.speaker || "").trim();
       const label = speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
-      hints.push({ kind: "answer", tier: 1, at, label: callLabel(label, at), question: String(item.text || ""),
+      hints.push({ kind: "answer", tier: 1, at, label: callLabel(label, at), question: String(item.text || ""), speaker,
         ...callCut(callLine(item.reply).line), ...callParts(item.reply, item) });
     } else if (item.category === "CONTRADICTION" && open) {
       const line = callLine(item.text);
@@ -307,7 +307,11 @@ function renderCall(state) {
   $("call-note").hidden = !note;
   callPart("call-note", note, text => [`${text} `, callButton("ql", t("call.check_ai"), () => $("getting-started-open").click())]);
 
-  const earlier = pick.earlier.map(hint => ({ label: hint.label, text: hint.text, source: hint.source }));
+  // A heard question says who asked, in quotes; our answer sits under its own label, so it never reads as hers (B6).
+  const earlier = pick.earlier.map(hint => (hint.kind === "answer"
+    ? { asked: hint.speaker ? t("call.asked", { name: hint.speaker, question: hint.question }) : t("call.asked_plain", { question: hint.question }),
+      label: callLabel(t("call.answer"), hint.at), text: hint.text, source: hint.source }
+    : { label: hint.label, text: hint.text, source: hint.source }));
   const open = $("call-earlier-open");
   const count = t("call.earlier", { n: earlier.length });
   if (open.textContent !== count) open.textContent = count;
@@ -321,6 +325,7 @@ function renderCall(state) {
     const items = document.createElement("ul");
     items.append(...list.map(hint => {
       const item = document.createElement("li");
+      if (hint.asked) item.append(textNode("p", "earlier-q", hint.asked));
       item.append(textNode("p", "say", hint.label), textNode("p", "earlier-hint", hint.text));
       if (hint.source) item.append(textNode("p", "why", hint.source));
       return item;

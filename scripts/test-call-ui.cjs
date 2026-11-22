@@ -884,6 +884,19 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // B6: in Earlier, a heard question says who asked, in quotes, and our answer sits under its own label.
+  for (const [lang, asked, label] of [['en', 'Anna Petrova asked: “When can you start the pilot?”', /^Answer · \d\d:\d\d$/],
+    // RU keeps the present tense: a past verb would guess the speaker's gender from a name.
+    ['ru', 'Анна Петрова спрашивает: «Когда вы сможете начать пилот?»', /^Ответ · \d\d:\d\d$/]]) {
+    const page = await callPage(browser, 'earlier_open', { lang, data: lang });
+    await page.click('#call-earlier-open');
+    const item = page.locator('#call-earlier li', { hasText: asked });
+    assert.equal(await item.count(), 1, lang);
+    assert.deepEqual(await item.locator('p').allTextContents().then(lines => [lines[0], lines[1].replace(/\d\d:\d\d/, '00:00'), lines[2]]),
+      [asked, label.source.includes('Answer') ? 'Answer · 00:00' : 'Ответ · 00:00', build('earlier_open', lang).state.journal[1].reply], lang);
+    assert.match(await item.locator('p.say').textContent(), label);
+    await page.context().close();
+  }
   // B5: the server skipped the automatic analysis (the start of an automatic recording): a heard question is not
   // promised an answer, and the page asks again while it waits.
   {
