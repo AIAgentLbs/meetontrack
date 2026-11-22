@@ -859,6 +859,9 @@ async function narrow(browser) {
   const barNow = await box(page, '.topbar');
   const dockNow = await box(page, '.dock');
   assert.ok(list.top >= barNow.bottom - 1 && list.top < dockNow.top - 20, `Earlier in view: ${JSON.stringify([list, barNow.bottom, dockNow.top])}`);
+  // E1: the whole list sits above the sticky dock when it fits, never under it.
+  if (list.height <= dockNow.top - barNow.bottom) assert.ok(list.bottom <= dockNow.top + 1, `Earlier above the dock: ${JSON.stringify([list, dockNow])}`);
+  else assert.ok(list.top >= barNow.bottom - 1, 'a tall list starts under the bar');
   assert.deepEqual(page.errors, []);
   await page.context().close();
 
@@ -887,6 +890,26 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // E1: a long Earlier list opened from More starts under the real top bar (taller than --bar-h at 400 px when it
+  // wraps), not under it; a short one ends above the real dock.
+  for (const [fixture, extra] of [['earlier_open', 8], ['other_lost', 0]]) {
+    const page = await callPage(browser, fixture, { width: 400, height: 560, lang: 'ru', data: 'ru' });
+    if (extra) {
+      const base = page.api.fixture.state.journal;
+      page.api.fixture.state.journal = [...base, ...Array.from({ length: extra }, (_, index) => ({ ...base.at(-1), id: `x${index}`,
+        category: 'RISK', text: `Риск номер ${index + 1}: срок сдвигается, если комитет не соберется.`,
+        created_at: new Date(Date.now() - (5 + index) * 60000).toISOString() }))];
+      await refresh(page);
+    }
+    await page.click('#call-more');
+    await page.click('#call-more-earlier');
+    await page.waitForTimeout(200);
+    const r = await page.evaluate(() => { const b = s => document.querySelector(s).getBoundingClientRect();
+      return { bar: b('.topbar').bottom, dock: b('.dock').top, top: b('#call-earlier').top, bottom: b('#call-earlier').bottom }; });
+    assert.ok(r.top >= r.bar - 1, `${fixture}: starts under the bar ${JSON.stringify(r)}`);
+    if (r.bottom - r.top <= r.dock - r.bar) assert.ok(r.bottom <= r.dock + 1, `${fixture}: ends above the dock ${JSON.stringify(r)}`);
+    await page.context().close();
+  }
   // D6: plain copy in both languages, each key once.
   {
     const page = await callPage(browser, 'waiting', { lang: 'ru' });
