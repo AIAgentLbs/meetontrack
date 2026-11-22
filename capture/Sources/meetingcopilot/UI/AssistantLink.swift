@@ -48,7 +48,7 @@ final class AssistantWindow: NSObject, WKNavigationDelegate, WKUIDelegate {
         super.init()
         window.title = ProductBrand.name
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 720, height: 480)
+        window.minSize = NSSize(width: 400, height: 480)
         window.contentView = webView
         window.center()
         window.setFrameAutosaveName("MeetOnTrackAssistant")

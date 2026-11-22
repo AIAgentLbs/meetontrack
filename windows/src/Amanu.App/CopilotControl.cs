@@ -4,12 +4,15 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using Amanu.Core.Recording;
 
 namespace Amanu.App;
 
 /// <summary>Same-user named pipe. Contains commands and health metadata, never credentials.</summary>
 public static class CopilotControl
 {
+    private const string SessionMismatch = "session_mismatch";
+
     private static string PipeName => "MeetingCopilot-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(WindowsIdentity.GetCurrent().User!.Value)))[..16] + App.Scope;
 
     public static async Task ServeAsync(AmanuRuntime runtime, CancellationToken lifetime)
@@ -24,10 +27,17 @@ public static class CopilotControl
                 timeout.CancelAfter(TimeSpan.FromSeconds(8));
                 using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen:true);
                 using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen:true) { AutoFlush=true };
-                var command = await reader.ReadLineAsync(timeout.Token);
+                var (command, session) = RecordVerbs.Parse(await reader.ReadLineAsync(timeout.Token) ?? "");
                 object result;
                 try
                 {
+                    // J1, M1: a command for a session that is no longer the live one (the next call began) does nothing.
+                    // The check and the action run under the coordinator's gate, so no call starts between them.
+                    if (session is not null && command is not ("stop" or "pause" or "resume" or "relisten"))
+                    {
+                        await writer.WriteLineAsync(JsonSerializer.Serialize(new { ok=false, error=SessionMismatch }));
+                        continue;
+                    }
                     switch (command)
                     {
                         case "status": break;
@@ -35,18 +45,23 @@ public static class CopilotControl
                             if (runtime.State.IsRecording) throw new InvalidOperationException("A meeting is already recording");
                             await runtime.StartManualAsync(); break;
                         case "stop":
-                            if (!runtime.State.IsRecording) throw new InvalidOperationException("No active recording");
-                            await runtime.StopManualAsync(); break;
+                        case "pause":
                         case "resume":
-                            if (!runtime.State.IsRecording) throw new InvalidOperationException("No active recording");
-                            await runtime.ResumeRecognitionAsync(); break;
+                        case "relisten":
+                            if (!await runtime.SessionCommandAsync(command, session))
+                            {
+                                await writer.WriteLineAsync(JsonSerializer.Serialize(new { ok=false, error=SessionMismatch }));
+                                continue;
+                            }
+                            break;
                         case "quit-when-idle":
                             _ = System.Windows.Application.Current.Dispatcher.InvokeAsync(App.QuitWhenIdleAsync); break;
                         default: throw new InvalidOperationException("Unknown capture command");
                     }
                     result = new { ok=true, recording=runtime.State.IsRecording, paused=runtime.State.IsPaused,
                         live_model_ready=runtime.IsLocalModelReady("nemotron-live"), final_model_ready=runtime.IsLocalModelReady("parakeet"),
-                        local_runtime_ready=runtime.LocalRuntimePresent, live_status=runtime.LiveStatus };
+                        local_runtime_ready=runtime.LocalRuntimePresent, live_status=runtime.LiveStatus,
+                        skip_recording=true };
                 }
                 catch (Exception) { result = new { ok=false, error="Capture command failed; inspect the Capture window" }; }
                 await writer.WriteLineAsync(JsonSerializer.Serialize(result));
@@ -69,7 +84,9 @@ public static class CopilotControl
             var result = await reader.ReadLineAsync(timeout.Token);
             Console.WriteLine(result);
             using var json=JsonDocument.Parse(result!);
-            return json.RootElement.GetProperty("ok").GetBoolean() ? 0 : 1;
+            if (json.RootElement.GetProperty("ok").GetBoolean()) return 0;
+            // Exit 3: the recorder is live with another session; the server reads it as "that recording ended".
+            return json.RootElement.TryGetProperty("error", out var error) && error.GetString() == SessionMismatch ? 3 : 1;
         }
         catch (Exception) { Console.WriteLine("{\"ok\":false,\"error\":\"Capture is not running or did not respond\"}"); return 1; }
     }

@@ -1,6 +1,6 @@
 // Real browser against actual UI files, synthetic API only: the header delivery pill
 // names the concrete problem and offers one action; closed failures show nothing.
-const { chromium } = require('playwright');
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');  // as the other release UI scripts
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -80,7 +80,9 @@ const auth = { ...healthy, state: 'action_required',
     assert.equal(await page.locator('#archive-dialog').isHidden(), true, 'Auth pill goes straight to settings');
 
     await reload(undelivered(weekly));
-    await pillIs('Отчет по встрече «Weekly sync» от 16 октября не отправлен');
+    await pillIs('Проверить отправку отчета');
+    // The pill is a few words; the meeting's title and date are in its tooltip and in the dialog it opens.
+    assert.match(await pill.getAttribute('title'), /Отчет по встрече «Weekly sync» от 16 октября не отправлен/);
     const all = await page.evaluate(() => document.body.innerText);
     assert.doesNotMatch(all, /проблем:|issues:/, 'No generic issue counter anywhere');
     await pill.click();
@@ -99,7 +101,7 @@ const auth = { ...healthy, state: 'action_required',
     // sign-in offers the sign-in fix instead of "check the internet".
     jobReport = { mail_status: 'failed', mail_error: { provider: 'gws', reason: 'authorization_expired' } };
     await reload(undelivered({ ...weekly, uncertain: true }));
-    await pillIs('Отчет по встрече «Weekly sync» от 16 октября мог не дойти');
+    await pillIs('Отчет мог не дойти');
     await pill.click();
     await page.locator('#delivery-undelivered').filter({ hasText: 'Возможно, он уже пришел' }).waitFor({ timeout: 3000 });
     await page.locator('#delivery-undelivered button').click();
@@ -112,7 +114,7 @@ const auth = { ...healthy, state: 'action_required',
     // MEETONTRACK-93: a resend still sending at the 5-minute deadline may yet arrive: never "Could not send".
     jobReport = null;
     await reload(undelivered(weekly));
-    await pillIs('Отчет по встрече «Weekly sync» от 16 октября не отправлен');
+    await pillIs('Проверить отправку отчета');
     await pill.click();
     await page.locator('#delivery-undelivered button').click();
     while (!heldPoll) await new Promise(resolve => setTimeout(resolve, 50));
@@ -124,7 +126,7 @@ const auth = { ...healthy, state: 'action_required',
 
     // MEETONTRACK-92: a report whose file is gone offers to create it again, not "check the archive".
     await reload(undelivered({ ...weekly, missing: true }));
-    await pillIs('Отчет по встрече «Weekly sync» от 16 октября не найден');
+    await pillIs('Отчет не найден');
     await pill.click();
     const recreate = page.locator('#delivery-undelivered button');
     await recreate.waitFor({ timeout: 3000 });
@@ -136,7 +138,7 @@ const auth = { ...healthy, state: 'action_required',
 
     language = 'en';
     await reload(undelivered(weekly));
-    await pillIs('Report for “Weekly sync” on October 16 was not sent');
+    await pillIs('Review failed delivery');
     assert.deepEqual(errors, [], 'UI must run without JavaScript errors');
     console.log('PASS: closed failure silent, plural count, auth to settings, named report + one resend, English');
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

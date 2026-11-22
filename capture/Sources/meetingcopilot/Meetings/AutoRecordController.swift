@@ -44,11 +44,18 @@ final class AutoRecordController {
     private let loadSettings: () -> Config.AutoRecordSettings
     private let checkMic: (Config.AutoRecordSettings) -> MicActivityMonitor.Result
     private let now: () -> Date
+    private let skips: () -> [SkipRecording.Call]?
+    private let microphone: @MainActor () -> SetupPermissions.State
+    private let notifyMicrophoneMissing: @MainActor () -> Void
     private var timer: Timer?
     private var micActiveSince: Date?
     private var micIdleSince: Date?
     private var handledEventIDs = Set<String>()
     private var standingDownUntilCallEnds = false
+    /// The start of the stored call skipped while the mic was held. That call
+    /// stays skipped, even past its scheduled end, until the call app lets go
+    /// of the mic, or until Undo in MeetOnTrack removes it from the file.
+    private var skippedCallStart: Date?
     private var lastCalendarCheck = Date.distantPast
     private var currentEventEnd: Date?
 
@@ -71,13 +78,19 @@ final class AutoRecordController {
         checkMic: @escaping (Config.AutoRecordSettings) -> MicActivityMonitor.Result = {
             MicActivityMonitor.check(callApps: $0.callApps, ignoring: $0.ignoreApps)
         },
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        skips: @escaping () -> [SkipRecording.Call]? = { SkipRecording.calls() },
+        microphone: @escaping @MainActor () -> SetupPermissions.State = SetupPermissions.microphone,
+        notifyMicrophoneMissing: @escaping @MainActor () -> Void = Notifications.microphoneMissing
     ) {
         self.enabled = settings.enabled
         self.calendar = calendar
         self.loadSettings = loadSettings
         self.checkMic = checkMic
         self.now = now
+        self.skips = skips
+        self.microphone = microphone
+        self.notifyMicrophoneMissing = notifyMicrophoneMissing
     }
 
     func start() {
@@ -157,6 +170,21 @@ final class AutoRecordController {
             standingDownUntilCallEnds = false
         }
 
+        // The person chose in MeetOnTrack not to record this call. Manual
+        // starts never come through here, so they still work.
+        // nil: the file could not be read, which is not an Undo.
+        let calls = skips()
+        if let latched = skippedCallStart,
+           calls.map({ !$0.contains(where: { $0.start == latched }) }) == true
+            || !mic.active && (micIdleSince.map { now.timeIntervalSince($0) } ?? 0) > settings.stopDelay {
+            skippedCallStart = nil
+        }
+        if let start = skippedCallStart ?? calls?.first(where: { $0.covers(now) })?.start {
+            if mic.active { skippedCallStart = start }
+            lastDecision = localised("skipped: chosen in MeetOnTrack", "пропуск: выбрано в MeetOnTrack")
+            return
+        }
+
         if settings.calendar, let calendar,
            now.timeIntervalSince(lastCalendarCheck) >= Self.calendarInterval {
             lastCalendarCheck = now
@@ -168,7 +196,7 @@ final class AutoRecordController {
                     localised("started from calendar: ", "начала по календарю: ") + event.title
                 // The call app usually grabs the mic a moment after the event
                 // starts, so it may be nil here — the calendar carries the name.
-                startRecording?(.calendar, MeetingContext(
+                begin(.calendar, MeetingContext(
                     meeting: event, app: mic.names.first, appFamilies: mic.families))
                 return
             }
@@ -199,8 +227,16 @@ final class AutoRecordController {
         lastDecision = localised(
             "started from mic activity (\(mic.names.first ?? "call app"))",
             "начала по микрофону (\(mic.names.first ?? "приложение звонка"))")
-        startRecording?(.micActivity, MeetingContext(
+        begin(.micActivity, MeetingContext(
             meeting: event, app: mic.names.first, appFamilies: mic.families))
+    }
+
+    /// An automatic start. Without microphone access only the far end is
+    /// recorded, which is still worth keeping, so it starts anyway and the
+    /// person is told; "not asked yet" is left to the system prompt.
+    private func begin(_ trigger: RecordingSession.Trigger, _ context: MeetingContext) {
+        if microphone() == .denied { notifyMicrophoneMissing() }
+        startRecording?(trigger, context)
     }
 
     // MARK: - stop

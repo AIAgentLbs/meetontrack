@@ -61,7 +61,6 @@ const elements = {
   send: document.querySelector("#send-button"),
   note: document.querySelector("#note-button"),
   help: document.querySelector("#composer-help"),
-  refresh: document.querySelector("#refresh-button"),
   journal: document.querySelector("#journal"),
   callPlan: document.querySelector("#call-plan"),
   callBoard: document.querySelector("#call-board"),
@@ -88,22 +87,187 @@ const elements = {
 
 const translations = {
   ru: {
+    "home.title": "Ближайшие встречи",
+    "home.today": "Сегодня, {date}",
+    "home.tomorrow": "Завтра, {date}",
+    "home.in_minutes": "через {n} мин",
+    "home.in_hours": "через {h} ч {m} мин",
+    "home.in_hours_whole": "через {h} ч",
+    "home.now": "идет сейчас",
+    "home.goal": "Цель:",
+    "home.sources.one": "Откуда это: {n} источник",
+    "home.sources.few": "Откуда это: {n} источника",
+    "home.sources.many": "Откуда это: {n} источников",
+    "home.sources.other": "Откуда это: {n} источника",
+    "home.open_memo": "Открыть мемо",
+    "home.hide_memo": "Свернуть мемо",
+    "home.call_link": "Перейти в звонок",
+    "home.skip": "Не записывать этот звонок",
+    "home.skipped": "Этот звонок не будет записан",
+    "home.unskip": "Вернуть",
+    "home.preparing_since": "Мемо готовится с {time},",
+    "home.preparing_note": "обычно 2-3 минуты. Появится здесь само.",
+    "home.preparing": "Мемо готовится,",
+    "home.preparing_late": "дольше обычного. Появится здесь само.",
+    "home.nothing_found": "О собеседнике в ваших источниках пока ничего нет.",
+    "home.connect_mail": "Подключить почту",
+    "home.connect_folder": "Подключить папку",
+    "home.failed": "Мемо не получилось: {reason}.",
+    "home.reason.ai_no_answer": "ИИ не ответил",
+    "home.reason.ai_needs_choice": "не выбран ИИ",
+    "home.reason.timeout": "ИИ не успел",
+    "home.reason.error": "ошибка при подготовке",
+    "home.retry_at": "Ничего делать не нужно, попробуем снова в {time}.",
+    "home.retry": "Повторить",
+    "home.stale": "Не удалось обновить звонки, показаны данные на {time}.",
+    "home.retry_now": "Повторить сейчас",
+    "home.choose_ai": "Выбрать ИИ",
+    "home.action_failed": "Не получилось. Попробуйте еще раз.",
+    "home.cannot_skip": "Программа записи не умеет пропускать звонок. Обновите приложение.",
+    "home.recording_active": "Сейчас идет запись. Остановите ее, чтобы не записывать звонок.",
+    "home.more_people": "и еще {n}",
+    "home.tool_title": "Нет программы для чтения календаря",
+    "home.tool_text": "Чтобы читать Google Календарь, нужна программа gws от Google.",
+    "home.tool_link": "Как ее установить",
+    "home.check_again": "Проверить снова",
+    "home.calendar_off_title": "Календарь не подключен",
+    "home.calendar_off_text": "Звонки и мемо появятся после подключения.",
+    "home.calendar_connect": "Подключить календарь",
+    "home.empty_title": "Больше звонков сегодня и завтра нет",
+    "home.empty_text_wide": "Прошедшие звонки - вверху.",
+    "home.empty_text_narrow": "Прошедшие звонки - в меню.",
+    "home.load_failed_title": "Не удалось загрузить звонки",
+    "home.load_failed_text": "Попробуем снова через минуту или нажмите Повторить.",
+    "call.ask": "Спросите",
+    "call.say": "Скажите",
+    "call.clarify": "Уточните",
+    "call.asks": "{name} спрашивает",
+    "call.asks_plain": "Собеседник спрашивает",
+    "call.answer": "Ответьте",
+    "call.own": "Ответ на ваш вопрос",
+    "call.just_now": "только что",
+    "call.min_ago": "{n}\u00a0мин назад",
+    "call.for_sec": "{n}\u00a0сек",
+    "call.for_min": "{n}\u00a0мин",
+    "call.from_memo": "Из подготовки, вопрос {n}",
+    "call.source": "Источник: {text}",
+    "call.said": "{name}: {quote}",
+    "call.per": "По {source}",
+    "call.board_details": "Источник",
+    "call.where": "Откуда это",
+    "call.where_hide": "Свернуть",
+    "call.heard_wait": "Готовлю ответ, обычно это несколько секунд.",
+    "call.heard_later": "Ответ появится позже: первые минуты автоматической записи ИИ не разбирает.",
+    "call.waiting_heard": "Слушаю разговор. Подсказка появится здесь, когда будет что сказать или спросить.",
+    "call.waiting": "Запись идет. Подсказка появится здесь, когда будет что сказать или спросить.",
+    "call.stopped": "Запись остановлена.",
+    "call.saved": "Запись сохранена.",
+    "call.stopped_until": "Через {time} можно будет открыть итоги, до тех пор запись можно продолжить.",
+    "call.open_results": "Открыть итоги звонка",
+    "call.board_mine": "Спросить у собеседника",
+    "call.board_incoming": "Вопросы к вам",
+    "call.board_empty_incoming": "Здесь появятся вопросы собеседника из расшифровки.",
+    "call.transcript_empty": "Жду расшифровку",
+    "call.transcript_failed": "Не удалось обновить расшифровку",
+    "call.ask_waiting": "Один вопрос уже ждет ответа.",
+    "call.ask_changed": "Вопрос не отправлен: звонок сменился.",
+    "call.return_question": "Вернуть вопрос",
+    "call.no_source": "Без источника - проверьте, прежде чем обещать",
+    "call.stop_pending": "Запись на паузе. Подсказок по этому звонку больше не будет.",
+    "call.waiting_help": "Свой вопрос можно задать внизу. Весь разговор текстом в «Расшифровке», вопросы и риски на «Доске».",
+    "call.paused": "Подсказки на паузе: ИИ не ответил.",
+    "call.paused_retry": "Запись идет, следующая попытка через {n}\u00a0мин.",
+    "call.paused_next": "Запись идет, следующая попытка будет со следующим анализом.",
+    "call.other_lost": "Собеседника не слышно {time}",
+    "call.other_lost_now": "Собеседника не слышно",
+    "call.other_lost_text": "Вас слышно. Когда звук вернется, подсказки пойдут снова.",
+    "call.you_lost": "Вас не слышно {time}",
+    "call.you_lost_now": "Вас не слышно",
+    "call.you_lost_text": "Собеседника слышно. Ваши слова не попадут в расшифровку, пока микрофон не заработает.",
+    "action.sound_output": "Выбрать, откуда слушать звонок",
+    "call.earlier": "Прошлые подсказки ({n})",
+    "call.earlier_hide": "Скрыть прошлые подсказки",
+    "call.transcript": "Расшифровка",
+    "call.board": "Доска",
+    "call.board_note": "вопросы, риски и проверка фактов",
+    "call.transcript_note": "весь разговор текстом",
+    "call.more": "Еще",
+    "call.ask_placeholder": "Спросить про звонок",
+    "call.ask_label": "Вопрос про этот звонок",
+    "call.send": "Отправить",
+    "call.open_chat": "Все вопросы и ответы",
+    "call.back": "Вернуться к звонку",
+    "call.check_ai": "Проверить ИИ в настройках",
+    "call.you": "Вы",
+    "call.other": "Собеседник",
+    "call.heard": "слышно",
+    "call.not_heard": "не слышно",
+    "call.checking": "проверяю",
+    "call.last_phrase": "{who}: {text}",
     "meeting.connecting": "Подключение к записи...",
     "status.checking": "Проверка",
-    "nav.repositories": "Контекст встречи",
-    "nav.meetings": "История встреч",
+    "shell.home": "Главная",
+    "shell.past_calls": "Прошедшие звонки",
+    "shell.menu": "Меню",
+    "shell.settings": "Настройки",
+    "shell.settings_note": "ИИ, распознавание речи, источники, куда отправлять отчет",
+    "shell.sources": "Папки с файлами",
+    "shell.sources_note": "на компьютере и в Google Диске",
+    "shell.getting_started": "Начало работы",
+    "shell.updates": "Обновления",
+    "shell.notes": "Заметки к звонку «{title}»",
+    "shell.notes_note": "ваш текст, который учтут подсказки",
+    "shell.keys": "Клавиши",
+    "shell.key.memo": "Открыть мемо следующего звонка",
+    "shell.key.join": "Перейти в звонок",
+    "shell.key.skip": "Не записывать следующий звонок",
+    "status.waiting": "Запись включится сама, когда начнется звонок",
+    "status.waiting_at": "Ждет звонка в {time}, запись включится сама",
+    "status.waiting_tomorrow_at": "Ждет звонка завтра в {time}, запись включится сама",
+    "status.waiting_tomorrow_at_manual": "Ждет звонка завтра в {time}",
+    "status.waiting_manual": "Ждет звонка",
+    "status.disconnected": "Нет связи с MeetOnTrack, пробуем снова",
+    "status.waiting_at_manual": "Ждет звонка в {time}",
+    "status.recording": "Запись",
+    "status.mic_missing": "Нет доступа к микрофону: запись в {time} не включится",
+    "status.mic_missing_mac": "Нет доступа к микрофону: ваш голос в звонке в {time} не запишется",
+    "status.call_audio_missing": "Нет доступа к звуку звонка: запись в {time} будет без собеседника",
+    "status.not_recording": "Запись не идет: {reason}",
+    "status.reason.mic": "нет доступа к микрофону",
+    "status.reason.recorder": "программа записи не запущена",
+    "status.reason.not_detected": "звонок не замечен",
+    "status.reason.paused": "запись на паузе",
+    "status.reason.stalled": "звук перестал записываться",
+    "status.reason.stale": "нет свежих данных от программы записи",
+    "action.back_to_call": "Вернуться к текущему звонку",
+    "action.start": "Начать запись",
+    "action.open_mic": "Открыть настройки микрофона",
+    "action.open_call_audio": "Открыть настройки записи звука",
+    "action.open_recorder": "Открыть программу записи",
+    "action.how_to_fix": "Как исправить",
+    "action.stop": "Остановить запись",
+    "action.stop_short": "Остановить",
+    "action.resume": "Продолжить запись",
+    "action.resume_short": "Продолжить",
+    "status.stopped": "Остановлено {time}",
+    "status.stopped_final": "Запись остановлена.",
+    "status.left": "еще {n}\u00a0сек",
+    "status.error.meeting_changed": "Звонок уже сменился, обновите страницу",
+    "status.error.too_late": "Запись уже остановлена",
+    "status.error.stop_failed": "Запись не остановилась, откройте программу записи",
+    "status.error.recorder_outdated": "Запись не остановилась. Обновите программу записи",
+    "status.error.resume_failed": "Запись не продолжилась, откройте программу записи",
     "language.label": "Язык интерфейса",
     "aria.transcript_view": "Вид левой панели",
     "aria.copilot_view": "Режим правой панели",
     "aria.journal_filter": "Фильтр журнала",
     "aria.workspace_filter": "Чат и сигналы встречи",
-    "common.refresh": "Обновить",
     "nav.swap_panels": "Поменять панели",
     "common.close": "Закрыть",
     "common.cancel": "Отмена",
-    "transcript.heading": "Ход созвона",
+    "transcript.heading": "Расшифровка",
     "transcript.loading": "Получаю последние реплики",
-    "transcript.tab": "Стенограмма",
+    "transcript.tab": "Расшифровка",
     "transcript.copy": "Копировать диалог",
     "transcript.hide": "Скрыть",
     "transcript.hide_label": "Скрыть расшифровку",
@@ -115,7 +279,7 @@ const translations = {
     "transcript.translation_hint": "Последний перевод: {time}. Новые реплики на английском не переводятся.",
     "transcript.translation_needs_ai": "EN: выберите ИИ для перевода в разделе «Начать работу»",
     "frames.tab": "Кадры",
-    "speakers.open": "Имена",
+    "speakers.open": "Изменить имена",
     "speakers.title": "Участники и реплики",
     "speakers.help": "Имя меняется во всей встрече. Если два голоса слиплись, выберите реплики и назначьте участника.",
     "speakers.rename_title": "Переименовать во всей встрече",
@@ -127,7 +291,7 @@ const translations = {
     "speakers.new_name": "Или новое имя",
     "speakers.assign": "Назначить выбранным",
     "speakers.rename": "Переименовать все",
-    "speakers.saved": "Сохранено. Имена обновлены в стенограмме и архиве; отчет обновится автоматически.",
+    "speakers.saved": "Сохранено. Имена обновлены в расшифровке и архиве; отчет обновится автоматически.",
     "speakers.pending": "Разметить",
     "speakers.edit_hint": "Нажмите, чтобы переименовать спикера или изменить автора реплики",
     "speaker.me": "Я",
@@ -136,7 +300,7 @@ const translations = {
     "transcript.capture_lost": "Потеря аудио",
     "transcript.capture_lost_hint": "Системная дорожка пропала. На отмеченном участке нельзя уверенно определить, кто говорит.",
     "speaker.others": "Остальные",
-    "transcript.empty_title": "Жду стенограмму",
+    "transcript.empty_title": "Жду расшифровку",
     "transcript.empty_text": "MeetOnTrack передает локальную расшифровку примерно раз в секунду.",
     "frames.local_note": "Кадры хранятся только локально вместе с записью.",
     "frames.capture": "Снять кадр сейчас",
@@ -146,12 +310,10 @@ const translations = {
     "copilot.heading": "Карта звонка и помощник",
     "view.chat": "Чат",
     "plan.tab": "Подготовка",
-    "plan.links": "Материалы",
+    "plan.links": "Источники",
     "plan.memo": "Мемо перед встречей",
     "plan.talk_track": "Шпаргалка ведущего",
     "plan.memo_open": "Открыть документ мемо",
-    "plan.agenda": "Встречи сегодня и завтра",
-    "plan.no_memo": "Нет мемо",
     "plan.unscheduled": "Подготовка без события в календаре",
     "plan.question": "Вопросы",
     "plan.risk": "Риски",
@@ -199,7 +361,7 @@ const translations = {
     "age.seconds": "{value} сек назад",
     "age.minutes": "{value} мин назад",
     "age.hours": "{value} ч назад",
-    "status.waiting": "Ожидание записи",
+    "status.waiting_recording": "Ожидание записи",
     "status.live": "Расшифровка идет",
     "status.finished": "Созвон завершен · контекст сохранен",
     "status.model_loading": "Загрузка модели",
@@ -208,7 +370,7 @@ const translations = {
     "status.no_fresh": "Нет свежих реплик",
     "transcript.overloaded_meta": "Расшифровка отстает. Последняя реплика: {age}",
     "transcript.latest_meta": "Последняя реплика: {age}",
-    "transcript.failed": "Не удалось обновить стенограмму",
+    "transcript.failed": "Не удалось обновить расшифровку",
     "speaker.name_hint": "Имя определено по активной рамке Zoom",
     "frames.empty_title": "Кадров пока нет",
     "frames.empty_text": "Во время Zoom MeetOnTrack сохраняет окно примерно раз в 15 секунд.",
@@ -217,7 +379,7 @@ const translations = {
     "frames.speaker_unknown": "Спикер не определен",
     "message.you": "Вы",
     "message.note": "Ваша заметка",
-    "message.thinking": "Ищу в стенограмме и репозиториях",
+    "message.thinking": "Ищу в расшифровке и репозиториях",
     "message.latest": "К последнему ответу",
     "speaker.voice": "Собеседник {value}",
     "speaker.voice_hint": "Голос различен локально по аудио; имя появится, когда Zoom покажет активного участника",
@@ -244,11 +406,11 @@ const translations = {
     "project.all_hint": "Проект не выбран. MeetOnTrack ищет по всем выбранным репозиториям.",
     "project.manual_hint": "Вы выбрали контекст только для этой встречи.",
     "project.auto_hint": "Проект определен по названию или репликам. Вы можете изменить выбор.",
-    "project.choose_title": "Контекст этой встречи",
-    "project.choose_description": "Подключите папки и Google Drive для поиска. Выбор Git-проекта ниже действует только для этой встречи; подключенные источники сохраняются до отключения.",
+    "project.choose_title": "Папки с файлами",
+    "project.choose_description": "Подключите папки на компьютере или Google Диск: в них MeetOnTrack ищет, что известно о собеседнике и теме звонка.",
     "project.loading": "Загружаю варианты…",
     "project.choose_help": "Сейчас поиск идет по {count}. Можно оставить как есть или сузить контекст.",
-    "project.no_meeting": "Начните запись, чтобы выбрать контекст встречи.",
+    "project.no_meeting": "Проект для звонка можно выбрать, когда идет запись. Папки подключаются в любое время.",
     "project.group_modes": "Режим поиска",
     "project.group_projects": "Проекты",
     "project.group_repositories": "Отдельные репозитории",
@@ -258,7 +420,7 @@ const translations = {
     "project.all_detail": "Искать по {count} без привязки к проекту.",
     "project.only_repo": "Только {name}",
     "project.selected": "Выбрано",
-    "project.local_note": "Папки и Google — отдельные источники. Git-репозитории подключать необязательно.",
+    "project.local_note": "Папки и Google Диск подключаются отдельно. Git-репозитории необязательны.",
     "project.edit_repos": "Изменить набор репозиториев",
     "project.saving": "Сохраняю выбор…",
     "ui.disconnected": "UI отключен",
@@ -314,20 +476,185 @@ const translations = {
     "archive.mail_pending": "Автоотправка почты еще не настроена",
   },
   en: {
+    "home.title": "Upcoming meetings",
+    "home.today": "Today, {date}",
+    "home.tomorrow": "Tomorrow, {date}",
+    "home.in_minutes": "in {n} min",
+    "home.in_hours": "in {h} h {m} min",
+    "home.in_hours_whole": "in {h} h",
+    "home.now": "on now",
+    "home.goal": "Goal:",
+    "home.sources.one": "Where this comes from: {n} source",
+    "home.sources.few": "Where this comes from: {n} sources",
+    "home.sources.many": "Where this comes from: {n} sources",
+    "home.sources.other": "Where this comes from: {n} sources",
+    "home.open_memo": "Open memo",
+    "home.hide_memo": "Hide memo",
+    "home.call_link": "Join the call",
+    "home.skip": "Do not record this call",
+    "home.skipped": "This call will not be recorded",
+    "home.unskip": "Undo",
+    "home.preparing_since": "Memo in progress since {time},",
+    "home.preparing_note": "usually 2-3 minutes. It will appear here by itself.",
+    "home.preparing": "Memo in progress,",
+    "home.preparing_late": "longer than usual. It will appear here by itself.",
+    "home.nothing_found": "Nothing about this contact in your sources yet.",
+    "home.connect_mail": "Connect mail",
+    "home.connect_folder": "Connect a folder",
+    "home.failed": "Memo not ready: {reason}.",
+    "home.reason.ai_no_answer": "the AI did not answer",
+    "home.reason.ai_needs_choice": "no AI is chosen",
+    "home.reason.timeout": "the AI ran out of time",
+    "home.reason.error": "something went wrong",
+    "home.retry_at": "Nothing to do, we will try again at {time}.",
+    "home.retry": "Retry",
+    "home.stale": "Could not refresh your calls, showing them as of {time}.",
+    "home.retry_now": "Retry now",
+    "home.choose_ai": "Choose the AI",
+    "home.action_failed": "That did not work. Try again.",
+    "home.cannot_skip": "The recorder cannot skip a call. Update the app.",
+    "home.recording_active": "A recording is in progress. Stop it first to skip this call.",
+    "home.more_people": "and {n} more",
+    "home.tool_title": "The calendar reader is not installed",
+    "home.tool_text": "To read Google Calendar, MeetOnTrack needs gws, a program from Google.",
+    "home.tool_link": "How to install it",
+    "home.check_again": "Check again",
+    "home.calendar_off_title": "The calendar is not connected",
+    "home.calendar_off_text": "Calls and memos appear once it is connected.",
+    "home.calendar_connect": "Connect the calendar",
+    "home.empty_title": "No more calls today or tomorrow",
+    "home.empty_text_wide": "Past calls are in the top bar.",
+    "home.empty_text_narrow": "Past calls are in the menu.",
+    "home.load_failed_title": "Could not load your calls",
+    "home.load_failed_text": "We will try again in a minute, or press Retry.",
+    "call.ask": "Ask",
+    "call.say": "Say",
+    "call.clarify": "Clarify",
+    "call.asks": "{name} asks",
+    "call.asks_plain": "The other side asks",
+    "call.answer": "Answer",
+    "call.own": "Answer to your question",
+    "call.just_now": "just now",
+    "call.min_ago": "{n} min ago",
+    "call.for_sec": "{n}\u00a0sec", // the bar says "sec" too (H1, L3)
+    "call.for_min": "{n} min",
+    "call.from_memo": "From the preparation, question {n}",
+    "call.source": "Source: {text}",
+    "call.said": "{name} said: {quote}",
+    "call.per": "Per {source}",
+    "call.board_details": "Source",
+    "call.where": "Where this comes from",
+    "call.where_hide": "Hide",
+    "call.heard_wait": "The answer is being prepared, usually a few seconds. It will appear here.",
+    "call.heard_later": "The answer comes later: the AI skips the first minutes of an automatic recording.",
+    "call.waiting_heard": "Listening. A hint appears here when there is something to say or ask.",
+    "call.waiting": "Recording. A hint appears here when there is something to say or ask.",
+    "call.stopped": "Recording stopped.",
+    "call.saved": "The recording is saved.",
+    "call.stopped_until": "In {time} you can open the call results, until then you can resume recording.",
+    "call.open_results": "Open the call results",
+    "call.board_mine": "Ask the other side",
+    "call.board_incoming": "Asked of you",
+    "call.board_empty_incoming": "Questions the other side asks appear here.",
+    "call.transcript_empty": "Waiting for the transcript",
+    "call.transcript_failed": "Could not refresh the transcript",
+    "call.ask_waiting": "One question is already waiting for its answer.",
+    "call.ask_changed": "The question was not sent: the call changed.",
+    "call.return_question": "Bring the question back",
+    "call.no_source": "No source - check before you promise",
+    "call.stop_pending": "The recording is paused. No more hints for this call.",
+    "call.waiting_help": "You can ask your own question below. The whole conversation is in Transcript, questions and risks are on the Board.",
+    "call.paused": "Hints paused: the AI did not answer.",
+    "call.paused_retry": "Recording continues, next try in {n}\u00a0min.",
+    "call.paused_next": "Recording continues, the next try comes with the next analysis.",
+    "call.other_lost": "The other side has not been heard for {time}",
+    "call.other_lost_now": "The other side is not heard",
+    "call.other_lost_text": "You are heard. Hints on what the other side says come back once their sound does.",
+    "call.you_lost": "You have not been heard for {time}",
+    "call.you_lost_now": "You are not heard",
+    "call.you_lost_text": "The other side is heard. Your words are not transcribed until the microphone is back.",
+    "action.sound_output": "Choose where to listen to the call from",
+    "call.earlier": "Earlier hints ({n})",
+    "call.earlier_hide": "Hide earlier hints",
+    "call.transcript": "Transcript",
+    "call.board": "Board",
+    "call.board_note": "questions, risks and fact checks",
+    "call.transcript_note": "the whole conversation as text",
+    "call.more": "More",
+    "call.ask_placeholder": "Ask about this call",
+    "call.ask_label": "A question about this call",
+    "call.send": "Send",
+    "call.open_chat": "All questions and answers",
+    "call.back": "Back to the call",
+    "call.check_ai": "Check the AI in settings",
+    "call.you": "You",
+    "call.other": "Other side",
+    "call.heard": "heard",
+    "call.not_heard": "not heard",
+    "call.checking": "checking",
+    "call.last_phrase": "{who}: {text}",
     "meeting.connecting": "Connecting to the recording...",
     "status.checking": "Checking",
-    "nav.repositories": "Meeting context",
-    "nav.meetings": "Meeting history",
+    "shell.home": "Home",
+    "shell.past_calls": "Past calls",
+    "shell.menu": "Menu",
+    "shell.settings": "Settings",
+    "shell.settings_note": "AI, speech recognition, sources, where the report goes",
+    "shell.sources": "File folders",
+    "shell.sources_note": "on this computer and in Google Drive",
+    "shell.getting_started": "Getting started",
+    "shell.updates": "Updates",
+    "shell.notes": "Notes for the call {title}",
+    "shell.notes_note": "your text the hints take into account",
+    "shell.keys": "Keys",
+    "shell.key.memo": "Open the next call's memo",
+    "shell.key.join": "Join the call",
+    "shell.key.skip": "Do not record the next call",
+    "status.waiting": "Recording starts by itself when a call begins",
+    "status.waiting_at": "Waiting for the {time} call, recording starts by itself",
+    "status.waiting_tomorrow_at": "Waiting for tomorrow's {time} call, recording starts by itself",
+    "status.waiting_tomorrow_at_manual": "Waiting for tomorrow's {time} call",
+    "status.waiting_manual": "Waiting for a call",
+    "status.disconnected": "No connection to MeetOnTrack, trying again",
+    "status.waiting_at_manual": "Waiting for the {time} call",
+    "status.recording": "Recording",
+    "status.mic_missing": "No microphone access: the {time} call will not be recorded",
+    "status.mic_missing_mac": "No microphone access: your voice in the {time} call will not be recorded",
+    "status.call_audio_missing": "No access to call audio: the {time} call will be recorded without the other side",
+    "status.not_recording": "Not recording: {reason}",
+    "status.reason.mic": "no microphone access",
+    "status.reason.recorder": "the recorder is not running",
+    "status.reason.not_detected": "the call was not detected",
+    "status.reason.paused": "recording is paused",
+    "status.reason.stalled": "audio stopped being saved",
+    "status.reason.stale": "no fresh data from the recorder",
+    "action.back_to_call": "Back to the current call",
+    "action.start": "Start recording",
+    "action.open_mic": "Open microphone settings",
+    "action.open_call_audio": "Open audio recording settings",
+    "action.open_recorder": "Open the recorder",
+    "action.how_to_fix": "How to fix",
+    "action.stop": "Stop recording",
+    "action.stop_short": "Stop",
+    "action.resume": "Resume recording",
+    "action.resume_short": "Resume",
+    "status.stopped": "Stopped {time}",
+    "status.stopped_final": "Recording stopped.",
+    "status.left": "{n}\u00a0sec left",
+    "status.error.meeting_changed": "The call has changed, reload the page",
+    "status.error.too_late": "The recording has already stopped",
+    "status.error.stop_failed": "The recording did not stop, open the recorder",
+    "status.error.recorder_outdated": "The recording did not stop. Update the recorder",
+    "status.error.resume_failed": "The recording did not resume, open the recorder",
     "language.label": "Interface language",
     "aria.transcript_view": "Left pane view",
     "aria.copilot_view": "Right pane view",
     "aria.journal_filter": "Journal filter",
     "aria.workspace_filter": "Meeting chat and signals",
-    "common.refresh": "Refresh",
     "nav.swap_panels": "Swap panels",
     "common.close": "Close",
     "common.cancel": "Cancel",
-    "transcript.heading": "Live meeting",
+    "transcript.heading": "Transcript",
     "transcript.loading": "Loading the latest utterances",
     "transcript.tab": "Transcript",
     "transcript.copy": "Copy dialogue",
@@ -341,7 +668,7 @@ const translations = {
     "transcript.translation_hint": "Latest translation: {time}. New English utterances are not translated.",
     "transcript.translation_needs_ai": "EN: choose AI for translation in Getting started",
     "frames.tab": "Frames",
-    "speakers.open": "Names",
+    "speakers.open": "Edit names",
     "speakers.title": "Participants and utterances",
     "speakers.help": "A name changes throughout this meeting. If voices were merged, select utterances and assign a participant.",
     "speakers.rename_title": "Rename throughout the meeting",
@@ -372,12 +699,10 @@ const translations = {
     "copilot.heading": "Call map & assistant",
     "view.chat": "Chat",
     "plan.tab": "Preparation",
-    "plan.links": "Materials",
+    "plan.links": "Sources",
     "plan.memo": "Pre-call memo",
     "plan.talk_track": "Talk track",
     "plan.memo_open": "Open memo document",
-    "plan.agenda": "Meetings today and tomorrow",
-    "plan.no_memo": "No memo",
     "plan.unscheduled": "Preparation without a calendar event",
     "plan.question": "Questions",
     "plan.risk": "Risks",
@@ -425,7 +750,7 @@ const translations = {
     "age.seconds": "{value}s ago",
     "age.minutes": "{value}m ago",
     "age.hours": "{value}h ago",
-    "status.waiting": "Waiting for recording",
+    "status.waiting_recording": "Waiting for recording",
     "status.live": "Transcription live",
     "status.finished": "Meeting ended · context retained",
     "status.model_loading": "Loading model",
@@ -470,11 +795,11 @@ const translations = {
     "project.all_hint": "No project is selected. MeetOnTrack searches all selected repositories.",
     "project.manual_hint": "You selected this context for this meeting only.",
     "project.auto_hint": "The project was inferred from the meeting title or transcript. You can change it.",
-    "project.choose_title": "Context for this meeting",
-    "project.choose_description": "Connect folders and Google Drive for search. The Git project selection below applies to this meeting; connected sources remain active until disconnected.",
+    "project.choose_title": "File folders",
+    "project.choose_description": "Connect folders on this computer or Google Drive: MeetOnTrack looks in them for what is known about the people and the topic of the call.",
     "project.loading": "Loading choices…",
     "project.choose_help": "MeetOnTrack currently searches {count}. Keep this scope or narrow it.",
-    "project.no_meeting": "Start a recording to choose meeting context.",
+    "project.no_meeting": "You can choose a project for the call while it is recorded. Folders can be connected at any time.",
     "project.group_modes": "Search mode",
     "project.group_projects": "Projects",
     "project.group_repositories": "Individual repositories",
@@ -484,7 +809,7 @@ const translations = {
     "project.all_detail": "Search {count} without choosing a project.",
     "project.only_repo": "Only {name}",
     "project.selected": "Selected",
-    "project.local_note": "Folders and Google are separate sources. Git repositories are optional.",
+    "project.local_note": "Folders and Google Drive are connected separately. Git repositories are optional.",
     "project.edit_repos": "Change repository set",
     "project.saving": "Saving selection…",
     "ui.disconnected": "UI disconnected",
@@ -556,6 +881,17 @@ elements.swapPanels.addEventListener("click", () => {
 });
 applyPanelOrder();
 
+// Focus goes back to the control that opened an overlay; a control inside the closed menu hands it to Menu.
+function returnFocus(opener) {
+  (opener?.getClientRects().length ? opener : document.querySelector("#menu-button")).focus();
+}
+// A closed dialog gives focus back to its opener: when that was a menu item, focus would fall to the page.
+// The browser restores that focus after the close event, so the check waits a task.
+document.addEventListener("close", () => setTimeout(() => {
+  const active = document.activeElement;
+  if (!active || active === document.body || !active.getClientRects().length) returnFocus(null);
+}), true);
+
 function t(key, variables = {}) {
   const template = translations[uiLanguage][key] || translations.ru[key] || key;
   return Object.entries(variables).reduce(
@@ -579,6 +915,8 @@ function plainError(error) {
   if (code) {
     const known = translations[uiLanguage][`error.${code}`];
     if (known && (uiLanguage === "ru" || technical(detail))) return known;
+    // A code with no Russian line: the detail is the server's English, so Russian gets the plain AI failure.
+    if (uiLanguage === "ru") return t("error.AI_FAILED");
     return technical(detail) ? t("error.generic") : detail;
   }
   if (!error?.status && ["TypeError", "TimeoutError", "AbortError"].includes(error?.name)) return t("error.unreachable");
@@ -623,14 +961,19 @@ function applyLanguage() {
   const languageSelect = document.querySelector("#interface-language");
   if (languageSelect) languageSelect.value = uiLanguage;
   const googleAccount = document.querySelector("#google-account");
-  if (googleAccount?.dataset.auth) googleAccount.textContent = googleAccount.dataset.auth === "connected"
-    ? t("google.account", {account: googleAccount.dataset.account || "gws"}) : t("google.auth");
+  if (googleAccount?.dataset.auth) googleAccountLine(googleAccount, false);
 }
 
 let transcriptSignature = "";
 let renderedMessages = "";
 let requestBusy = false;
 let autoAnalysisPrimed = false;
+let analysisSkipped = null; // the meeting whose last automatic analysis the server skipped as a short automatic recording
+let heardPrimed = ""; // the heard question the last automatic analysis was started for
+// After an urgent request the server skipped (inside its 15 s gap), the time from which the next
+// poll asks again while a heard question still waits, even if the transcript has not changed.
+let urgentRetryAt = 0;
+const URGENT_GAP_MS = 15000;
 let journalSignature = "";
 let journalFilter = "notes";
 let repositoryCatalog = [];
@@ -660,7 +1003,7 @@ let recognitionResumeError = "";
 let noteBusy = false;
 let chatPinnedToLatest = true;
 Object.assign(translations.en, {
-  "nav.meetings": "Meetings", "archive.title": "Meetings",
+  "archive.title": "Meetings",
   "library.search": "Search titles, participants and content", "library.return": "Return to current call",
   "library.hide": "Hide library", "library.no_results": "No meetings match this search.",
   "library.recording": "Recording",
@@ -683,7 +1026,7 @@ Object.assign(translations.en, {
   "library.rebuild_failed": "Could not build the analysis. Check AI access in Getting started; it is retried automatically."
 });
 Object.assign(translations.ru, {
-  "nav.meetings": "Встречи", "archive.title": "Встречи",
+  "archive.title": "Встречи",
   "library.search": "Поиск по названию, участникам и содержимому", "library.return": "Вернуться к текущему звонку",
   "library.hide": "Скрыть историю", "library.no_results": "По этому запросу встречи не найдены.",
   "library.recording": "Записывается",
@@ -708,7 +1051,6 @@ Object.assign(translations.ru, {
 let archiveMeetings = [];
 let selectedArchiveMeeting = "";
 let libraryCallActive = null;
-let archiveAutomatic = false;
 let archiveRequest = 0;
 let archiveDetailRequest = 0;
 let archiveAbort;
@@ -818,6 +1160,9 @@ Object.assign(translations.ru, {
   "delivery.dismiss": "Прочитано", "delivery.dismiss_failed": "Не удалось сохранить. Повторите.",
   "delivery.local_note": "Запись и отчет остаются локально. Ошибки доставки не останавливают звонок.",
   "delivery.auth_pill": "{channel}: войдите снова", "delivery.open_settings": "Открыть настройки",
+  "delivery.pill.undelivered": "Проверить отправку отчета", "delivery.pill.unsure": "Отчет мог не дойти",
+  "delivery.pill.missing": "Отчет не найден", "delivery.pill.failed": "Отчет не создан",
+  "delivery.pill.nopdf": "PDF отчета не создан", "delivery.pill.final": "Отчет ждет расшифровку",
   "delivery.undelivered.title_date": "Отчет по встрече «{title}» от {date} не отправлен",
   "delivery.undelivered.title": "Отчет по встрече «{title}» не отправлен",
   "delivery.undelivered.date": "Отчет по встрече от {date} не отправлен",
@@ -889,6 +1234,9 @@ Object.assign(translations.en, {
   "delivery.dismiss": "Mark as read", "delivery.dismiss_failed": "Could not save. Try again.",
   "delivery.local_note": "Recordings and reports stay locally. Delivery errors do not interrupt the call.",
   "delivery.auth_pill": "{channel}: sign in again", "delivery.open_settings": "Open settings",
+  "delivery.pill.undelivered": "Review failed delivery", "delivery.pill.unsure": "Report may not have arrived",
+  "delivery.pill.missing": "Report not found", "delivery.pill.failed": "Report not created",
+  "delivery.pill.nopdf": "Report PDF not created", "delivery.pill.final": "Report waits for the transcript",
   "delivery.undelivered.title_date": "Report for “{title}” on {date} was not sent",
   "delivery.undelivered.title": "Report for “{title}” was not sent",
   "delivery.undelivered.date": "Report for the meeting on {date} was not sent",
@@ -983,11 +1331,15 @@ Object.assign(translations.en, {
   "recognition.unverified": "Cannot verify recording or transcription: no fresh response from the app. Audio recording was not restarted.",
 });
 
+// A recording claim needs a capture check under 20 s old from a server that still answers (shell.js uses it too).
+const recordingFresh = (health, now = Date.now()) =>
+  !stateConnectionFailed && Number.isFinite(health?.checked_at) && now / 1000 - health.checked_at < 20;
+
 function renderRecordingHealth(health = {}) {
   recordingHealth = health;
   const capture = health.capture;
   const matched = health.meeting_id && health.meeting_id === (activeTranscript?.physical_meeting_id || activeTranscript?.meeting_id);
-  const fresh = !stateConnectionFailed && Number.isFinite(health.checked_at) && Date.now() / 1000 - health.checked_at < 20;
+  const fresh = recordingFresh(health);
   elements.newMeeting.disabled = boundaryBusy || !matched || !fresh || !capture?.audio_recording;
   elements.captureStatus.hidden = !matched || !capture;
   elements.captureStatus.classList.toggle("live", Boolean(fresh && capture?.audio_recording));
@@ -1044,13 +1396,16 @@ function speakerReviewText(review) {
   return t("speaker_review", {count: (review.segment_ids || []).length, names: names ? `; ${names}` : ""});
 }
 
+const deliveryFamily = item => (item.failed?.fallback === "html" ? "nopdf" : item.failed ? "failed" : item.missing ? "missing"
+  : item.final_wait ? "final" : item.uncertain ? "unsure" : "undelivered");
+
 function undeliveredLabel(item) {
   const started = new Date(item.started_at || "");
   const values = {
     title: item.title || "",
     date: Number.isNaN(started.getTime()) ? "" : started.toLocaleDateString(uiLanguage, { day: "numeric", month: "long" }),
   };
-  const family = item.failed?.fallback === "html" ? "nopdf" : item.failed ? "failed" : item.missing ? "missing" : item.final_wait ? "final" : item.uncertain ? "unsure" : "undelivered";
+  const family = deliveryFamily(item);
   return t(`delivery.${family}.${["title", "date"].filter(key => values[key]).join("_") || "plain"}`, values);
 }
 
@@ -1139,13 +1494,14 @@ function renderDeliveryHealth(health = {}) {
   // The pill names the concrete problem; automatic retries are not the person's problem.
   const problems = [];
   if (authChannels.length) problems.push(t("delivery.auth_pill", { channel: authChannels.map(key => deliveryChannelNames[key]).join(", ") }));
-  if (undelivered.length === 1) problems.push(undeliveredLabel(undelivered[0]));
+  // A few words that never get cut; the meeting's title and date are in the dialog the pill opens.
+  if (undelivered.length === 1) problems.push(t(`delivery.pill.${deliveryFamily(undelivered[0])}`));
   else if (undelivered.length) {
     // Never state an unknown outcome as a confirmed failure.
     const family = undelivered.some(item => item.uncertain) ? "unsure_many" : "undelivered_many";
     problems.push(t(`delivery.${family}.${new Intl.PluralRules(uiLanguage).select(undelivered.length)}`, { count: undelivered.length }));
   }
-  elements.deliveryAlert.hidden = !Object.keys(channels).length;
+  elements.deliveryAlert.hidden = !problems.length;
   elements.deliveryAlert.dataset.state = problems.length ? "action_required" : "idle";
   elements.deliveryAlert.dataset.action = authChannels.length && !undelivered.length ? "settings" : "archive";
   elements.deliveryAlert.textContent = problems.join(" · ") || t("delivery.button");
@@ -1221,7 +1577,7 @@ function renderDeliveryHealth(health = {}) {
     row.append(value);
     fragment.append(row);
   }
-  elements.deliveryAlert.title = [...problems, ...hints].join("\n");
+  elements.deliveryAlert.title = [...problems, ...undelivered.map(undeliveredLabel), ...hints].join("\n");
   elements.deliveryChannels.replaceChildren(fragment);
   elements.deliverySummary.hidden = !Object.keys(channels).length;
   const notices = (health.notifications || []).filter(item => item.id > deliveryAcknowledgedThrough);
@@ -1262,7 +1618,7 @@ Object.assign(translations.ru, {
   "board.details": "Основание и источник", "board.prepared": "Подготовка", "board.live": "По ходу звонка",
   "board.to_me": "Ко мне", "board.general": "Общий вопрос", "board.risk": "Риск", "board.objection": "Возражение",
   "board.empty.mine": "Здесь появятся вопросы из подготовки и подсказки, что спросить.",
-  "board.empty.incoming": "Здесь появятся вопросы собеседников из стенограммы.",
+  "board.empty.incoming": "Здесь появятся вопросы собеседников из расшифровки.",
   "board.empty.risks": "Здесь появятся риски и возражения из подготовки и разговора.",
   "board.waiting": "Пункты появятся по мере анализа разговора.",
   "board.filter": "Показывать пункты со статусом",
@@ -1282,6 +1638,125 @@ Object.assign(translations.en, {
   "board.filter": "Show items with status",
   "board.filter_none": "All statuses are hidden. Turn at least one status on above.",
   "board.filter_empty": "No items with the selected statuses.",
+});
+
+// After (after.js): the send block and the board's memo line.
+Object.assign(translations.ru, {
+  "after.send.draft": "Отчет уйдет сам, когда будет готова полная расшифровка, обычно через 2-3 минуты.",
+  "after.send.send_now_pending": "Отчет уйдет, как только будет готова полная расшифровка.",
+  "after.send.preparing": "Отчет готовится.",
+  "after.send.showing": "Итог уточнен по полной расшифровке. Отчет уйдет через 30 секунд.",
+  "after.send.changes": "Отчет ждет ваших правок и уйдет через 30 секунд после последней.",
+  "after.send.sending": "Отчет отправляется.",
+  "after.send.held": "Отчет не уйдет сам. Он уйдет, только когда вы нажмете «Отправить сейчас».",
+  "after.send.sent": "Отчет отправлен.",
+  "after.send.edited": "Вы изменили отчет после отправки.",
+  "after.send.failed": "Отчет дошел не везде.",
+  "after.send.no_channels": "Отправка отчетов не настроена. Отчет сохранен на этом компьютере.",
+  "after.rule.changes": "Правки итога, шагов или доски задерживают отправку на 30 секунд.",
+  "after.rule.keep": "Уточненный итог не заменяет ваш текст.",
+  "after.to": "Получите вы: {list}. Собеседнику отчет не уходит.", "after.to_sent": "Получили вы: {list}. Собеседнику отчет не ушел.",
+  "after.to.email": "почта {to}", "after.to.email_plain": "почта", "after.to.telegram": "Telegram ({to})", "after.to.telegram_me": "Telegram (Избранное)",
+  "after.to.twenty": "заметка в CRM", "after.to.twenty_named": "заметка в CRM, карточка {to}", "after.to.drive": "копия в Google Drive",
+  "after.channel.email": "Почта", "after.channel.telegram": "Telegram", "after.channel.twenty": "CRM", "after.channel.drive": "Google Drive",
+  "after.ch.sent": "{channel}: отправлено в {time}", "after.ch.waiting": "{channel}: ждет", "after.ch.held": "{channel}: не отправляется",
+  "after.ch.failed": "{channel}: не доставлено, следующая попытка в {time}", "after.ch.needs_choice": "{channel}: выберите карточку",
+  "after.ch.sent_plain": "{channel}: отправлено", "after.ch.failed_plain": "{channel}: не доставлено",
+  "after.ch.unknown": "{channel}: возможно, уже доставлено",
+  "after.busy": "Приложение сейчас отправляет отчет. Повторите через несколько секунд.",
+  "after.sending": "Отчет уже отправляется, остановить его нельзя.",
+  "after.not_ready": "Отчет обновляется после правки. Нажмите еще раз через несколько секунд.",
+  "after.memo_checked": "То, что прозвучало на звонке, сверено с мемо.",
+  "after.memo_waiting": "Сверка с мемо будет готова вместе с полной расшифровкой.",
+  "after.memo_failed": "Сверки с мемо нет: {reason}. Отчет уйдет без нее.",
+  "after.memo_reason.timeout": "ИИ не ответил вовремя", "after.memo_reason.ai_no_answer": "ИИ не дал ответа",
+  "after.memo_reason.ai_needs_choice": "ИИ не выбран в настройках", "after.memo_reason.too_long": "звонок слишком длинный для сверки",
+  "after.memo_reason.error": "сверка не удалась", "after.memo_reason.not_checked": "сверка идет только для недавних звонков",
+  "after.memo_reason.ai_unavailable": "выбранный ИИ сейчас недоступен, проверьте его в разделе «Начать работу»",
+  "after.differs_memo": "Мемо к звонку: «{text}»", "after.differs_fact": "{source}: «{text}»", "after.quoted": "«{text}»",
+});
+Object.assign(translations.en, {
+  "after.send.draft": "The report goes by itself once the final transcript is ready, usually in 2-3 minutes.",
+  "after.send.send_now_pending": "The report goes as soon as the final transcript is ready.",
+  "after.send.preparing": "The report is being prepared.",
+  "after.send.showing": "The summary is refined from the final transcript. The report goes in 30 seconds.",
+  "after.send.changes": "The report waits for your changes and goes 30 seconds after the last one.",
+  "after.send.sending": "The report is being sent.",
+  "after.send.held": "The report will not go by itself. It goes only when you press Send now.",
+  "after.send.sent": "The report is sent.",
+  "after.send.edited": "You changed the report after it was sent.",
+  "after.send.failed": "The report did not reach every channel.",
+  "after.send.no_channels": "Report delivery is not set up. The report is saved on this computer.",
+  "after.rule.changes": "Changes to the summary, the next steps or the board hold the report for 30 seconds.",
+  "after.rule.keep": "The refined summary never replaces your text.",
+  "after.to": "You receive it: {list}. The other side does not receive the report.",
+  "after.to_sent": "You received it: {list}. The other side did not receive the report.",
+  "after.to.email": "e-mail {to}", "after.to.email_plain": "e-mail", "after.to.telegram": "Telegram ({to})", "after.to.telegram_me": "Telegram (Saved messages)",
+  "after.to.twenty": "a note in your CRM", "after.to.twenty_named": "a note in your CRM, record {to}", "after.to.drive": "a copy in Google Drive",
+  "after.channel.email": "E-mail", "after.channel.telegram": "Telegram", "after.channel.twenty": "CRM", "after.channel.drive": "Google Drive",
+  "after.ch.sent": "{channel}: sent at {time}", "after.ch.waiting": "{channel}: waiting", "after.ch.held": "{channel}: not sending",
+  "after.ch.failed": "{channel}: not delivered, next try at {time}", "after.ch.needs_choice": "{channel}: choose the record",
+  "after.ch.sent_plain": "{channel}: sent", "after.ch.failed_plain": "{channel}: not delivered",
+  "after.ch.unknown": "{channel}: may already have arrived",
+  "after.busy": "The app is sending a report right now. Try again in a few seconds.",
+  "after.sending": "The report is already being sent and cannot be stopped.",
+  "after.not_ready": "The report is being updated after your edit. Press again in a few seconds.",
+  "after.memo_checked": "What was said on the call, checked against the memo.",
+  "after.memo_waiting": "The check against the memo comes with the final transcript.",
+  "after.memo_failed": "No check against the memo: {reason}. The report goes without it.",
+  "after.memo_reason.timeout": "the AI did not answer in time", "after.memo_reason.ai_no_answer": "the AI gave no answer",
+  "after.memo_reason.ai_needs_choice": "no AI is chosen in settings", "after.memo_reason.too_long": "the call is too long to check",
+  "after.memo_reason.error": "the check failed", "after.memo_reason.not_checked": "the memo check runs only for recent calls",
+  "after.memo_reason.ai_unavailable": "the chosen AI is unavailable right now, check it in Getting started",
+  "after.differs_memo": "Call memo: “{text}”", "after.differs_fact": "{source}: “{text}”", "after.quoted": "“{text}”",
+});
+// After (after.js): the view itself.
+Object.assign(translations.ru, {
+  "after.report": "Отчет", "after.back": "Назад", "after.open_transcript": "Открыть расшифровку",
+  "after.meta": "{day}, {time}.", "after.stopped": "Запись остановлена на {time}.",
+  "after.change": "Изменить получателей", "after.change_setup": "Настроить отправку", "after.send_now": "Отправить сейчас", "after.hold": "Не отправлять",
+  "after.send_again": "Отправить еще раз",
+  "after.send_again_note": "Письмо и сообщение в Telegram придут повторно, заметка в CRM останется прежней.",
+  "after.retry": "Повторить", "after.channel_settings": "Проверить настройки отправки",
+  "after.summary": "Итог", "after.next_steps": "Следующие шаги", "after.draft": "черновик",
+  "after.updated": "обновлен по полной расшифровке",
+  "after.refining": "Итог уточняется по полной расшифровке.",
+  "after.fields_note": "Уйдет в отчет как написано.",
+  "after.fields_note_sent": "Правки не уйдут сами: после них появится «Отправить еще раз».",
+  "after.fields_note_edited": "Правки не уйдут сами, нажмите «Отправить еще раз».",
+  "after.placeholder": "Готовлю черновик итога, обычно несколько секунд",
+  "after.placeholder_next": "Готовлю следующие шаги, обычно несколько секунд", "after.why_wait": "Станет доступно, когда появится черновик",
+  "after.board": "Доска", "after.board_note": "Уйдет в отчет, лишнее можно убрать.", "after.board_note_sent": "Вошло в отчет.",
+  "after.board_note_none": "Войдет в отчет, лишнее можно убрать.", "after.board_note_sending": "Входит в отчет.",
+  "after.col_risks": "Риски и возражения", "after.col_facts": "Проверка фактов",
+  "after.tag.no_answer": "Без ответа", "after.tag.answered": "Отвечено", "after.tag.differs": "Расходится", "after.tag.risk": "Риск",
+  "after.tag.objection": "Возражение", "after.tag.confirmed": "Подтверждено", "after.from_memo": "Из мемо",
+  "after.answered_n": "Отвечено: {n}", "after.confirmed_n": "Подтверждено: {n}",
+  "after.quote": "«{quote}», {speaker}, {time}", "after.differs_call": "{speaker}, на этом звонке, {time}: «{quote}»",
+  "after.remove": "Убрать", "after.removed": "Убрано из отчета.", "after.bring_back": "Вернуть", "after.empty": "Пусто",
+});
+Object.assign(translations.en, {
+  "after.report": "Report", "after.back": "Back", "after.open_transcript": "Open the transcript",
+  "after.meta": "{day}, {time}.", "after.stopped": "Recording stopped at {time}.",
+  "after.change": "Change recipients", "after.change_setup": "Set up delivery", "after.send_now": "Send now", "after.hold": "Do not send", "after.send_again": "Send again",
+  "after.send_again_note": "The e-mail and the Telegram message arrive a second time, the CRM note stays as it was.",
+  "after.retry": "Retry", "after.channel_settings": "Check the delivery settings",
+  "after.summary": "Summary", "after.next_steps": "Next steps", "after.draft": "draft",
+  "after.updated": "updated from the final transcript",
+  "after.refining": "The summary is being refined from the final transcript.",
+  "after.fields_note": "Goes into the report as written.",
+  "after.fields_note_sent": "Edits do not go by themselves: Send again appears after them.",
+  "after.fields_note_edited": "Edits do not go by themselves: press Send again.",
+  "after.placeholder": "Preparing the draft summary, usually a few seconds",
+  "after.placeholder_next": "Preparing the next steps, usually a few seconds", "after.why_wait": "Available once the draft appears",
+  "after.board": "Board", "after.board_note": "Goes into the report, remove what does not belong.", "after.board_note_sent": "Went into the report.",
+  "after.board_note_none": "Goes into the saved report, remove what does not belong.", "after.board_note_sending": "Is in the report.",
+  "after.col_risks": "Risks and objections", "after.col_facts": "Fact check",
+  "after.tag.no_answer": "No answer", "after.tag.answered": "Answered", "after.tag.differs": "Differs", "after.tag.risk": "Risk",
+  "after.tag.objection": "Objection", "after.tag.confirmed": "Confirmed", "after.from_memo": "From the memo",
+  "after.answered_n": "Answered: {n}", "after.confirmed_n": "Confirmed: {n}",
+  "after.quote": "“{quote}”, {speaker}, {time}", "after.differs_call": "{speaker}, on this call, {time}: “{quote}”",
+  "after.remove": "Remove", "after.removed": "Removed from the report.", "after.bring_back": "Bring back", "after.empty": "Nothing here",
 });
 
 const journalGroups = {
@@ -1379,7 +1854,8 @@ function readableAnswer(text) {
 function speakerLabel(segment) {
   if (segment.speaker_id === "unassigned") return t("speakers.pending");
   if (segment.speaker_identity === "manual") return segment.speaker_label || segment.speaker;
-  if (segment.source === "microphone") return t("speaker.me");
+  // Call says "Вы" for the person everywhere, the heartbeat included (G4).
+  if (segment.source === "microphone") return t(document.body.dataset.view === "call" ? "call.you" : "speaker.me");
   const label = segment.speaker_label || segment.speaker;
   if (label && !/^(Собеседник|Спикер)\s*\d*$/.test(label)) return label;
   // Call audio with no separated voice is everyone else (owner decision 2026-10-21).
@@ -1512,7 +1988,7 @@ function renderTranscript(transcript) {
   elements.liveStatus.classList.toggle("error", Boolean(transcript.error || transcript.status === "error"));
   elements.liveStatus.title = ["unavailable", "error"].includes(transcript.status) ? plainError(transcript.status_reason) : "";
   if (transcript.error) {
-    elements.liveStatus.lastChild.textContent = t("status.waiting");
+    elements.liveStatus.lastChild.textContent = t("status.waiting_recording");
   } else if (transcript.live) {
     elements.liveStatus.lastChild.textContent = t("status.live");
   } else if (transcript.status === "finished") {
@@ -1531,7 +2007,9 @@ function renderTranscript(transcript) {
     elements.liveStatus.lastChild.textContent = t("status.no_fresh");
   }
 
-  const signature = `${transcript.meeting_id}:${transcript.updated_at}:${transcript.segments.length}:${transcript.translation_revision || 0}:${transcript.speaker_revision || 0}`;
+  // In Call the transcript is stamped in elapsed call time, the bar's clock (G1); elsewhere in clock time.
+  const start = ["call", "after"].includes(document.body.dataset.view) ? callStartIso({ ...window.appState, transcript }) : "";
+  const signature = `${transcript.meeting_id}:${transcript.updated_at}:${transcript.segments.length}:${transcript.translation_revision || 0}:${transcript.speaker_revision || 0}:${start}`;
   if (signature === transcriptSignature) return;
   transcriptSignature = signature;
 
@@ -1554,7 +2032,7 @@ function renderTranscript(transcript) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.append(
-      textNode("strong", "", transcript.error ? t("transcript.failed") : t("transcript.empty_title")),
+      textNode("strong", "", transcript.error ? t(start ? "call.transcript_failed" : "transcript.failed") : t(start ? "call.transcript_empty" : "transcript.empty_title")),
       textNode(
         "span",
         "",
@@ -1595,7 +2073,7 @@ function renderTranscript(transcript) {
       }
       if (segment.spans_boundary) body.append(textNode("small", "boundary-provenance", t("meeting.crossing")));
       if (segment.boundary_unassigned) body.append(textNode("small", "boundary-provenance", t("meeting.unassigned")));
-      speaker.append(textNode("time", "", localTime(segment.timestamp)));
+      speaker.append(textNode("time", "", (start && callClock(start, Date.parse(segment.timestamp))) || localTime(segment.timestamp)));
       row.append(speaker, body);
       fragment.append(row);
     }
@@ -1960,65 +2438,41 @@ function memoNodes(plan) {
   return nodes;
 }
 
-// Before a call the Preparation tab lists today's and tomorrow's meetings with their memos.
-let agenda = null;
-let agendaSignature = "";
-async function refreshAgenda() {
+// Microphone, call audio and recorder, for the call status (shell.js). A failed fetch keeps the last answer.
+async function refreshPermissions(fresh = false) {
   try {
-    agenda = await getJSON("/api/agenda");
+    window.permissionsData = await getJSON(fresh ? "/api/permissions?fresh=1" : "/api/permissions");
+  } catch {}
+}
+
+// Today's and tomorrow's meetings, polled for Home (home.js renders them), with the permissions. A failed fetch
+// keeps the last agenda, marked stale on Home; before the first one arrives Home says it could not load them.
+async function refreshAgenda() {
+  const permissions = refreshPermissions();
+  try {
+    window.agendaData = await getJSON("/api/agenda");
+    window.agendaFailed = false;
+    window.agendaLoadedAt = Date.now();
   } catch {
-    return;
+    window.agendaFailed = true;
   }
-  if (agendaMode) renderCallPlan(currentCallPlan, true);
+  await permissions;
+  window.renderShell?.();
 }
 
-function renderAgenda() {
-  const meetings = agenda?.meetings || [];
-  const unscheduled = agenda?.unscheduled_plans || [];
-  elements.callPlanTab.hidden = !meetings.length && !unscheduled.length;
-  elements.callPlanCount.textContent = String(meetings.length + unscheduled.length);
-  const signature = `${uiLanguage}:${JSON.stringify(agenda)}`;
-  if (signature === agendaSignature) return;
-  agendaSignature = signature;
-  const fragment = document.createDocumentFragment();
-  fragment.append(textNode("h3", "call-plan-title", t("plan.agenda")));
-  const planNodes = (plan) => {
-    const block = document.createElement("div");
-    block.append(textNode("p", "call-plan-source", plan.title), ...memoNodes(plan));
-    return block;
-  };
-  for (const meeting of meetings) {
-    const card = document.createElement("article");
-    const start = new Date(meeting.start);
-    const when = start.toLocaleString(uiLanguage === "en" ? "en-GB" : "ru-RU",
-      { weekday: "short", hour: "2-digit", minute: "2-digit" });
-    card.append(textNode("h4", "call-plan-section-title", `${when} · ${meeting.title}`));
-    const people = (meeting.attendees || []).filter((person) => !person.self).map((person) => person.name || person.email);
-    if (people.length) card.append(textNode("p", "", people.join(", ")));
-    if (!meeting.plans.length) card.append(textNode("p", "call-plan-tentative", t("plan.no_memo")));
-    for (const plan of meeting.plans) card.append(planNodes(plan));
-    fragment.append(card);
-  }
-  if (unscheduled.length) {
-    fragment.append(textNode("h4", "call-plan-section-title", t("plan.unscheduled")));
-    for (const plan of unscheduled) fragment.append(planNodes(plan));
-  }
-  elements.callPlan.replaceChildren(fragment);
-}
-
-// showAgenda: between calls the last call's plan stays for the board, the tab shows the agenda.
-let agendaMode = true;
-function renderCallPlan(plan, showAgenda = false) {
+function renderCallPlan(plan) {
   currentCallPlan = plan;
-  agendaMode = !plan || showAgenda;
+  // The open Preparation tab going away hands the pane to Call overview, never a blank one.
+  if (!plan && elements.callPlanTab.getAttribute("aria-selected") === "true") {
+    document.querySelector('[data-content-view="board"]').click();
+  }
   elements.callPlanTab.hidden = !plan;
-  if (agendaMode) {
+  if (!plan) {
     callPlanSignature = "";
     selectedPlanMeetingId = "";
-    renderAgenda();
+    elements.callPlan.replaceChildren();
     return;
   }
-  agendaSignature = "";
   selectedPlanMeetingId = plan.meeting_id;
   elements.callPlanCount.textContent = String(plan.items.filter((item) => item.status !== "resolved").length);
   const signature = `${uiLanguage}:${JSON.stringify(plan)}`;
@@ -2108,9 +2562,13 @@ function renderCallPlan(plan, showAgenda = false) {
   }
 }
 
+// "0 открыто · 2 закрыто" -> "2 закрыто": every counter template puts the number first.
+const nonZero = (text) => text.split(" · ").filter((part) => !/^0\s/u.test(part)).join(" · ");
+
 function renderCallBoard(plan, journal) {
   currentJournal = journal;
-  const signature = `${uiLanguage}:${[...boardStatuses]}:${activeTranscript?.meeting_id}:${JSON.stringify(plan)}:${JSON.stringify(journal)}`;
+  const call = document.body.dataset.view === "call";
+  const signature = `${call}:${uiLanguage}:${[...boardStatuses]}:${activeTranscript?.meeting_id}:${JSON.stringify(plan)}:${JSON.stringify(journal)}`;
   if (signature === callBoardSignature) return;
   callBoardSignature = signature;
   const scrolls = Object.fromEntries([...elements.callBoard.querySelectorAll("[data-board-list]")]
@@ -2118,10 +2576,22 @@ function renderCallBoard(plan, journal) {
   const entries = (plan?.items || []).map((item) => ({ ...item, origin: "plan",
     lane: item.kind === "question" ? "mine" : "risks", category: item.kind === "objection" ? "OBJECTION" : "RISK" }));
   for (const item of journal) {
-    const lane = item.category === "ASK" ? "mine"
+    // A contradiction is a clarification to ask the client, never a risk (L5).
+    const lane = ["ASK", "CONTRADICTION"].includes(item.category) ? "mine"
       : ["INCOMING_QUESTION", "OPEN_QUESTION"].includes(item.category) ? "incoming"
-      : ["RISK", "OBJECTION", "CONTRADICTION"].includes(item.category) ? "risks" : "";
+      : ["RISK", "OBJECTION"].includes(item.category) ? "risks" : "";
     if (lane) entries.push({ ...item, origin: "journal", lane, status: item.status || "open" });
+  }
+  // In Call the board has no status filter, and a live hint that repeats a prepared item of its own lane shows once
+  // (C1); a question put to the user is never dropped for one prepared for the client (J6).
+  const statuses = call ? new Set(BOARD_STATUSES) : boardStatuses;
+  if (call) {
+    const prepared = entries.filter((item) => item.origin === "plan");
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const item = entries[index];
+      if (item.origin === "journal" && prepared.some((plan) => plan.lane === item.lane
+        && callSame(callLine(plan.text).rest, callLine(item.text).rest))) entries.splice(index, 1);
+    }
   }
   const fragment = document.createDocumentFragment();
   const summary = document.createElement("div");
@@ -2172,16 +2642,24 @@ function renderCallBoard(plan, journal) {
     section.className = `board-column ${lane}`;
     const header = document.createElement("header");
     header.className = "board-column-header";
-    header.append(textNode("h3", "", t(`board.${lane}`)), textNode("p", "", t("board.count", {
+    // In Call the headings are plain words and a zero counter is not shown (G4).
+    const count = t("board.count", {
       open: group.filter((item) => item.status !== "resolved").length,
       closed: group.filter((item) => item.status === "resolved").length,
-    })));
+    });
+    header.append(textNode("h3", "", t(call && lane !== "risks" ? `call.board_${lane}` : `board.${lane}`)));
+    header.append(textNode("p", "", call ? nonZero(count) : count));
     const list = document.createElement("div");
     list.className = "board-list";
     list.dataset.boardList = lane;
-    const shown = group.filter((item) => boardStatuses.has(item.status));
-    if (!group.length) list.append(textNode("p", "board-empty", t(`board.empty.${lane}`)));
-    else if (!boardStatuses.size) list.append(textNode("p", "board-empty", t("board.filter_none")));
+    const shown = group.filter((item) => statuses.has(item.status));
+    const subtypeOf = (item) => (lane === "incoming" ? (item.category === "INCOMING_QUESTION" ? "to_me" : "general")
+      : lane === "risks" ? (item.category === "OBJECTION" ? "objection" : "risk")
+      : item.origin === "plan" ? "prepared" : "live");
+    // In Call a tag every card of the column shares says nothing, so it is left out (G4).
+    const sameTag = call && new Set(group.map(subtypeOf)).size === 1;
+    if (!group.length) list.append(textNode("p", "board-empty", t(call && lane === "incoming" ? "call.board_empty_incoming" : `board.empty.${lane}`)));
+    else if (!statuses.size) list.append(textNode("p", "board-empty", t("board.filter_none")));
     else if (!shown.length) list.append(textNode("p", "board-empty", t("board.filter_empty")));
     for (const item of shown) {
       const card = document.createElement("article");
@@ -2196,10 +2674,7 @@ function renderCallBoard(plan, journal) {
       heading.append(textNode("p", "", mainText));
       const controls = document.createElement("div");
       controls.className = "board-item-controls";
-      const subtype = lane === "incoming" ? (item.category === "INCOMING_QUESTION" ? "to_me" : "general")
-        : lane === "risks" ? (item.category === "OBJECTION" ? "objection" : "risk")
-        : item.origin === "plan" ? "prepared" : "live";
-      controls.append(textNode("span", "board-item-type", t(`board.${subtype}`)));
+      if (!sameTag) controls.append(textNode("span", "board-item-type", t(`board.${subtypeOf(item)}`)));
       if (item.source === "meeting_chat") controls.append(textNode("span", "board-item-type", uiLanguage === "ru" ? "Из чата аудитории" : "Audience chat"));
       const select = document.createElement("select");
       select.setAttribute("aria-label", `${mainText}: ${t("board.tab")}`);
@@ -2229,7 +2704,10 @@ function renderCallBoard(plan, journal) {
       const detail = document.createElement("details");
       const key = `${activeTranscript?.meeting_id}:${item.origin}:${item.id}`;
       detail.open = boardExpanded.has(key);
-      detail.append(textNode("summary", "", t("board.details")), textNode("p", "", readableAnswer(item.text)));
+      // In Call the detail says "Источник", the feed's one word for it, never "Основание" (G5).
+      const body = readableAnswer(item.text);
+      detail.append(textNode("summary", "", t(call ? "call.where" : "board.details")), // one name across Call (H2)
+        textNode("p", "", call ? body.replace(/(?:Основание|Evidence):/gu, `${t("call.board_details")}:`) : body));
       if (item.evidence) detail.append(textNode("p", "board-evidence", t("plan.evidence", { quote: item.evidence })));
       if (item.origin === "plan" && plan.source_label) detail.append(textNode("small", "", plan.source_label));
       if (item.speaker) detail.append(textNode("small", "", item.speaker));
@@ -2506,7 +2984,7 @@ function closeArchive() {
   archiveDetailRequest += 1;
   archiveAbort?.abort();
   setArchiveMode();
-  if (restoreFocus) elements.archiveButton.focus();
+  if (restoreFocus) returnFocus(elements.archiveButton);
 }
 
 function updateLibraryMode(data) {
@@ -2514,18 +2992,15 @@ function updateLibraryMode(data) {
     || data.transcript?.live === true || ["recording", "loading", "overloaded"].includes(data.transcript?.status);
   const previous = libraryCallActive;
   libraryCallActive = active;
-  if (previous !== active) {
-    if (!active) void openArchive({automatic: true, focus: false});
-    else if (archiveAutomatic) closeArchive();
-  }
+  // The past calls open only by hand; a call that starts takes the screen back from them.
+  if (active && previous === false && !elements.archiveDialog.hidden) closeArchive();
   setArchiveMode();
 }
 
-async function openArchive({automatic = false, focus = true} = {}) {
-  archiveAutomatic = automatic;
+async function openArchive() {
   elements.archiveDialog.hidden = false;
   setArchiveMode();
-  if (focus) elements.archiveSearch.focus();
+  elements.archiveSearch.focus();
   await refreshArchive();
 }
 
@@ -3062,15 +3537,16 @@ factColumn.className = "board-column facts";
 
 function renderFactChecks(state) {
   const items = state?.items || [];
-  const signature = `${uiLanguage}:${factsExpanded}:${activeTranscript?.meeting_id || ""}:${JSON.stringify(state || {})}`;
+  const call = document.body.dataset.view === "call";
+  const signature = `${call}:${uiLanguage}:${factsExpanded}:${activeTranscript?.meeting_id || ""}:${JSON.stringify(state || {})}`;
   if (signature === factSignature) return;
   factSignature = signature;
   const header = document.createElement("header");
   header.className = "board-column-header";
   const count = (status) => items.filter((item) => item.status === status).length;
-  header.append(textNode("h3", "", t("fact.title")), textNode("p", "", t("fact.count", {
-    confirmed: count("confirmed"), unclear: count("unclear"), refuted: count("refuted"),
-  })));
+  const counts = t("fact.count", { confirmed: count("confirmed"), unclear: count("unclear"), refuted: count("refuted") });
+  header.append(textNode("h3", "", t("fact.title")));
+  header.append(textNode("p", "", call ? nonZero(counts) : counts));
   const list = document.createElement("div");
   list.className = "board-list";
   list.dataset.boardList = "facts";
@@ -3115,16 +3591,15 @@ async function state() {
     pageVersion ||= serverVersion;
     // A change made here while this request ran wins over the older snapshot.
     if (epoch === preferenceEpoch && !preferenceSaves) applyPreferences(data.preferences || {});
+    window.appState = data;
     const project = data.project || {};
     window.renderReleaseUpdates(data.updates || {});
-    window.renderGettingStartedStatus?.(data);
     renderDeliveryHealth(data.delivery || {});
     const scopedRepositories = project.repositories || [];
     const count = repositoryCountLabel(scopedRepositories.length || data.repositories || 0);
     const projectKind = project.kind || "all";
     const hint = projectKind === "all" ? "project.all_hint"
       : project.confidence === "manual" ? "project.manual_hint" : "project.auto_hint";
-    elements.repoStatus.textContent = document.documentElement.lang === "en" ? "Context sources" : "Источники контекста";
     const repositoryList = scopedRepositories
       .map((repo) => `${repo.name}: ${repo.path}`)
       .join("\n");
@@ -3132,12 +3607,13 @@ async function state() {
     stateConnectionFailed = false;
     renderTranscript(data.transcript);
     renderRecordingHealth(data.recording_health || {});
+    window.renderShell?.();
+    window.renderGettingStartedStatus?.(data); // after the shell: the banner depends on the view (getting-started.js)
     updateLibraryMode(data);
     renderFrames(data.frames || []);
     renderFrameStatus(data.frame_capture || {});
     renderMessages(data.copilot, data.journal || []);
-    // Between calls the last call's plan gives way to the agenda of upcoming meetings.
-    renderCallPlan(data.call_plan || null, data.transcript?.status === "finished");
+    renderCallPlan(data.call_plan || null);
     renderJournal(data.journal || []);
     renderFactChecks(data.fact_checks);
     renderCallBoard(data.call_plan || null, data.journal || []);
@@ -3153,15 +3629,21 @@ async function state() {
       && data.copilot.messages.length === 0
       && data.copilot.analysis?.state === "idle";
     const analysisKey = `${data.transcript.meeting_id}:${data.transcript.status}:${data.transcript.latest_at}:${(data.meeting_chat || []).length}:${(data.meeting_chat || []).at(-1)?.id || ""}`;
+    const urgentRetryDue = Boolean(data.heard_question) && urgentRetryAt > 0 && Date.now() >= urgentRetryAt;
+    // A question offered as heard for the first time asks at once, also when the transcript key did not change
+    // (a provisional line turned final with the same start time, B4).
+    const heard = data.heard_question;
+    const heardKey = heard ? `${heard.at}|${heard.text}` : "";
     if (
       (data.transcript.live || finishedWithoutAnalysis) &&
       (data.transcript.latest_at || data.meeting_chat?.length) &&
-      analysisKey !== autoAnalysisPrimed &&
+      (analysisKey !== autoAnalysisPrimed || urgentRetryDue || (heardKey && heardKey !== heardPrimed)) &&
       !requestBusy &&
       !data.copilot.busy
     ) {
       autoAnalysisPrimed = analysisKey;
-      void analyze(finishedWithoutAnalysis);
+      heardPrimed = heardKey;
+      void analyze(finishedWithoutAnalysis, Boolean(data.heard_question));
     }
   } catch (error) {
     // The poll runs every 2.5 s, so one missed answer fixes itself. Say something only when it keeps failing.
@@ -3175,6 +3657,7 @@ async function state() {
       elements.captureStatus.classList.add("error");
       elements.captureStatus.lastChild.textContent = t("capture.disconnected");
     }
+    window.renderShell?.();
     elements.help.textContent = plainError(error);
     elements.help.classList.add("error");
   } finally {
@@ -3195,11 +3678,15 @@ async function post(path, payload) {
   return data;
 }
 
-async function ask(question) {
+// True when the question went out; false when it did not (empty, or another request holds the line):
+// the Call view's ask field keeps its text then (F4).
+// meeting: the call a queued Call question was asked in; the server refuses it for another one (M4).
+function ask(question, meeting) {
   const clean = question.trim();
-  if (!clean || requestBusy) return;
+  if (!clean || requestBusy) return false;
   requestBusy = true;
-  elements.question.value = "";
+  // Asked from the Call view's own field: a note being written in the composer stays.
+  if (elements.question.value.trim() === clean) elements.question.value = "";
   elements.help.textContent = t("help.ai");
   elements.help.classList.remove("error");
   const pending = document.createElement("article");
@@ -3212,11 +3699,19 @@ async function ask(question) {
   elements.chat.scrollTop = elements.chat.scrollHeight;
   chatPinnedToLatest = true;
   updateChatLatestButton();
+  void sendQuestion(clean, meeting);
+  return true;
+}
+window.callAsk = ask;
+
+async function sendQuestion(clean, meeting) {
   try {
-    await post("/api/chat", { question: clean });
+    await post("/api/chat", { question: clean, ...(meeting ? { meeting_id: meeting } : {}) });
   } catch (error) {
-    elements.help.textContent = plainError(error);
+    const changed = error?.message === "meeting_changed";
+    elements.help.textContent = changed ? t("call.ask_changed") : plainError(error);
     elements.help.classList.add("error");
+    window.callAskFailed?.(clean, plainError(error), changed);
   } finally {
     requestBusy = false;
     await state();
@@ -3246,13 +3741,18 @@ async function saveNote() {
   }
 }
 
-async function analyze(force) {
+async function analyze(force, urgent = false) {
   if (requestBusy) return;
   requestBusy = true;
+  urgentRetryAt = 0;
   elements.help.textContent = force ? t("analysis.searching") : t("analysis.checking");
   elements.help.classList.remove("error");
   try {
-    await post("/api/analyze", { force });
+    const result = await post("/api/analyze", { force, urgent });
+    // The start of an automatic recording is not analysed: the Call view says so instead of promising an answer,
+    // and a waiting question is asked again after the gap like any skip (B5).
+    analysisSkipped = result.reason === "short_automatic_recording" ? window.appState?.transcript?.meeting_id || "" : null;
+    if (urgent && result.skipped && (!result.reason || analysisSkipped !== null)) urgentRetryAt = Date.now() + URGENT_GAP_MS;
   } catch (error) {
     elements.help.textContent = plainError(error);
     elements.help.classList.add("error");
@@ -3348,16 +3848,6 @@ elements.translationJump.addEventListener("click", () => {
   else document.querySelector("#getting-started-open")?.click();
 });
 
-elements.refresh.addEventListener("click", async () => {
-  elements.refresh.disabled = true;
-  try {
-    await post("/api/refresh", {});
-    setTimeout(() => void state(), 1400);
-  } finally {
-    setTimeout(() => { elements.refresh.disabled = false; }, 1800);
-  }
-});
-
 elements.captureFrame.addEventListener("click", async () => {
   elements.captureFrame.disabled = true;
   elements.captureFrame.textContent = t("frames.capturing");
@@ -3387,14 +3877,15 @@ elements.projectEditRepos.addEventListener("click", () => {
 elements.archiveButton.addEventListener("click", () => {
   if (!elements.archiveDialog.hidden) closeArchive(); else void openArchive();
 });
-elements.archiveClose.addEventListener("click", () => { closeArchive(); elements.archiveButton.focus(); });
+elements.archiveClose.addEventListener("click", () => { closeArchive(); returnFocus(elements.archiveButton); });
 elements.archiveSearch.addEventListener("input", () => {
   clearTimeout(archiveSearchTimer);
   archiveSearchTimer = setTimeout(() => { void refreshArchive(); }, 250);
 });
 document.addEventListener("keydown", event => {
-  if (event.key === "Escape" && !elements.archiveDialog.hidden && !document.querySelector("dialog[open]")) {
-    closeArchive(); elements.archiveButton.focus();
+  if (event.key === "Escape" && !elements.archiveDialog.hidden
+    && !document.querySelector("dialog[open], #settings-panel:not([hidden]), #getting-started:not([hidden])")) {
+    closeArchive(); returnFocus(elements.archiveButton);
   }
 });
 window.addEventListener("resize", setArchiveMode);
@@ -3481,7 +3972,7 @@ document.querySelector("#interface-language").addEventListener("change", (event)
 // Hiding only folds the panel away: recording and live transcription keep running.
 elements.transcriptHide.addEventListener("click", () => {
   applyTranscriptHidden(true);
-  elements.transcriptShow.focus();
+  returnFocus(elements.transcriptShow);
   void savePreference({ transcript_hidden: true }, elements.newMeetingStatus);
 });
 elements.transcriptShow.addEventListener("click", () => {
@@ -3491,38 +3982,42 @@ elements.transcriptShow.addEventListener("click", () => {
 });
 
 Object.assign(translations.ru, {
-  "settings.open": "Настройки", "google.heading": "Google-аккаунт и источники LLM", "google.sources": "Разрешить LLM искать контекст",
+  "settings.open": "Настройки", "google.heading": "Google: почта, календарь, файлы", "google.sources": "Где искать",
+  "google.calendar": "Календарь", "google.gmail": "Почта (Gmail)", "google.drive": "Google Диск",
   "google.manual": "Проверить поиск вручную (необязательно)",
   "google.connect": "Подключить Google", "google.disconnect": "Отключить Google от MeetOnTrack", "google.check": "Проверить подключение",
-  "google.automatic": "После подключения и выбора источников LLM сам формулирует поисковые запросы по вопросу или теме звонка. Репозитории остаются дополнительным источником, а не единственным.",
+  "google.automatic": "После подключения MeetOnTrack сам ищет в выбранных источниках по теме звонка и его участникам.",
   "google.disconnected": "Поиск в Google отключен. Подключение аккаунта для доставки отчетов сохранено; оно управляется отдельно ниже.",
   "google.pending": "Завершите вход в открывшемся браузере, затем нажмите «Проверить подключение».",
-  "google.calendar_note": "При включении Calendar MeetOnTrack также сопоставляет подготовку с событиями дня звонка.",
+  "google.calendar_note": "Если календарь включен, MeetOnTrack сверяет подготовку со звонками этого дня.",
   "google.privacy": "Выключен по умолчанию. Только чтение. Найденные фрагменты используются в текущем звонке выбранной моделью анализа; при облачной модели покидают компьютер.",
   "google.save": "Сохранить источники", "google.query": "Участник, компания или тема встречи",
   "google.search": "Найти для текущего звонка", "google.loading": "Подключаю источники…",
   "google.searching": "Ищу контекст…", "google.saved": "Источники сохранены; предыдущие результаты очищены.",
-  "google.limits": "Calendar: −90/+30 дней. Gmail: до 3 писем за год, заголовки и фрагменты. Drive: до 5 результатов; для первых 2 — фрагменты Google Docs или A1:Z80 первого листа Google Sheets. Другие форматы и ошибки чтения помечаются как «только метаданные». Результаты используются 10 минут; изменение источников очищает их. Отправка отчетов настраивается отдельно.",
+  "google.limits": "Календарь: 90 дней назад и 30 вперед. Почта: до 3 писем за год, только заголовки и короткий отрывок письма. Google Диск: до 5 файлов, у первых двух берутся подходящие отрывки документа или начало таблицы. Найденное хранится 10 минут и стирается при смене источников. Отправка отчетов настраивается отдельно.",
   "google.account": "Подключен Google: {account}", "google.auth": "Сначала подключите свой Google-аккаунт в разделе «Хранение и доставка отчетов», разрешив чтение контекста. Затем подключите поиск здесь и выберите источники.",
+  "google.setup": "Чтобы войти в Google, сначала один раз настройте программу gws от Google, это около 5 минут.", "google.setup_link": "Как настроить",
   "google.empty": "Ничего не найдено", "google.partial": "Показана часть результатов",
   "google.failed": "Источник недоступен: {source} ({state}). Проверьте подключение аккаунта и разрешения доступа в настройках.",
   "google.no_meeting": "Для поиска начните или откройте текущую запись.",
   "google.result": "Найдено {count}. MeetOnTrack может использовать эти фрагменты в текущей встрече в течение 10 минут.",
 });
 Object.assign(translations.en, {
-  "settings.open": "Settings", "google.heading": "Google account and LLM sources", "google.sources": "Allow LLM context search",
+  "settings.open": "Settings", "google.heading": "Google: mail, calendar, files", "google.sources": "Where to look",
+  "google.calendar": "Calendar", "google.gmail": "Mail (Gmail)", "google.drive": "Google Drive",
   "google.manual": "Test search manually (optional)",
   "google.connect": "Connect Google", "google.disconnect": "Disconnect Google from MeetOnTrack", "google.check": "Check connection",
-  "google.automatic": "Once connected and sources are selected, the LLM generates search queries from the question or call topic. Repositories remain an additional source, not the only one.",
+  "google.automatic": "Once connected, MeetOnTrack searches the chosen sources by the topic of the call and its people.",
   "google.disconnected": "Google search is disconnected. The account connection for report delivery is preserved and managed separately below.",
   "google.pending": "Complete sign-in in the opened browser, then choose Check connection.",
-  "google.calendar_note": "Enabling Calendar also matches meeting preparation against events on the call date.",
+  "google.calendar_note": "With the calendar on, MeetOnTrack matches preparation to that day's calls.",
   "google.privacy": "Off by default. Read-only. Results are used for this call by your selected analysis model; a cloud model receives them outside your computer.",
   "google.save": "Save sources", "google.query": "Participant, company or meeting topic",
   "google.search": "Search for this call", "google.loading": "Loading connections…",
   "google.searching": "Searching context…", "google.saved": "Sources saved; previous results cleared.",
-  "google.limits": "Calendar: past 90 / next 30 days. Gmail: up to 3 messages from the past year, headers and snippets. Drive: up to 5 results; first 2 can include Google Docs excerpts or first-sheet A1:Z80 from Google Sheets. Other formats and content-read failures are labelled metadata-only. Results expire in 10 minutes; source changes clear them. Report delivery is configured separately.",
+  "google.limits": "Calendar: 90 days back and 30 ahead. Mail: up to 3 messages from the past year, headers and snippets only. Google Drive: up to 5 files; for the first two, relevant excerpts of a document or the start of a spreadsheet. Results are kept for 10 minutes and cleared when the sources change. Report delivery is set up separately.",
   "google.account": "Connected Google: {account}", "google.auth": "First connect your Google account under Report storage and delivery, granting context-read permission. Then connect search here and choose sources.",
+  "google.setup": "Signing in to Google needs a one-time setup of gws, a program from Google, about 5 minutes.", "google.setup_link": "How to set it up",
   "google.empty": "No results", "google.partial": "Some results are omitted",
   "google.failed": "Source unavailable: {source} ({state}). Check the account connection and access permissions in Settings.",
   "google.no_meeting": "Start a current recording before searching.",
@@ -3539,6 +4034,14 @@ function googleControls(busy) {
   document.querySelector("#google-disconnect").disabled = busy || !googleConnected;
   document.querySelector("#google-search-form").setAttribute("aria-busy", String(busy));
 }
+// Connected: the account. Not yet: Connect Google's sign-in; with no profile or the own client, the native OAuth setup
+// under Report storage and delivery (docs/DELIVERY.md); with a named gws profile not signed in, its setup and guide.
+function googleAccountLine(account, pending) {
+  if (account.dataset.auth === "connected") account.textContent = t("google.account", {account: account.dataset.account || "gws"});
+  else if (pending) account.textContent = t("google.pending");
+  else if (account.dataset.client === "true" || !["personal", "work"].includes(account.dataset.profile)) account.textContent = t("google.auth");
+  else account.replaceChildren(`${t("google.setup")} `, externalLink(t("google.setup_link"), homeToolHelp()));
+}
 async function loadGoogleContext() {
   if (googleBusy) return;
   googleControls(true);
@@ -3550,22 +4053,25 @@ async function loadGoogleContext() {
     googleConnected = data.connected === true;
     account.dataset.auth = googleConnected ? "connected" : "not_connected";
     account.dataset.account = data.account || "";
-    account.textContent = googleConnected ? t("google.account", {account: data.account || "gws"}) : data.login_pending ? t("google.pending") : t("google.auth");
+    account.dataset.client = String(data.client_configured === true);
+    account.dataset.profile = data.profile || "";
+    googleAccountLine(account, data.login_pending);
   } catch (error) { account.textContent = plainError(error); }
   finally { googleControls(false); }
 }
 const googleSettings = document.querySelector("#google-context-settings");
 document.querySelector("#settings-content").append(googleSettings);
 googleSettings.open = true;
+// Home's Connect mail waits for this load to know whether the Mail box is usable yet.
+window.googleLoad = Promise.resolve();
 document.querySelector("#settings-open").addEventListener("click", () => {
   document.querySelector("#settings-panel").hidden = false;
   document.querySelector("#settings-open").setAttribute("aria-expanded", "true");
-  void loadGoogleContext();
+  window.googleLoad = loadGoogleContext();
 });
 document.querySelector("#settings-close").addEventListener("click", () => {
   document.querySelector("#settings-panel").hidden = true;
   document.querySelector("#settings-open").setAttribute("aria-expanded", "false");
-  document.querySelector("#settings-open").focus();
 });
 document.querySelector("#google-check").addEventListener("click", () => void loadGoogleContext());
 for (const action of ["connect", "disconnect"]) document.querySelector(`#google-${action}`).addEventListener("click", async () => {
@@ -3645,6 +4151,7 @@ setInterval(() => void refreshAgenda(), 60000);
 setInterval(() => {
   if (recordingHealth.checked_at && Date.now() / 1000 - recordingHealth.checked_at >= 20) {
     renderRecordingHealth(recordingHealth);
+    window.renderShell?.();
   }
 }, 1000);
 setInterval(() => void state(), 2500);
@@ -3653,6 +4160,14 @@ window.matchMedia("(max-width: 600px)").addEventListener("change", () => {
   deliverySignature = "";
   renderDeliveryHealth(deliveryHealth);
 });
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) void state();
-});
+// Back from System Settings: the permissions may have changed.
+// Coming back to the window reads the state and the permissions fresh. A window covered by System Settings
+// may never turn hidden, so focus counts as coming back too; both on one return give one read.
+let welcoming = null;
+function welcomeBack() {
+  if (welcoming) return;
+  void state();
+  welcoming = refreshPermissions(true).then(() => window.renderShell?.()).finally(() => { welcoming = null; });
+}
+document.addEventListener("visibilitychange", () => document.hidden || welcomeBack());
+addEventListener("focus", welcomeBack);

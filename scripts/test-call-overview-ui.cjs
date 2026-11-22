@@ -1,6 +1,7 @@
 // Real UI files, synthetic API only: the owner's Chat holds only his questions, notes and answers;
-// auto-analysis lands on Call overview; one chat tab; status filters persist in shared preferences;
-// the assistant is called MeetOnTrack and RU copy has no "ё".
+// auto-analysis lands on Call overview; one chat tab; the assistant is called MeetOnTrack and RU copy has no "ё".
+// The board and the chat open as panels over the After view (MEETONTRACK-163: After replaced the two panes, so the
+// tab bar, the Preparation tab and the status filters have no screen left; their checks went with them).
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -12,6 +13,8 @@ const errors = [];
   const root = path.resolve(__dirname, '../copilot/web');
   const saved = [];
   let preferences = { interface_language: 'ru' };
+  let plan = { meeting_id: 't', title: 'Pilot review', items: [{ id: 'p1', kind: 'question', status: 'open', text: 'Who owns the pilot?' }],
+    score: { total: 1, resolved: 0, by_kind: {} }, links: [] };
   const journal = [
     { id: 'n1', category: 'NOTE', source: 'user_note', text: 'Моя заметка про бюджет', meeting_id: 't', created_at: '2026-10-22T10:01:30+00:00' },
     { id: 'a1', category: 'ASK', source: 'copilot', text: 'Кто отвечает за пилот?', meeting_id: 't', status: 'open' },
@@ -20,7 +23,9 @@ const errors = [];
     { id: 'r1', category: 'RISK', source: 'copilot', text: 'Нет бюджета', meeting_id: 't', status: 'open' },
   ];
   const state = () => ({ preferences, journal, frames: [], project: {},
-    transcript: { meeting_id: 't', meeting: 'Test call', status: 'recording', live: true, started_at: '2026-10-22T10:00:00Z', segments: [], speakers: [] },
+    // A call that just ended: the After view, with the board and the chat as panels over it.
+    transcript: { meeting_id: 't', meeting: 'Test call', status: 'finished', live: false, started_at: '2026-10-22T10:00:00Z',
+      ended_at: new Date().toISOString(), segments: [], speakers: [] },
     recording_health: { capture: { audio_recording: true } },
     meeting_chat: [{ id: 'c1', sender: 'Anna', text: 'Когда релиз?' }],
     copilot: { busy: true, analysis: { state: 'idle' }, messages: [  // busy = an auto-analysis is running
@@ -29,6 +34,7 @@ const errors = [];
       // An older server could still send a stored analysis message: the Chat ignores it.
       { role: 'assistant', kind: 'insight', text: 'RISK — Нет бюджета\nSIGNAL_UPDATE: {"id":"r1"}', at: '2026-10-22T10:03:00+00:00' },
     ] },
+    call_plan: plan,
     fact_checks: { web: true, items: [{ id: 'f1', status: 'confirmed', claim: 'Пилот в понедельник', segment: { source: 'system', speaker: 'Anna' } }] },
   });
   try {
@@ -53,9 +59,11 @@ const errors = [];
       // Other panels get a bare {ok: true} stub here; only errors raised by app.js are this test's business.
       page.on('pageerror', error => /app\.js/.test(error.stack || '') && errors.push(String(error.stack)));
       await page.goto('http://overview-ui.test/');
+      await page.evaluate(() => openCallPanel('board'));
       await page.locator('#call-board .board-item').first().waitFor();
       return page;
     };
+    plan = null;  // the rest runs without a plan
     let page = await open();
 
     // One chat tab only: the meeting chat tab, its counter and empty text are gone.
@@ -70,7 +78,7 @@ const errors = [];
     assert.match(await board.textContent(), /Когда релиз\?/);
 
     // Chat: the owner's question, his note and the answer, in time order; nothing else.
-    await page.locator('[data-content-view="chat"]').click();
+    await page.evaluate(() => openCallPanel('chat'));
     const chat = page.locator('#chat');
     await chat.locator('.message').first().waitFor();
     const messages = await chat.locator('.message').evaluateAll(nodes => nodes.map(node => [
@@ -88,53 +96,14 @@ const errors = [];
     assert.doesNotMatch(await chat.textContent(), /SIGNAL_UPDATE|Автоанализ|RISK|\{"/);
     assert.doesNotMatch(await page.locator('body').textContent(), /SIGNAL_UPDATE/, 'protocol text is shown nowhere');
 
-    // Status filters: all on by default, real toggle buttons with labels, keyboard operable.
-    await page.locator('[data-content-view="board"]').click();
-    const toggle = status => page.locator(`#call-board [data-status-filter="${status}"]`);
-    for (const status of ['open', 'clarify', 'resolved']) assert.equal(await toggle(status).getAttribute('aria-pressed'), 'true');
-    assert.equal(await toggle('open').textContent(), 'Открыто 2');
-    const counts = async () => page.locator('#call-board .board-column-header p').allTextContents();
-    const before = await counts();
-    await toggle('resolved').focus();
-    await page.keyboard.press('Enter');  // hide green
-    assert.equal(await toggle('resolved').getAttribute('aria-pressed'), 'false');
-    assert.equal(await page.evaluate(() => document.activeElement.dataset.statusFilter), 'resolved', 'focus stays on the toggle');
-    assert.equal(await page.locator('#call-board .board-item.resolved').count(), 0);
-    assert.equal(await page.locator('#call-board .board-item.open').count(), 2);
-    assert.deepEqual(await counts(), before, 'column counts keep counting all items');
-    assert.deepEqual(saved.at(-1), { call_overview_statuses: ['open', 'clarify'] });
-    await toggle('open').click();  // only yellow
-    assert.equal(await page.locator('#call-board .board-item').count(), 1);
-    assert.equal(await page.locator('#call-board .board-item.clarify').count(), 1);
-    assert.equal(await page.locator('#call-board .facts .fact-row').count(), 1, 'fact check is not filtered');
-
-    // The choice survives a reload, from config.json and not from this browser.
-    await page.evaluate(() => localStorage.clear());
-    await page.close();
-    page = await open();
-    assert.equal(await page.locator('#call-board [data-status-filter="clarify"]').getAttribute('aria-pressed'), 'true');
-    assert.equal(await page.locator('#call-board [data-status-filter="open"]').getAttribute('aria-pressed'), 'false');
-    assert.equal(await page.locator('#call-board .board-item').count(), 1);
-
-    // All off: a short line in each column, not blank columns.
-    await page.locator('#call-board [data-status-filter="clarify"]').click();
-    assert.deepEqual(saved.at(-1), { call_overview_statuses: [] });
-    const empty = await page.locator('#call-board .board-column:not(.facts) .board-empty').allTextContents();
-    assert.deepEqual(empty, Array(3).fill('Все статусы скрыты. Включите хотя бы один статус выше.'));
-    assert.doesNotMatch(empty.join(''), /[—ё]/, 'RU copy: no em dashes, no ё');
-    assert.equal(await page.locator('#call-board .facts .fact-row').count(), 1);
-
     // English copy.
     preferences = { ...preferences, interface_language: 'en' };
     await page.reload();
     await page.waitForFunction(() => document.documentElement.lang === 'en');
-    await page.locator('#call-board [data-status-filter="open"]').waitFor();
-    assert.equal(await page.locator('#call-board .board-filters').getAttribute('aria-label'), 'Show items with status');
-    assert.match(await page.locator('#call-board .board-empty').first().textContent(), /All statuses are hidden/);
     assert.equal(await page.locator('#question').getAttribute('placeholder'), 'Ask MeetOnTrack or capture a thought during the conversation.');
     assert.doesNotMatch(await page.evaluate(() => JSON.stringify(translations.en)), /Copilot/, 'no Copilot in the EN dictionary');
     assert.deepEqual(errors, []);
-    console.log('Call overview UI: owner-only chat, one chat tab, persistent status filters, RU/EN: OK');
+    console.log('Call overview UI: owner-only chat, one chat tab, RU/EN: OK');
   } finally {
     await browser.close();
   }

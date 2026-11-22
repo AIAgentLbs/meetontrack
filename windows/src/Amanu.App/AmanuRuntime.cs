@@ -69,7 +69,7 @@ public sealed class AmanuRuntime : IAsyncDisposable
 
         capture = new WindowsAudioCapture();
         coordinator = new RecordingCoordinator(sessions, new AutoRecordPolicy(Options(settings)), capture,
-            () => Settings.SystemAudio == "all");
+            () => Settings.SystemAudio == "all", () => SkipRecording.Calls());
         activityMonitor = new CallActivityMonitor(Matcher(settings));
         httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
         httpClient.DefaultRequestHeaders.UserAgent.ParseAdd($"MeetOnTrack-Windows/{AppVersion}");
@@ -90,9 +90,17 @@ public sealed class AmanuRuntime : IAsyncDisposable
         };
         coordinator.AutomaticStartFailed += (_, failure) =>
         {
-            Notify(T("Couldn't start recording", "Не удалось начать запись"),
-                failure.Error.Message + " " + T($"Trying again in {(int)failure.RetryIn.TotalSeconds} s.", $"Повторю через {(int)failure.RetryIn.TotalSeconds} с."),
-                NotificationKind.Error);
+            var retry = T($"Trying again in {(int)failure.RetryIn.TotalSeconds} s.", $"Повторю через {(int)failure.RetryIn.TotalSeconds} с.");
+            if (MicrophoneAccess.Read() is not (MicrophoneAccess.State.Allowed or MicrophoneAccess.State.Unknown))
+            {
+                // Once per call: the retries that follow fail for the same reason (the wait resets with each call).
+                if (failure.RetryIn == AutoRecordPolicy.FirstRetry)
+                    Notify(T("Couldn't start recording: no microphone access", "Не удалось начать запись: нет доступа к микрофону"),
+                        retry, NotificationKind.Error, MicrophoneAccess.OpenSettings);
+            }
+            else
+                Notify(T("Couldn't start recording", "Не удалось начать запись"),
+                    failure.Error.Message + " " + retry, NotificationKind.Error);
         };
         processing.StatusChanged += (_, status) =>
         {
@@ -203,7 +211,8 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public event EventHandler<string>? LiveStatusChanged;
     /// <summary>Settings or their problems changed — here or in the file.</summary>
     public event EventHandler? SettingsChanged;
-    public event EventHandler<(string Title, string Message, NotificationKind Kind)>? NotificationRequested;
+    /// <summary>A banner to show; <c>Click</c> is what clicking it does, null for the recordings window.</summary>
+    public event EventHandler<(string Title, string Message, NotificationKind Kind, Action? Click)>? NotificationRequested;
 
     /// <summary>
     /// Reads the config and settles the interface language before anything shows
@@ -420,6 +429,15 @@ public sealed class AmanuRuntime : IAsyncDisposable
 
     public Task TogglePauseAsync() => coordinator.TogglePauseAsync();
 
+    /// <summary>A pipe verb for one session, checked and done under the coordinator's gate (M1).</summary>
+    public async Task<bool> SessionCommandAsync(string verb, string? session)
+    {
+        var done = await coordinator.CommandAsync(verb, DateTimeOffset.Now,
+            () => RecordVerbs.Accepts(session, State.IsRecording ? LiveSessionId : ""));
+        if (done.Relisten) await ResumeRecognitionAsync();
+        return done.Accepted;
+    }
+
     public async Task StopForExitAsync()
     {
         if (State.IsRecording) await coordinator.StopAsync(DateTimeOffset.Now, "quit");
@@ -522,13 +540,16 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public bool IsLocalModelReady(string model) => models.IsReady(model);
     public bool IsLocalModelDownloading(string model) => models.IsDownloading(model);
     public bool LocalRuntimePresent => models.CliPath is not null;
+
+    /// <summary>The meeting_id the live file carries for this recording: what `record --session` names.</summary>
+    public string LiveSessionId => copilotExporter.MeetingId;
     public long? LocalModelBytes(string model) => models.DownloadedBytes(model);
 
     public Task CompleteSetupAsync(CancellationToken cancellationToken = default) =>
         AtomicFiles.WriteJsonAsync(SetupPath, new { version = 1, completed_at = DateTimeOffset.UtcNow }, cancellationToken);
 
-    public void Notify(string title, string message, NotificationKind kind) =>
-        NotificationRequested?.Invoke(this, (title, message, kind));
+    public void Notify(string title, string message, NotificationKind kind, Action? click = null) =>
+        NotificationRequested?.Invoke(this, (title, message, kind, click));
 
     /// <summary>
     /// The assistant gets one window of its own: an open one comes forward, otherwise the default

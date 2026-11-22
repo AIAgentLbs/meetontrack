@@ -28,6 +28,8 @@ internal sealed class TrayIconService : IDisposable
     private readonly MenuItem pauseItem = new();
     private readonly MenuItem autoRecordItem = new() { Header = T("Record meetings automatically", "Записывать встречи автоматически"), IsCheckable = true };
     private readonly ContextMenu menu = new();
+    /// <summary>What clicking the balloon on screen does; null opens the recordings.</summary>
+    private Action? balloonClick;
     private readonly System.Windows.Threading.DispatcherTimer clock = new() { Interval = TimeSpan.FromSeconds(1) };
 
     public TrayIconService(AmanuRuntime runtime, StatusWindow window)
@@ -70,7 +72,7 @@ internal sealed class TrayIconService : IDisposable
             if (args.Button == System.Windows.Forms.MouseButtons.Left) window.Dispatcher.Invoke(window.Reveal);
             else if (args.Button == System.Windows.Forms.MouseButtons.Right) window.Dispatcher.Invoke(OpenMenu);
         };
-        icon.BalloonTipClicked += (_, _) => window.Dispatcher.Invoke(App.ShowRecordings);
+        icon.BalloonTipClicked += (_, _) => window.Dispatcher.Invoke(balloonClick ?? new Action(App.ShowRecordings));
 
         runtime.StateChanged += OnChanged;
         runtime.SettingsChanged += OnChanged;
@@ -91,11 +93,12 @@ internal sealed class TrayIconService : IDisposable
 
     private void OnChanged(object? sender, EventArgs e) => System.Windows.Application.Current.Dispatcher.InvokeAsync(Refresh);
 
-    private void OnNotification(object? sender, (string Title, string Message, NotificationKind Kind) notification) =>
+    private void OnNotification(object? sender, (string Title, string Message, NotificationKind Kind, Action? Click) notification) =>
         System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
         {
             if (!icon.Visible) return;
             // One balloon at a time: a new one replaces the last rather than stacking.
+            balloonClick = notification.Click;
             icon.BalloonTipTitle = notification.Title;
             icon.BalloonTipText = notification.Message.Length > 250 ? notification.Message[..250] + "…" : notification.Message;
             icon.BalloonTipIcon = notification.Kind switch

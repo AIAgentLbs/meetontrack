@@ -5,7 +5,6 @@
   const word = (english, russian) => en() ? english : russian;
   let current = {}, recording = false, starting = false;
   const labels = {
-    "getting-started-open": ["Getting started", "Начать работу"],
     "getting-started-heading": ["Start using MeetOnTrack", "Начать работу с MeetOnTrack"],
     "getting-started-close": ["Close", "Закрыть"],
     "getting-started-intro": ["Start a call, see both sides in the transcript, then ask a question. Recording and local speech recognition need no paid API key. AI answers use the AI tool you choose below and its account limits.", "Начните звонок, увидьте обе стороны в стенограмме и задайте вопрос. Для записи и локальной расшифровки платный ключ не нужен. Ответы ИИ используют выбранный ниже инструмент ИИ и лимиты его аккаунта."],
@@ -46,6 +45,7 @@
     for (const [id, texts] of Object.entries(labels)) $(id).textContent = texts[en() ? 0 : 1];
     $("startup-record").textContent = recording ? word("Recording is active", "Запись идет") : starting ? word("Waiting for recording…", "Жду начала записи…") : word("Start recording now", "Начать запись сейчас");
     $("startup-record").disabled = recording || starting || current.capture_installed === false;
+    // Without the microphone a recording cannot start: the guide does not offer it (shell.js callStatus).
     $("startup-audio-status").textContent = !current.capture_installed
       ? word("Recorder not found. Install MeetOnTrack from meetontrack.com.", "Приложение для записи не найдено. Запустите установщик с meetontrack.com.")
       : current.live_enabled
@@ -77,7 +77,9 @@
     summary_rewrite: ["Summary rewrite", "Переписывание итога"],
     summary: ["Meeting summary", "Итог встречи"],
     speaker_names: ["Speaker names", "Имена спикеров"],
-    fact_check: ["Fact checking", "Проверка фактов"]
+    fact_check: ["Fact checking", "Проверка фактов"],
+    memo: ["Pre-call memo", "Мемо перед звонком"],
+    memo_check: ["Memo check", "Сверка с мемо"]
   };
   let aiState = {providers: [], purposes: {}}, draft = null, edited = false;  // edited: the person changed the draft
   const options = {};
@@ -235,7 +237,8 @@
     if (login) found.push([word(`You are not signed in to ${login.label}. There is no AI help until you sign in.`, `Вы не вошли в ${login.label}. Пока вы не войдете, подсказок ИИ не будет.`) + (setup.sign_in?.failed?.[login.provider] ? word(" The last sign-in did not finish.", " Прошлый вход не завершен.") : ""), signInButton(login.provider, login.label)]);
     else if (ai.state === "needs_choice") found.push([word("AI is not chosen. There is no AI help during calls.", "ИИ не выбран. Подсказок ИИ во время звонка не будет."), word("Choose AI", "Выбрать ИИ"), () => openStep("startup-ai-heading")]);
     else if (ai.state === "error") found.push([word("AI check failed: ", "Проверка ИИ не прошла: ") + plainError(ai.message || ""), word("Fix AI", "Исправить ИИ"), () => openStep("startup-ai-heading")]);
-    else if (aiFailure) found.push([word("AI help failed: ", "Подсказки ИИ не работают: ") + plainError(aiFailure), word("Fix AI", "Исправить ИИ"), () => openStep("startup-ai-heading")]);
+    // In the Call view a failed analysis is the feed's calm paused note (call.js), not a banner.
+    else if (aiFailure && !(aiFailure.analysis && document.body.dataset.view === "call")) found.push([word("AI help failed: ", "Подсказки ИИ не работают: ") + plainError(aiFailure.text), word("Fix AI", "Исправить ИИ"), () => openStep("startup-ai-heading")]);
     return found;
   }
   function renderBlockers() {
@@ -261,7 +264,11 @@
   window.renderGettingStartedStatus = data => {
     blockerState.health = data.recording_health || null;
     blockerState.live = data.transcript || null;
-    blockerState.aiFailure = data.copilot?.error || (data.copilot?.analysis?.state === "error" ? data.copilot.analysis.message : "");
+    const analysisError = data.copilot?.analysis?.state === "error" ? data.copilot.analysis.message || "" : "";
+    // A failed analysis also sets copilot.error (CodexSession.ask): the analysis wins, so in Call it shows once,
+    // as the feed's pause (D3). A failed Ask shows in the Call feed too (call.js callAskFailed).
+    blockerState.aiFailure = analysisError ? { text: analysisError, analysis: true }
+      : data.copilot?.error ? { text: data.copilot.error, analysis: false } : null;
     renderBlockers();
     const wasRecording = recording;
     recording = Boolean(data.recording_health?.audio_recording);

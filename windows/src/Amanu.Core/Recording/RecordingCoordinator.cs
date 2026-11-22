@@ -36,11 +36,16 @@ public sealed record RecordingState(
 /// </param>
 public sealed record CompletedRecording(SessionHandle Session, string Reason, bool Discarded, bool Settled);
 
+/// <summary>What a pipe command did: Accepted false means it named another session and nothing happened;
+/// Relisten asks the caller to restart live recognition.</summary>
+public sealed record SessionCommand(bool Accepted, bool Relisten);
+
 public sealed class RecordingCoordinator(
     SessionStore sessions,
     AutoRecordPolicy autoRecord,
     IAudioCapture capture,
-    Func<bool>? wholeSystemAudio = null) : IAsyncDisposable
+    Func<bool>? wholeSystemAudio = null,
+    Func<IReadOnlyList<SkipCall>?>? skips = null) : IAsyncDisposable
 {
     private readonly SemaphoreSlim gate = new(1, 1);
     private SessionHandle? current;
@@ -90,8 +95,19 @@ public sealed class RecordingCoordinator(
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Undo in MeetOnTrack removes the call from the file, and its skip with it. A file that cannot be
+            // read (null) is not an Undo: the skip holds.
+            var stored = skips?.Invoke();
+            if (autoRecord.SkippedCall is { } latched && (skips is null || stored is not null && !stored.Any(call => call.Start == latched)))
+                autoRecord.SkipLifted();
             var decision = autoRecord.Observe(observation);
-            if (decision.Action == AutoRecordAction.Start && current is null)
+            if (decision.Action == AutoRecordAction.Start && current is null
+                && stored?.FirstOrDefault(call => call.Covers(observation.At)) is { } skipped)
+            {
+                // The person chose in MeetOnTrack not to record this call; manual starts still work.
+                autoRecord.Skipped(skipped.Start);
+            }
+            else if (decision.Action == AutoRecordAction.Start && current is null)
             {
                 try
                 {
@@ -176,20 +192,53 @@ public sealed class RecordingCoordinator(
         try
         {
             if (current is null) return;
-            var paused = !State.IsPaused;
-            await capture.SetPausedAsync(paused, cancellationToken).ConfigureAwait(false);
-            if (paused) pausedAt = DateTimeOffset.UtcNow;
-            else if (pausedAt is { } started)
-            {
-                pausedFor += DateTimeOffset.UtcNow - started;
-                pausedAt = null;
-            }
-            Publish(State with { IsPaused = paused });
+            await TogglePauseCoreAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             gate.Release();
         }
+    }
+
+    /// <summary>
+    /// A control-pipe verb (stop, pause, resume, relisten) for the session <paramref name="accepts"/> names (J1, M1).
+    /// The session check, the pause state the verb reads and the action happen under one hold of the gate, so the
+    /// next call cannot start between the check and the action.
+    /// </summary>
+    public async Task<SessionCommand> CommandAsync(
+        string verb, DateTimeOffset now, Func<bool> accepts, CancellationToken cancellationToken = default)
+    {
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!accepts()) return new SessionCommand(false, false);
+            if (current is null) throw new InvalidOperationException("No active recording");
+            if (verb == "stop")
+            {
+                await StopCoreAsync(now, "manual", cancellationToken).ConfigureAwait(false);
+                return new SessionCommand(true, false);
+            }
+            var (togglePause, relisten) = RecordVerbs.Effects(verb, State.IsPaused);
+            if (togglePause) await TogglePauseCoreAsync(cancellationToken).ConfigureAwait(false);
+            return new SessionCommand(true, relisten);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task TogglePauseCoreAsync(CancellationToken cancellationToken)
+    {
+        var paused = !State.IsPaused;
+        await capture.SetPausedAsync(paused, cancellationToken).ConfigureAwait(false);
+        if (paused) pausedAt = DateTimeOffset.UtcNow;
+        else if (pausedAt is { } started)
+        {
+            pausedFor += DateTimeOffset.UtcNow - started;
+            pausedAt = null;
+        }
+        Publish(State with { IsPaused = paused });
     }
 
     private async Task StartCoreAsync(

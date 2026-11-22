@@ -192,3 +192,30 @@ class GoogleContextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GoogleProfileStatusTests(unittest.TestCase):
+    """Home picks the first-time Google step from the selected profile: none or own client = the native OAuth setup
+    (docs/DELIVERY.md), a named gws profile = the gws guide."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def status(self, profile):
+        provider = GoogleContext(Path(self.tmp.name) / "settings.json", "/fake/gws")
+
+        class Settings:
+            oauth = None
+
+            def profile(self):
+                return profile
+
+        provider.delivery_settings = Settings()
+        with patch.object(provider, "_run", side_effect=RuntimeError("google_not_connected")):
+            return provider.status()
+
+    def test_status_names_the_selected_profile(self):
+        self.assertEqual(self.status("")["profile"], "")
+        self.assertEqual(self.status("work")["profile"], "work")
+        self.assertFalse(self.status("")["client_configured"])

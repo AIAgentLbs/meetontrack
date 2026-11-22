@@ -12,7 +12,7 @@ class TeamsParticipantTests(unittest.TestCase):
             "capture_warnings": [{"reason": "system-audio-lost"}],
             "segments": [{"speaker": "Голос не подтверждён", "text": "a" * 300}],
         }, max_chars=20)
-        self.assertIn("нельзя приписывать Майку", context)
+        self.assertIn("нельзя приписывать пользователю", context)
         self.assertTrue(context.endswith("a" * 20))
 
     def test_main_tile_name_and_icon(self):

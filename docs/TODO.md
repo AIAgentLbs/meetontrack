@@ -25,6 +25,17 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
   Design: [call flow redesign](superpowers/specs/2026-11-20-call-flow-redesign-design.md).
 - [ ] [MEETONTRACK-165](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-165/): Calm the app chrome: at most three top-bar controls plus a menu, panels as overlays, one call status, regrouped settings, tab order and border contrast fixed (five P1 findings of the 0.1.32 audit).
   Design: [call flow redesign](superpowers/specs/2026-11-20-call-flow-redesign-design.md). Accepted at 30/40 or more on the Impeccable critique.
+- [ ] [MEETONTRACK-167](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-167/): `server.py --self-test` fails with real user settings: the self-test stand-in AI does not accept `planning=` when Google context is on.
+- [ ] [MEETONTRACK-168](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-168/): Live-call memo binding, rare edge cases in `copilot/web/call_plan.py` (alias-only file swap, rescheduled start, calls across midnight, a prep file attached to the neighbouring meeting with the same contact).
+- [ ] [MEETONTRACK-171](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-171/): Do not record and call status: edge cases after the redesign reviews.
+- [ ] [MEETONTRACK-172](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-172/): `test_call_plan` fails outside European time zones.
+- [ ] [MEETONTRACK-173](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-173/): Do not record: recorder-owned skip by event under the start lock, then re-enable (off since R35, `server.SKIP_RECORDING_ENABLED`).
+- [ ] [MEETONTRACK-174](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-174/): Home: memo citations, goal links, first-use Google guide focus (last Codex pass on the Home polish, R40).
+- [ ] [MEETONTRACK-178](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-178/): After view: Send now on a report held past the 3-day delivery window does nothing and shows no reason.
+- [ ] [MEETONTRACK-179](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-179/): After view: the "How recipients will see it" read-only preview of the outgoing report (spec, deferred from plan 4).
+- [ ] [MEETONTRACK-180](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-180/): After delivery: participants.json with a 90-day backfill, CRM note update on Send again, and a 1-minute first retry.
+- [ ] [MEETONTRACK-181](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-181/): Remove code the new After screen left unreachable (status filters, Preparation tab, tab bars, transcript Hide/Show, Swap panels), plus the memo check that shows "waiting" on old calls that never become ready.
+- [ ] [MEETONTRACK-182](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-182/): After view: residual P2/P3 from the last review round (pending edits on a meeting switch, typing pause and the archive lock, Hold while queued, legacy first-send time, Telegram destination label, resend error scope).
 - [x] MEETONTRACK-1 (done and verified, closed 2026-11-14): `scripts/check-note-ui.cjs` fails at 0.1.11 and identically at the 0.1.10
   source (`ae27f2b`): `#note-help` shows `--:--` where the test expects the
   fixture's elapsed time `02:44`. Decide whether the hint must render the call

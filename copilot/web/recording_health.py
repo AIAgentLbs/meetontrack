@@ -1,7 +1,7 @@
 """Observe durable audio independently of recognition; never start/stop capture.
 
-Can run beside an old Capture binary during a call. Recovery only sends the
-existing `record resume` command after matching a live owner and meeting clock.
+Recovery only sends `record relisten` (restart recognition, never unpause) after matching a
+live owner and meeting clock, and nothing while a Stop's pause is pending (`hold`).
 """
 from __future__ import annotations
 
@@ -181,10 +181,11 @@ class RecognitionGuard:
     max_attempts = 3
 
     def __init__(self, health: RecordingHealth, live_file: Path, state_file: Path,
-                 binary: Path, runner=None, notifier=None):
+                 binary: Path, runner=None, notifier=None, hold=None):
         self.health, self.live_file, self.state_file, self.binary = health, live_file, state_file, binary
         self.runner = runner or subprocess.run
         self.notifier = notifier
+        self.hold = hold or (lambda: False)  # true while a Stop is pending (server.py: RECORDING_CONTROL)
         self.lock = threading.RLock()
         self.identity = ""
         self.attempts = []
@@ -239,7 +240,7 @@ class RecognitionGuard:
                     if native_status not in {"loading", "overloaded", "error", "recording"}:
                         raise ValueError("Нет активной расшифровки для возобновления")
                     stalled = True
-                if stalled and meeting_id and capture["audio_recording"]:
+                if stalled and meeting_id and capture["audio_recording"] and not self.hold():
                     # An explicit owner retry may start a fresh bounded budget,
                     # but never bypass the in-flight cooldown.
                     if (manual_meeting_id is not None and len(self.attempts) >= self.max_attempts
@@ -265,7 +266,7 @@ class RecognitionGuard:
                         self._save({"identity": identity, "attempts": self.attempts,
                                     "state": "recovering", "meeting_id": meeting_id})
                         try:
-                            self.runner([str(self.binary), "record", "resume"],
+                            self.runner([str(self.binary), "record", "relisten"],
                                         capture_output=True, text=True, timeout=8, check=True)
                             state, reason = "recovering", "recognition_resume_sent"
                         except (OSError, subprocess.SubprocessError):

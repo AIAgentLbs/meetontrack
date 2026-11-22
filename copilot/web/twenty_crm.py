@@ -645,6 +645,20 @@ class TwentyContext:
                               "date": str(note.get("createdAt") or "")[:40]})
         return items
 
+    def records(self, attendees: list[str], title: str = "") -> list[dict]:
+        """CRM records for a meeting not yet started; the live meeting's cache stays as it is."""
+        client = self.client_factory()
+        if client is None or not (attendees or title):
+            return []
+        with self._lock:
+            generation = self._generation
+        try:
+            items = self._collect(client, attendees, title)
+        except TwentyError:
+            return []
+        with self._lock:
+            return items if generation == self._generation else []
+
     def augment(self, meeting_id: str, attendees: list[str], title: str = "") -> str:
         client = self.client_factory()
         if client is None or not meeting_id or not (attendees or title):
