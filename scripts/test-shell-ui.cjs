@@ -106,6 +106,20 @@ const errors = [];
         endedAfterQuietEnd: viewFor({ transcript: { meeting_id: 'm1', status: 'finished', latest_at: ago(150), ended_at: ago(10) } }, null, now),
         finishedExport: viewFor({ transcript: { meeting_id: 'm1', status: 'finished', updated_at: ago(10) } }, null, now),
         endedLongAgo: viewFor({ transcript: { meeting_id: 'm1', status: 'finished', latest_at: ago(10), ended_at: ago(130) } }, null, now),
+        // After opened by hand in the seconds after the final stop, while m1 still reads live.
+        ...(() => {
+          const stop = minutes => ({ recording_control: { last_stop: { meeting_id: 'm1', stopped_at: ago(minutes) } } });
+          const stillLive = { ...stop(0.1), transcript: { meeting_id: 'm1', status: 'recording', live: true } };
+          const byHand = { view: 'after', key: callKey(stillLive, now), at: now - 5000 };
+          return {
+            stopLive: viewFor(stillLive, byHand, now),
+            // The recorder then goes inactive with a status other than finished: still After, no Home flash.
+            stopInactive: viewFor({ ...stop(0.1), recording_health: { capture: { state: 'inactive' } },
+              transcript: { meeting_id: 'm1', status: 'stopped', live: false, updated_at: ago(0.1) } }, byHand, now),
+            stop3h: viewFor({ ...stop(180), transcript: { meeting_id: 'm1', status: 'stopped', live: false } }, null, now),
+            stopNewCall: viewFor({ ...stop(0.1), transcript: { meeting_id: 'm2', status: 'recording', live: true } }, byHand, now),
+          };
+        })(),
       };
     });
     assert.deepEqual(views, {
@@ -114,6 +128,7 @@ const errors = [];
       recordingNotLive: 'call', stalled: 'call', paused: 'call', crashed: 'home', keyHolds: true,
       manualAfter3h: 'home', manualAfter10m: 'after',
       endedNoLatest: 'after', endedAfterQuietEnd: 'after', finishedExport: 'after', endedLongAgo: 'home',
+      stopLive: 'after', stopInactive: 'after', stop3h: 'home', stopNewCall: 'call',
     });
 
     // One call status, first rule that matches: live, a call running without a recording, a missing

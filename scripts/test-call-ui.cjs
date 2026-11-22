@@ -1252,7 +1252,7 @@ async function polish(browser) {
     assert.equal(shown.workspace, shown.feed);
     const board = await page.locator('#call-board').innerText();
     assert.deepEqual(await page.locator('#call-board .board-column-header h3').allTextContents(),
-      ['Спросить у клиента', 'Вопросы к вам', 'Риски и возражения', 'Проверка фактов']);
+      ['Спросить у собеседника', 'Вопросы к вам', 'Риски и возражения', 'Проверка фактов']);
     for (const line of await page.locator('#call-board .board-column-header p').allTextContents()) assert.doesNotMatch(line, /(^|\s)0\s/, line);
     assert.doesNotMatch(board, /стенограм/i);
     // A tag every card in a column shares is left out; a column that mixes the memo and the call keeps them (L5).
@@ -1835,7 +1835,7 @@ async function round4(browser) {
     const page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru', width: 400, height: 900 });
     await page.click('#call-more');
     await page.click('#call-more-board');
-    for (const heading of ['Спросить у клиента', 'Вопросы к вам', 'Риски и возражения', 'Проверка фактов']) {
+    for (const heading of ['Спросить у собеседника', 'Вопросы к вам', 'Риски и возражения', 'Проверка фактов']) {
       const node = page.locator('#call-board .board-column-header h3', { hasText: heading });
       await node.scrollIntoViewIfNeeded();
       const box = await node.boundingBox();
@@ -1950,7 +1950,7 @@ async function round4(browser) {
     await page.context().close();
   }
   // L5: at 400 px the line to say is a clear step larger than the question above it; the board files a clarification
-  // under To ask the client and keeps suggested replies out of Risks.
+  // under Ask the other side and keeps suggested replies out of Risks.
   {
     const page = await callPage(browser, 'answer', { lang: 'ru', data: 'ru', width: 400 });
     const [question, hint] = await Promise.all(['#call-slot .heard-q', '#call-slot .hint'].map(selector =>

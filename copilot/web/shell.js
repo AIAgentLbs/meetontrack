@@ -42,6 +42,9 @@ function viewFor(state, manual, now = Date.now()) {
   if (manual && manual.key === callKey(state, now) && now - manual.at < AFTER_WINDOW_MS) return manual.view;
   if (isLive(state, now)) return "call";
   const transcript = state?.transcript || {};
+  // This call was stopped for good: After, whatever status the recorder leaves behind as it goes inactive.
+  const stop = state?.recording_control?.last_stop;
+  if (transcript.meeting_id && stop?.meeting_id === transcript.meeting_id && now - Date.parse(stop.stopped_at) <= AFTER_WINDOW_MS) return "after";
   // When the recording ended, as the server counts it (meeting_boundaries.py): the stop, the finished export, the last line.
   const ended = Date.parse(transcript.ended_at || transcript.updated_at || transcript.latest_at || "");
   if (transcript.status === "finished" && transcript.meeting_id && now - ended <= AFTER_WINDOW_MS) return "after";
