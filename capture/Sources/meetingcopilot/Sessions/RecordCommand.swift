@@ -14,7 +14,7 @@ struct Record: ParsableCommand {
         abstract: "Start or stop recording in the running meetingcopilot."
     )
 
-    @Argument(help: "start, stop, toggle, pause, or resume the current recording.")
+    @Argument(help: "start, stop, toggle, pause, resume, or relisten (restart recognition only) the current recording.")
     var action: RecordRequest.Action
 
     /// Test seam: who answers the request. The real one rings the running app.
@@ -44,6 +44,24 @@ enum RecordRequest {
         case toggle
         case pause
         case resume
+        /// Restart recognition of a running recording, never unpause it: the
+        /// server's recognition watchdog sends this, so it cannot undo a Stop.
+        case relisten
+    }
+
+    enum Effect: Equatable, Sendable {
+        case pause, unpause, relisten
+    }
+
+    /// What pause, resume and relisten do to a live session. Only an explicit
+    /// `resume` unpauses; a paused session ignores `relisten`.
+    static func effects(of action: Action, paused: Bool) -> [Effect] {
+        switch action {
+        case .pause: return paused ? [] : [.pause]
+        case .resume: return paused ? [.unpause, .relisten] : [.relisten]
+        case .relisten: return paused ? [] : [.relisten]
+        case .start, .stop, .toggle: return []
+        }
     }
 
     private static let request = Notification.Name("com.aiagentlabs.meeting-copilot.record")

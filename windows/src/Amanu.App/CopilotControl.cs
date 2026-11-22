@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using Amanu.Core.Recording;
 
 namespace Amanu.App;
 
@@ -38,13 +39,13 @@ public static class CopilotControl
                             if (!runtime.State.IsRecording) throw new InvalidOperationException("No active recording");
                             await runtime.StopManualAsync(); break;
                         case "pause":
-                            if (!runtime.State.IsRecording) throw new InvalidOperationException("No active recording");
-                            if (!runtime.State.IsPaused) await runtime.TogglePauseAsync();
-                            break;
                         case "resume":
+                        case "relisten":
                             if (!runtime.State.IsRecording) throw new InvalidOperationException("No active recording");
-                            if (runtime.State.IsPaused) await runtime.TogglePauseAsync();
-                            await runtime.ResumeRecognitionAsync(); break;
+                            var (togglePause, relisten) = RecordVerbs.Effects(command!, runtime.State.IsPaused);
+                            if (togglePause) await runtime.TogglePauseAsync();
+                            if (relisten) await runtime.ResumeRecognitionAsync();
+                            break;
                         case "quit-when-idle":
                             _ = System.Windows.Application.Current.Dispatcher.InvokeAsync(App.QuitWhenIdleAsync); break;
                         default: throw new InvalidOperationException("Unknown capture command");

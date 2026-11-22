@@ -715,19 +715,26 @@ final class AppController {
         case .start where session == nil: toggle()
         case .stop where session != nil: toggle()
         case .toggle: toggle()
-        case .pause:
-            guard let session, !session.isPaused else { return }
-            session.pause()
-            tick()
-        case .resume:
+        case .pause, .resume, .relisten:
             guard let session else { return }
-            if session.isPaused { session.resume() }
-            // Recognition is independent of durable capture: rebuilding its
-            // epoch must not stop/recreate the audio files or meeting ID.
-            toggleLive(true)
+            for effect in RecordRequest.effects(of: action, paused: session.isPaused) {
+                switch effect {
+                case .pause: setPaused(session, true)
+                case .unpause: setPaused(session, false)
+                // Recognition is independent of durable capture: rebuilding its
+                // epoch must not stop/recreate the audio files or meeting ID.
+                case .relisten: toggleLive(true)
+                }
+            }
             tick()
         case .start, .stop: break
         }
+    }
+
+    /// Pause or unpause the capture, and say so in the live file the server reads.
+    private func setPaused(_ session: RecordingSession, _ paused: Bool) {
+        if paused { session.pause() } else { session.resume() }
+        Task { [liveTranscription] in await liveTranscription.setCapturePaused(paused) }
     }
 
     private func toggle() {
@@ -742,11 +749,7 @@ final class AppController {
 
     private func togglePause() {
         guard let session else { return }
-        if session.isPaused {
-            session.resume()
-        } else {
-            session.pause()
-        }
+        setPaused(session, !session.isPaused)
         tick()
     }
 

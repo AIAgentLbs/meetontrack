@@ -2490,6 +2490,8 @@ SKIPS = SkipRecording(SKIP_RECORDING_FILE)
 # The id the page shows in /api/state (a logical id after a boundary split); annotated_snapshot is defined further down.
 RECORDING_CONTROL = RecordingControl(RECOGNITION_GUARD.binary, RECORDING_STOP_FILE,
                                      lambda: annotated_snapshot()["meeting_id"])
+# Recognition recovery never runs during a Stop's undo window: only an explicit Resume unpauses.
+RECOGNITION_GUARD.hold = lambda: RECORDING_CONTROL.stopping is not None
 PLANS = CallPlans(PREPARATIONS_FILE, CALL_PLAN_STATE_FILE, ACTIVE_REPOS_FILE,
                  CalendarMeetings(enabled=lambda: "calendar" in GOOGLE_CONTEXT.enabled_sources()),
                  app_plans=lambda: MEMOS.plans(),  # late-bound: MEMOS is defined further down

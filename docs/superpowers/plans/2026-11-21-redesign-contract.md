@@ -120,10 +120,13 @@ opens the system settings page for that permission.
 
 ## Recording control (plan 3)
 
-`record resume` only restarts live recognition of a running recording
-(`MeetingCopilot.swift:718`, `CopilotControl.cs:40`); after `record stop`
-there is nothing to resume, so Stop pauses first and stops for good after the
-undo window.
+After `record stop` there is nothing to resume, so Stop pauses first and stops
+for good after the undo window. `record resume` unpauses and restarts
+recognition; `record relisten` only restarts recognition of a running,
+unpaused recording. The server's recognition watchdog sends `relisten`, and
+nothing at all while a stop is pending, so only an explicit Resume unpauses
+(fix wave A1). A paused capture publishes `status: "paused"` in the live file
+on both platforms.
 
 - `POST /api/recording/stop` with `{"meeting_id": "..."}` pauses the recorder
   at once (`record pause`) and answers

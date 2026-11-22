@@ -1,4 +1,6 @@
 import ArgumentParser
+import Foundation
+import os
 import Testing
 
 @testable import meetingcopilot
@@ -32,5 +34,33 @@ struct RecordRequestTests {
         Record.ask = { _ in true }
 
         try Record.parse(["resume"]).run()
+    }
+
+    /// The recognition watchdog sends `relisten`, never `resume`: only an
+    /// explicit Resume unpauses, so a Stop's pause survives a watchdog tick.
+    @Test func watchdogNeverUnpausesAPausedSession() throws {
+        #expect(try Record.parse(["relisten"]).action == .relisten)
+        #expect(RecordRequest.effects(of: .relisten, paused: true) == [])
+        #expect(RecordRequest.effects(of: .relisten, paused: false) == [.relisten])
+        #expect(RecordRequest.effects(of: .resume, paused: true) == [.unpause, .relisten])
+        #expect(RecordRequest.effects(of: .resume, paused: false) == [.relisten])
+        #expect(RecordRequest.effects(of: .pause, paused: false) == [.pause])
+        #expect(RecordRequest.effects(of: .pause, paused: true) == [])
+    }
+
+    /// A paused capture is published as `paused` in the live file, which the
+    /// server's watchdog reads, whatever recognition is doing.
+    @Test func pausedCaptureIsPublished() async {
+        let coordinator = LiveTranscriptionCoordinator(resolve: { .unavailable("off") })
+        let published = OSAllocatedUnfairLock<[LiveTranscriptionCoordinator.Status]>(initialState: [])
+        await coordinator.beginRecording(
+            enabled: true, update: { snapshot in published.withLock { $0.append(snapshot.status) } },
+            attach: { _ in })
+        await coordinator.setCapturePaused(true)
+        #expect(await coordinator.snapshot.status == .paused)
+        #expect(published.withLock { $0.last } == .paused)
+        await coordinator.setCapturePaused(false)
+        #expect(await coordinator.snapshot.status == .unavailable("off"))
+        await coordinator.finishRecording()
     }
 }

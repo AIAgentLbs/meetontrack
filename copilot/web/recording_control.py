@@ -1,7 +1,7 @@
 """Stop pauses the recorder at once; the real `record stop` lands after the undo window.
 
-`record resume` only restarts recognition of a running recording, so Stop pauses first and
-stops for good `grace` seconds later. The pending stop lives on disk, so a closed window or a
+After `record stop` there is nothing to resume, so Stop pauses first and stops for good `grace`
+seconds later. The pending stop lives on disk, so a closed window or a
 restarted server still ends the recording. Contract: "Recording control (plan 3)".
 """
 from __future__ import annotations
