@@ -235,6 +235,7 @@ body[data-view="call"] :is(#transcript-show, #swap-panels) { display: none; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .say { font-size: 13px; font-weight: 700; color: var(--accent-strong); margin-bottom: 4px; }
 .hint { font-size: 24px; line-height: 1.35; font-weight: 700; max-width: 26em; text-wrap: balance; overflow-wrap: anywhere; }
+.hint.long { font-size: 20px; }
 .heard-q { font-size: 20px; line-height: 1.4; font-weight: 400; max-width: 34em; overflow-wrap: anywhere; }
 .heard-q + .hint { margin-top: 12px; }
 .heard-wait { margin-top: 10px; color: var(--muted); font-size: 14px; }
@@ -304,6 +305,7 @@ body[data-view="call"]:not([data-call-panel="notes"]):not([data-call-panel="chat
 }
 @media (max-width: 600px) {
   .hint { font-size: 22px; }
+  .hint.long { font-size: 19px; }
 }
 /* Window narrower than 700 px: navigation goes into the menu. */
 @media (max-width: 700px) {

@@ -24,18 +24,18 @@ async function functions(browser) {
     dashFallback: speakable('Да — это первый ответ без запятых который идет все дальше и дальше и еще дальше'),
     dashEnd: speakable('Yes, one two three four five six seven eight nine ten eleven— twelve thirteen'),
   }));
-  assert.equal(spoken.dash, 'Уточните сроки запуска пилота');
-  assert.ok(!spoken.dash.includes('—'));
+  // B1: a hint is never cut. The first line shows whole: no fragment, no "…".
+  assert.equal(spoken.dash, 'Уточните сроки запуска пилота — заказчик говорил про конец квартала, а в договоре стоит середина следующего года без оговорок');
   assert.equal(spoken.short, 'Who signs the purchase on your side, and when?');
-  assert.equal(spoken.question, 'Why is the proposal 1,1 million?');
-  assert.equal(spoken.plain, 'One two three four five six seven eight nine ten eleven twelve…');
+  assert.equal(spoken.question, 'Why is the proposal 1,1 million, if your own estimate is 3,4 million and the contractor costs 700 thousand?');
+  assert.equal(spoken.plain, 'One two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty');
   assert.equal(spoken.evidence, 'Ask who signs.');
   assert.equal(spoken.inline, 'Ask who signs.');
-  // Model markdown never reaches the hint, and the cut never leaves a lone dash.
+  // Model markdown never reaches the hint.
   assert.equal(spoken.markdown, 'Ask who signs now.');
   assert.equal(spoken.markdownInline, 'Ask who signs.');
-  assert.equal(spoken.dashFallback, 'Да это первый ответ без запятых который идет все дальше и дальше…');
-  assert.equal(spoken.dashEnd, 'Yes, one two three four five six seven eight nine ten eleven…');
+  assert.equal(spoken.dashFallback, 'Да — это первый ответ без запятых который идет все дальше и дальше и еще дальше');
+  for (const line of Object.values(spoken)) assert.ok(!line.endsWith('…'), line);
 
   // pickHint: the newest fresh hint of the lowest tier, the memo when nothing is fresh.
   const picks = await run(() => {
@@ -105,15 +105,15 @@ async function functions(browser) {
   const marked = await run(() => hintCandidates({ journal: [{ category: 'RISK', created_at: new Date().toISOString(),
     text: '**Say the date slips.**\n**Source:** `memo`' }] })[0]);
   assert.deepEqual([marked.text, marked.source], ['The date slips.', 'Source: memo']);
-  // The verb sets the label, also when the cut drops the question mark; the full line stays reachable (ruling 6).
+  // The verb sets the label (ruling 6), and the line shows whole (B1).
   const verbs = await run(() => ['Спросите, кто подписывает?', 'Скажите: старт в понедельник.', 'Ask whether the regional offices that join the pilot later keep the same price and start conditions',
     'Asking around is fine.', 'Уточните сроки.'].map(line => {
     const hint = hintCandidates({ journal: [{ category: line.startsWith('Уточните') ? 'CONTRADICTION' : 'ASK', text: line, created_at: new Date().toISOString() }] })[0];
     return [hint.label.split(' · ')[0], hint.text, hint.full];
   }));
   assert.deepEqual(verbs, [['Ask', 'Кто подписывает?', ''], ['Say', 'Старт в понедельник.', ''],
-    ['Ask', 'Whether the regional offices that join the pilot later keep the same…',
-      'Whether the regional offices that join the pilot later keep the same price and start conditions'],
+    // B1: shown whole; an Ask line that lost its verb still reads as a question.
+    ['Ask', 'Whether the regional offices that join the pilot later keep the same price and start conditions?', ''],
     ['Say', 'Asking around is fine.', ''], ['Clarify', 'Сроки.', '']]);
   // A resolved contradiction is never a hint; an open one is.
   const contradictions = await run(() => hintCandidates({ journal: [
@@ -275,7 +275,8 @@ async function everyFixture(browser) {
       assert.doesNotMatch(report.text, /AI_[A-Z]+|no answer within/, `${label}: server text`);
       assert.ok(report.whereNew, `${label}: Where this comes from reveals nothing new`);
       if (report.hint !== null) {
-        assert.ok(report.hint >= 22 && report.hint <= 24, `${label}: hint ${report.hint}px`);
+        // 22-24 px, one step less for a long line (B1).
+        assert.ok(report.hint >= (name === 'long_hint' ? 19 : 22) && report.hint <= 24, `${label}: hint ${report.hint}px`);
         assert.equal(report.max, report.hint, `${label}: ${report.largest} is larger than the hint`);
       }
     }
@@ -342,14 +343,11 @@ async function interactions(browser) {
   assert.deepEqual(await page.locator('#call-slot .why-more p').allTextContents(), ['From the memo, question 2', 'Example LLC']);
   await page.context().close();
 
-  // A hint cut for reading aloud keeps its verb label and opens whole (ruling 6).
+  // A long hint keeps its verb label and shows whole: nothing to open (ruling 6, B1).
   page = await callPage(browser, 'long_hint');
   assert.match(await text(page, '#call-slot .say'), /^Ask · \d\d:\d\d$/);
-  assert.match(await text(page, '#call-slot .hint'), /^Whether the regional offices .*…$/);
-  await page.click('#call-slot .why-acts button.ql');
-  assert.equal(await page.locator('#call-slot .why-more p').first().textContent(),
-    'Whether the regional offices that join the pilot later will keep the same price and the same start conditions as the first two offices');
-  assert.equal(await visible(page, '#call-slot .why-more'), true);
+  assert.equal(await text(page, '#call-slot .hint'),
+    'Will the regional offices that join the pilot later keep the same price and the same start conditions as the first two?');
   await page.context().close();
   page = await callPage(browser, 'long_hint', { lang: 'ru', data: 'ru' });
   assert.match(await text(page, '#call-slot .say'), /^Спросите · \d\d:\d\d$/);
@@ -886,6 +884,23 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // B1: the long hint shows whole, in one smaller step of type, never clamped and with nothing hidden behind Where.
+  for (const [lang, width] of [['ru', 1440], ['en', 1440], ['ru', 400]]) {
+    const page = await callPage(browser, 'long_hint', { lang, data: lang, width });
+    const long = build('long_hint', lang).state.journal[0].text;
+    const shown = await text(page, '#call-slot .hint');
+    assert.ok(long.endsWith(shown) || long.toLowerCase().endsWith(shown.toLowerCase()), `${lang}: ${shown}`);
+    assert.ok(!shown.endsWith('…'), shown);
+    const style = await page.$eval('#call-slot .hint', node => ({ size: parseFloat(getComputedStyle(node).fontSize),
+      clamp: getComputedStyle(node).webkitLineClamp, cut: node.scrollHeight > node.clientHeight + 1 }));
+    assert.deepEqual([style.size, style.cut], [width > 600 ? 20 : 19, false], `${lang} ${width}: ${JSON.stringify(style)}`);
+    assert.equal(await page.locator('#call-slot .why-full').count(), 0);
+    await page.context().close();
+  }
+  const short = await callPage(browser, 'hint');
+  assert.equal(await short.$eval('#call-slot .hint', node => parseFloat(getComputedStyle(node).fontSize)), 24);
+  await short.context().close();
+
   // A4: during the undo window and after the final stop the feed never says the call is heard or recorded, no
   // problem card shows for the paused tracks, the hint slot gives way to one plain line, and the ask field still works.
   for (const fixture of ['stopped', 'stopped_final']) {

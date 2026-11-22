@@ -2,21 +2,14 @@
 // Transcript, journal and AI text are untrusted: every value goes in through textContent.
 const HINT_FRESH_MS = 30000; // an event hint stays current this long
 const OWN_FRESH_MS = 60000; // the answer to the person's own question stays current this long
-const CALL_HINT_WORDS = 12;
+const CALL_HINT_WORDS = 12; // a longer hint line shows whole, one step smaller (B1)
 const CALL_HINT_SPLIT = /\n|(?:Основание|Источник|Evidence|Source):/u; // the split of the board's main line
-const CALL_CLAUSE_MARKS = [", ", "; ", ": ", " - ", " — ", " – "]; // dashes: Russian model output uses them (F15)
 const callWords = text => text.split(/\s+/).filter(word => /[\p{L}\p{N}]/u.test(word));
 
-// The part of a hint a person can say aloud: its first line, cut to a clause or to twelve words.
+// The part of a hint a person can say aloud: its first line, whole. A hint is never cut: a fragment cannot be
+// said to a client (B1), so a long line wraps and steps its type down instead.
 function speakable(text) {
-  const line = readableAnswer(String(text || "")).split(CALL_HINT_SPLIT)[0].trim();
-  if (callWords(line).length <= CALL_HINT_WORDS) return line;
-  const at = Math.min(...CALL_CLAUSE_MARKS.map(mark => line.indexOf(mark)).filter(index => index > 0));
-  const clause = Number.isFinite(at) ? line.slice(0, at).trim() : "";
-  const size = callWords(clause).length;
-  if (size >= 3 && size <= CALL_HINT_WORDS) return line.endsWith("?") && !clause.endsWith("?") ? `${clause}?` : clause;
-  // The same words the count saw: a lone dash is not a word, and no dash or stop is left before the ellipsis.
-  return `${callWords(line).slice(0, CALL_HINT_WORDS).join(" ").replace(/[\s,;:.\-–—]+$/u, "")}…`;
+  return readableAnswer(String(text || "")).split(CALL_HINT_SPLIT)[0].trim();
 }
 
 const callAt = value => {
@@ -32,7 +25,9 @@ function callLine(raw) {
   for (const [verb, words] of CALL_VERBS) {
     const match = line.match(new RegExp(`^(?:${words})(?=[\\s,:]|$)[\\s,:]*`, "iu"));
     if (match && match[0].length < line.length) {
-      const rest = line.slice(match[0].length);
+      let rest = line.slice(match[0].length);
+      // "Ask whether…" without its verb is a question: it ends like one, never as a bare fragment (B1).
+      if (verb === "ask" && !/[?？]$/u.test(rest)) rest = `${rest.replace(/[.\s]+$/u, "")}?`;
       return { line, verb, rest: rest[0].toLocaleUpperCase() + rest.slice(1) };
     }
   }
@@ -229,7 +224,9 @@ function callSlotNodes(slot) {
     actions.append(callButton("ql", t("call.open_chat"), () => openCallPanel("chat")));
     nodes.push(actions);
   }
-  if (slot.type === "answer" || slot.type === "hint") nodes.push(textNode("p", "hint", slot.text));
+  if (slot.type === "answer" || slot.type === "hint") {
+    nodes.push(textNode("p", callWords(slot.text).length > CALL_HINT_WORDS ? "hint long" : "hint", slot.text));
+  }
   // Where this comes from opens what the slot does not show: the whole hint when it was cut, the whole source line
   // and the detail. A source that fits on its line with nothing else to show gets no control (callFitWhere).
   const more = [slot.full, slot.source, ...(slot.detail || [])].filter(Boolean);
