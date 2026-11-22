@@ -472,6 +472,8 @@ function openCallPanel(panel) {
     if (!wasOpen) callOpener = active === body ? null : active.closest("#call-more-menu") ? $("call-more") : active;
     body.dataset.callPanel = panel;
     if (panel !== "transcript") document.querySelector(`[data-content-view="${panel}"]`).click();
+    // The tabs are hidden in Call: the transcript itself, never Frames left selected in After (J5).
+    else document.querySelector('[data-transcript-view="transcript"]').click();
     if (panel === "board") renderCallBoard(currentCallPlan, currentJournal); // the Call form of the board (C1)
   } else {
     delete body.dataset.callPanel;

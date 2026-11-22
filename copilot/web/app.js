@@ -2448,13 +2448,15 @@ function renderCallBoard(plan, journal) {
       : ["RISK", "OBJECTION", "CONTRADICTION"].includes(item.category) ? "risks" : "";
     if (lane) entries.push({ ...item, origin: "journal", lane, status: item.status || "open" });
   }
-  // In Call the board has no status filter, and a live hint that repeats a prepared question shows once (C1).
+  // In Call the board has no status filter, and a live hint that repeats a prepared item of its own lane shows once
+  // (C1); a question put to the user is never dropped for one prepared for the client (J6).
   const statuses = call ? new Set(BOARD_STATUSES) : boardStatuses;
   if (call) {
-    const prepared = entries.filter((item) => item.origin === "plan").map((item) => callLine(item.text).rest);
+    const prepared = entries.filter((item) => item.origin === "plan");
     for (let index = entries.length - 1; index >= 0; index--) {
       const item = entries[index];
-      if (item.origin === "journal" && prepared.some((text) => callSame(text, callLine(item.text).rest))) entries.splice(index, 1);
+      if (item.origin === "journal" && prepared.some((plan) => plan.lane === item.lane
+        && callSame(callLine(plan.text).rest, callLine(item.text).rest))) entries.splice(index, 1);
     }
   }
   const fragment = document.createDocumentFragment();

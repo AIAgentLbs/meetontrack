@@ -1303,6 +1303,30 @@ async function polish(browser) {
 
 // Sections H, I and J: critique 3, the re-review and Codex on the fix wave.
 async function round3(browser) {
+  // J6: the board drops a repeat only within its lane: a prepared question never erases the same one put to the user.
+  {
+    const page = await callPage(browser, 'board_open');
+    const state = page.api.fixture.state;
+    const prepared = 'Who signs off the purchase?';
+    state.journal.push({ id: 'j-in', category: 'INCOMING_QUESTION', text: prepared, meeting_id: 'm1',
+      created_at: new Date().toISOString(), status: 'open' }, { id: 'j-ask', category: 'ASK', text: `Ask ${prepared}`,
+      meeting_id: 'm1', created_at: new Date().toISOString(), status: 'open' });
+    await refresh(page);
+    await page.click('#call-board-open');
+    const lane = name => page.locator(`#call-board [data-board-list="${name}"] .board-item`).allInnerTexts();
+    assert.equal((await lane('incoming')).filter(item => item.includes(prepared)).length, 1, 'the incoming question stays');
+    assert.equal((await lane('mine')).filter(item => item.includes(prepared)).length, 1, 'the prepared one shows once');
+    await page.context().close();
+  }
+  // J5: Transcript in Call always opens the transcript itself, never Frames carried over from After.
+  {
+    const page = await callPage(browser, 'hint');
+    await page.evaluate(() => document.querySelector('[data-transcript-view="frames"]').click());
+    await page.click('#call-transcript-open');
+    assert.equal(await visible(page, '#transcript'), true);
+    assert.equal(await page.evaluate(() => document.getElementById('frames').hidden), true);
+    await page.context().close();
+  }
   // J3: a queued question belongs to its meeting; a second one never overwrites the first.
   {
     const page = await callPage(browser, 'hint', { lang: 'ru', data: 'ru' });
