@@ -148,7 +148,9 @@ function pickHint(state, now) {
   const events = hints.filter(hint => hint.kind !== "memo" && hint.at !== null).sort((a, b) => b.at - a.at);
   const fresh = events.filter(hint => now - hint.at <= (hint.kind === "own" ? OWN_FRESH_MS : HINT_FRESH_MS));
   // The slot picks among the latest analysis only, so the current hint is never older than what Earlier lists (L2).
-  const latest = fresh.filter(hint => fresh[0].at - hint.at <= CALL_ANALYSIS_MS);
+  // The answer to the person's own question is not analysis: it keeps its own freshness (P5).
+  const analysis = fresh.filter(hint => hint.kind !== "own");
+  const latest = fresh.filter(hint => hint.kind === "own" || analysis[0].at - hint.at <= CALL_ANALYSIS_MS);
   const event = latest.sort((a, b) => a.tier - b.tier)[0];
   const memo = hints.find(hint => hint.kind === "memo");
   // The memo question stands as of the latest analysis that found nothing newer: never older than Earlier either.

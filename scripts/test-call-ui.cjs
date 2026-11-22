@@ -1824,6 +1824,19 @@ async function round4(browser) {
     assert.equal(await page.$eval('#call-slot .heard-q', node => getComputedStyle(node).fontWeight), '400');
     await page.context().close();
   }
+  // P5: the answer to the person's own question keeps its 60 s, whatever the analysis cutoff says: an ASK six seconds
+  // later does not send it to Earlier. The cutoff orders analysis hints among themselves only.
+  {
+    const page = await callPage(browser, 'waiting');
+    const current = await page.evaluate(() => {
+      const at = ms => new Date(Date.now() - ms).toISOString();
+      return pickHint({ copilot: { messages: [{ role: 'user', text: 'Who signs?', at: at(12000) },
+        { role: 'assistant', text: 'The committee signs.', at: at(10000) }] },
+      journal: [{ category: 'ASK', text: 'Ask about the budget?', created_at: at(4000) }] }, Date.now()).current;
+    });
+    assert.deepEqual([current.kind, current.text], ['own', 'The committee signs.']);
+    await page.context().close();
+  }
   // L2: the slot picks among the latest analysis only; Earlier never holds anything newer than the current hint.
   {
     const page = await callPage(browser, 'waiting');
