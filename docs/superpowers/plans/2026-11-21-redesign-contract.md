@@ -134,6 +134,11 @@ on both platforms.
   deferred stop act only while it is still the live one, else they clear the
   pending stop and act on nothing (Resume answers `meeting_changed`), so a
   new call that began meanwhile is never muted (fix wave A2).
+- The server passes that session to the recorder: `record pause|resume|stop
+  --session <meeting_id>`. The recorder compares it with its own live session
+  (macOS on the main actor, Windows against the exporter's id) and refuses a
+  mismatch with exit code 3, which the server reads as "that recording is
+  over". Without `--session` the commands act as before (fix wave J1).
 - `POST /api/recording/stop` with `{"meeting_id": "..."}` pauses the recorder
   at once (`record pause`) and answers
   `{"ok": true, "stopped_at": ISO, "until": ISO | null}`; the server sends

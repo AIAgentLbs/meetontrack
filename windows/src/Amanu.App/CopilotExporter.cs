@@ -27,6 +27,8 @@ public sealed class CopilotExporter : IDisposable
         timer = new(_ => { try { Flush(); } catch (IOException) { } catch (UnauthorizedAccessException) { } }, null, 1000, 1000);
     }
 
+    public string MeetingId { get { lock (gate) return meetingId; } }
+
     public void SetState(RecordingState next)
     {
         lock (gate)

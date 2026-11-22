@@ -470,6 +470,8 @@ final class AppController {
     private let calendar: CalendarWatcher?
     private let autoRecord: AutoRecordController
     private var session: RecordingSession?
+    /// The meeting_id this recording publishes in the live file: the session `record --session` names.
+    private var liveSessionID: String?
     /// Whether a meeting is being recorded. The session itself stays private —
     /// four things need this one fact about it (the settings form, the setup
     /// form, the update gate, and the quit alert) and none of them need the
@@ -606,7 +608,7 @@ final class AppController {
             forName: AssistantLink.request, object: nil, queue: .main
         ) { _ in MainActor.assumeIsolated { AssistantLink.open() } }
         activateObserver = SingleInstance.observe { [weak self] in self?.showWindow() }
-        recordRequestObserver = RecordRequest.observe { [weak self] action in
+        recordRequestObserver = RecordRequest.observe(live: { [weak self] in self?.liveSessionID }) { [weak self] action in
             self?.perform(action)
         }
         if SetupState.isPending {
@@ -833,6 +835,7 @@ final class AppController {
             oneToOneRemoteSpeaker: context.oneToOneRemoteSpeaker,
             recordingDirectory: newSession.dir.path
         )
+        liveSessionID = liveExportContext.meetingID
         Task { [weak self, liveTranscription, liveTranscriptExporter] in
             await liveTranscription.beginRecording(
                 enabled: liveEnabled,
@@ -872,6 +875,7 @@ final class AppController {
             "○ stopped (\(reason)) · \(Self.format(duration)) · \(session.dir.path)\n".utf8
         ))
         self.session = nil
+        liveSessionID = nil
         present(.idle, elapsed: nil)
         // If Sparkle was told to wait for this recording, it has waited.
         updates.recordingDidFinish()

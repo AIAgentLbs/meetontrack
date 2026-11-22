@@ -17,16 +17,25 @@ struct Record: ParsableCommand {
     @Argument(help: "start, stop, toggle, pause, resume, or relisten (restart recognition only) the current recording.")
     var action: RecordRequest.Action
 
+    @Option(help: "Act only if this is the app's live session (the meeting_id in its live file); exit 3 if not.")
+    var session: String?
+
     /// Test seam: who answers the request. The real one rings the running app.
-    @MainActor static var ask: (RecordRequest.Action) -> Bool = { RecordRequest.askRunningApp($0) }
+    @MainActor static var ask: (RecordRequest.Action, String?) -> RecordRequest.Answer = {
+        RecordRequest.askRunningApp($0, session: $1)
+    }
 
     /// No answer exits non-zero: a missing app, or an app older than this CLI
     /// that ignores an unknown verb, must not read as done. The server's Stop
     /// relies on it to fall back from `pause` to an immediate stop.
     func run() throws {
-        let action = action
-        let answered = MainActor.assumeIsolated { Record.ask(action) }
-        guard answered else {
+        let action = action, session = session
+        let answer = MainActor.assumeIsolated { Record.ask(action, session) }
+        if answer == .refused {
+            FileHandle.standardError.write(Data("meetingcopilot is recording another session.\n".utf8))
+            throw ExitCode(3)
+        }
+        guard answer == .done else {
             FileHandle.standardError.write(Data(
                 ("meetingcopilot isn't running. Start it from the Dock, or `launchctl kickstart "
                     + "gui/$(id -u)/com.aiagentlabs.meeting-copilot`.\n").utf8))
@@ -53,6 +62,17 @@ enum RecordRequest {
         case pause, unpause, relisten
     }
 
+    /// done: acknowledged and acted on; refused: the named session is not the live one; none: no answer.
+    enum Answer: Equatable, Sendable {
+        case done, refused, none
+    }
+
+    /// A command naming a session is for that session only; one without (a person at the terminal) is
+    /// for whatever is live, as before.
+    static func accepts(session: String?, live: String?) -> Bool {
+        session == nil || session == live
+    }
+
     /// What pause, resume and relisten do to a live session. Only an explicit
     /// `resume` unpauses; a paused session ignores `relisten`.
     static func effects(of action: Action, paused: Bool) -> [Effect] {
@@ -66,53 +86,57 @@ enum RecordRequest {
 
     private static let request = Notification.Name("com.aiagentlabs.meeting-copilot.record")
     private static let acknowledged = Notification.Name("com.aiagentlabs.meeting-copilot.record-ack")
+    private static let refused = Notification.Name("com.aiagentlabs.meeting-copilot.record-refused")
 
     @MainActor
     private final class Reply {
-        var arrived = false
+        var answer = Answer.none
     }
 
-    /// The request identifier and the verb travel together in the notification
-    /// object, because that is the only field a distributed notification can
-    /// carry between two processes that share no user info.
-    private static func encode(_ id: String, _ action: Action) -> String {
-        "\(id) \(action.rawValue)"
+    /// The request identifier, the verb and the optional session travel together in
+    /// the notification object, because that is the only field a distributed
+    /// notification can carry between two processes that share no user info.
+    static func encode(_ id: String, _ action: Action, session: String?) -> String {
+        ([id, action.rawValue] + (session.map { [$0] } ?? [])).joined(separator: " ")
     }
 
-    private static func decode(_ object: String?) -> (id: String, action: Action)? {
-        guard let parts = object?.split(separator: " ", maxSplits: 1), parts.count == 2,
+    static func decode(_ object: String?) -> (id: String, action: Action, session: String?)? {
+        guard let parts = object?.split(separator: " ", maxSplits: 2), parts.count >= 2,
               let action = Action(rawValue: String(parts[1]))
         else { return nil }
-        return (String(parts[0]), action)
+        return (String(parts[0]), action, parts.count == 3 ? String(parts[2]) : nil)
     }
 
     @MainActor
-    static func askRunningApp(_ action: Action, timeout: TimeInterval = 4) -> Bool {
+    static func askRunningApp(_ action: Action, session: String?, timeout: TimeInterval = 4) -> Answer {
         let center = DistributedNotificationCenter.default()
         let requestID = UUID().uuidString
         let reply = Reply()
-        let token = center.addObserver(
-            forName: acknowledged, object: requestID, queue: .main
-        ) { _ in
-            MainActor.assumeIsolated { reply.arrived = true }
+        let tokens = [(acknowledged, Answer.done), (refused, Answer.refused)].map { name, answer in
+            center.addObserver(forName: name, object: requestID, queue: .main) { _ in
+                MainActor.assumeIsolated { reply.answer = answer }
+            }
         }
-        defer { center.removeObserver(token) }
+        defer { tokens.forEach(center.removeObserver) }
 
         center.postNotificationName(
-            request, object: encode(requestID, action), deliverImmediately: true)
+            request, object: encode(requestID, action, session: session), deliverImmediately: true)
 
         let deadline = Date().addingTimeInterval(timeout)
-        while !reply.arrived, Date() < deadline {
+        while reply.answer == .none, Date() < deadline {
             _ = RunLoop.current.run(
                 mode: .default,
                 before: min(deadline, Date().addingTimeInterval(0.05))
             )
         }
-        return reply.arrived
+        return reply.answer
     }
 
+    /// `live` is the app's current live session (nil when idle), read on the main actor, where every
+    /// session change happens, so the check and the action see the same session.
     @MainActor
-    static func observe(_ act: @escaping @MainActor (Action) -> Void) -> NSObjectProtocol {
+    static func observe(live: @escaping @MainActor () -> String?,
+                        _ act: @escaping @MainActor (Action) -> Void) -> NSObjectProtocol {
         let center = DistributedNotificationCenter.default()
         return center.addObserver(forName: request, object: nil, queue: .main) { note in
             // Pull the Sendable string out before crossing into MainActor:
@@ -120,7 +144,11 @@ enum RecordRequest {
             // even though this observer is delivered on main.
             let object = note.object as? String
             MainActor.assumeIsolated {
-                guard let (requestID, action) = decode(object) else { return }
+                guard let (requestID, action, session) = decode(object) else { return }
+                guard accepts(session: session, live: live()) else {
+                    center.postNotificationName(refused, object: requestID, deliverImmediately: true)
+                    return
+                }
                 // Answer before acting. Starting a recording takes a moment —
                 // the tap, the file, the engine — and a caller that waits for
                 // the work to finish before hearing anything concludes that

@@ -19,6 +19,7 @@ from private_dirs import private_dir
 
 
 RETRY_SECONDS = 5  # a deferred stop the recorder did not acknowledge is sent again this often
+REFUSED = 3  # `record --session` exit code: the recorder is live with another session (fix wave J1)
 
 
 def _iso(seconds: float) -> str:
@@ -46,13 +47,18 @@ class RecordingControl:
         except (OSError, ValueError, AttributeError):
             pass
 
-    def _command(self, verb: str) -> bool:
+    def _command(self, verb: str, session: str | None) -> bool | None:
+        """True: done. None: refused, the recorder's live session is not `session` (that recording is
+        over). False: no answer. The recorder checks the session itself, under its own state, so a
+        command can never land on a call that began after the live file was read."""
+        argv = [str(self.binary), "record", verb]
+        if session:
+            argv += ["--session", session.split("|")[0]]  # the live file's meeting_id
         try:
-            done = self.run([str(self.binary), "record", verb],
-                            capture_output=True, text=True, timeout=10, check=False)
+            done = self.run(argv, capture_output=True, text=True, timeout=10, check=False)
         except (OSError, subprocess.SubprocessError):
             return False
-        return done.returncode == 0
+        return True if done.returncode == 0 else None if done.returncode == REFUSED else False
 
     def _save(self) -> None:
         private_dir(self.path.parent)
@@ -83,7 +89,7 @@ class RecordingControl:
                 if not pending.get("failed"):
                     return {"stopped_at": pending["stopped_at"], "until": pending["until"]}
                 # The deferred stop keeps failing: Stop pressed again tries it now, for this recording only.
-                if self._same(pending) and not self._command("stop"):
+                if self._same(pending) and self._command("stop", pending.get("session")) is False:
                     raise RuntimeError("stop_failed")
                 self._ended(pending)
                 self._save()
@@ -94,7 +100,10 @@ class RecordingControl:
             if not session:  # the poll still shows this call, the recorder has moved on
                 raise ValueError("meeting_changed")
             stopped_at = _iso(self.clock())
-            if self._command("pause"):
+            paused = self._command("pause", session)
+            if paused is None:
+                raise ValueError("meeting_changed")
+            if paused:
                 until = _iso(datetime.fromisoformat(stopped_at).timestamp() + self.grace)
                 self.stopping = {"meeting_id": meeting_id, "session": session, "stopped_at": stopped_at, "until": until}
                 try:
@@ -103,7 +112,10 @@ class RecordingControl:
                 except OSError:  # a pending stop a restart would forget leaves the recorder paused: stop now
                     pass
             # A recorder that cannot pause (or an unwritable state file) stops for good, no undo.
-            if not self._command("stop"):
+            stopped = self._command("stop", session)
+            if stopped is None:
+                raise ValueError("meeting_changed")
+            if not stopped:
                 raise RuntimeError("stop_failed")  # a paused recorder keeps its pending stop in memory
             self.stopping, self.last_stop = None, {"meeting_id": meeting_id, "stopped_at": stopped_at}
             try:
@@ -137,7 +149,15 @@ class RecordingControl:
             except OSError:
                 self.stopping = pending
                 raise RuntimeError("resume_failed") from None  # a code, never the OS text with the path
-            if not self._command("resume"):
+            resumed = self._command("resume", pending.get("session"))
+            if resumed is None:  # the recorder is live with another call: that recording is over
+                self._ended(pending)
+                try:
+                    self._save()
+                except OSError:
+                    pass
+                raise ValueError("meeting_changed")
+            if not resumed:
                 self.stopping = pending
                 try:
                     self._save()
@@ -153,7 +173,7 @@ class RecordingControl:
             # The recording may have ended by itself and the next call begun: then there is nothing to stop.
             # An unreadable live file is unknown, not ended: tried again like an unacknowledged stop.
             same = self._same(pending)
-            if same is None or (same and not self._command("stop")):
+            if same is None or (same and self._command("stop", pending.get("session")) is False):
                 # Not acknowledged (the app busy, or not running): kept pending and tried again in 5 s, so
                 # last_stop never claims a stop that did not happen; the page shows the failure meanwhile.
                 self.stopping = {**pending, "failed": int(pending.get("failed") or 0) + 1,

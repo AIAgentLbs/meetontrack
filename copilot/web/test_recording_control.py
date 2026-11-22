@@ -23,12 +23,13 @@ class Recorder:
     """Fake subprocess.run: records the verb, answers with the exit code set for it."""
 
     def __init__(self, codes=None, block=None):
-        self.codes, self.block, self.calls = codes or {}, block, []
+        self.codes, self.block, self.calls, self.argv = codes or {}, block, [], []
         self.entered, self.release = threading.Event(), threading.Event()
 
     def __call__(self, argv, **kwargs):
-        verb = tuple(argv[1:])
+        verb = tuple(argv[1:3])
         self.calls.append(verb)
+        self.argv.append(list(argv[1:]))
         if verb == self.block:
             self.entered.set()
             self.release.wait(5)
@@ -122,7 +123,7 @@ class RecordingControlTests(unittest.TestCase):
         on_disk = []
 
         def run(argv, **kwargs):
-            if argv[1:] == ["record", "resume"]:
+            if argv[1:3] == ["record", "resume"]:
                 on_disk.append(json.loads(self.path.read_text())["stopping"])
             return SimpleNamespace(returncode=0)
         control = self.control(run)
@@ -304,7 +305,7 @@ class RecordingControlTests(unittest.TestCase):
 
     def test_tick_survives_a_missing_recorder(self):
         def run(argv, **kwargs):
-            if argv[1:] == ["record", "stop"]:
+            if argv[1:3] == ["record", "stop"]:
                 raise FileNotFoundError(argv[0])
             return SimpleNamespace(returncode=0)
         control = self.control(run)
@@ -392,6 +393,58 @@ class RecordingControlTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "stop_failed"):
             control.stop("m1")
         self.assertEqual(run.calls, [])
+
+    def test_every_command_names_the_recorders_session(self):
+        # J1: the recorder itself checks the session, so a stop meant for m1 can never land on the next call.
+        run = Recorder({STOP: 1})
+        control = self.control(run)
+        control.stop("m1")
+        self.now[0] = T0 + 31
+        control.tick()
+        run.codes = {}
+        control.stop("m1")  # pressed again after the failed deferred stop
+        self.path.unlink()
+        control2 = self.control(run)
+        control2.stop("m1")
+        control2.resume("m1")
+        session = ["--session", "m1"]
+        self.assertEqual(run.argv, [["record", "pause", *session], ["record", "stop", *session],
+                                    ["record", "stop", *session], ["record", "pause", *session],
+                                    ["record", "resume", *session]])
+
+    def test_refused_deferred_stop_means_that_recording_ended(self):
+        run = Recorder({STOP: 3})
+        control = self.control(run)
+        stopped_at = control.stop("m1")["stopped_at"]
+        self.now[0] = T0 + 31
+        control.tick()
+        self.assertEqual(run.calls, [PAUSE, STOP])
+        self.assertIsNone(control.snapshot()["stopping"])
+        self.assertEqual(control.snapshot()["last_stop"], {"meeting_id": "m1", "stopped_at": stopped_at})
+
+    def test_refused_pause_or_resume_is_another_meeting(self):
+        run = Recorder({PAUSE: 3})
+        control = self.control(run)
+        with self.assertRaisesRegex(ValueError, "meeting_changed"):
+            control.stop("m1")
+        self.assertEqual(run.calls, [PAUSE])
+        self.assertIsNone(control.snapshot()["stopping"])
+        run.codes = {RESUME: 3}
+        control.stop("m1")
+        with self.assertRaisesRegex(ValueError, "meeting_changed"):
+            control.resume("m1")
+        self.assertIsNone(control.snapshot()["stopping"])
+        self.assertEqual(control.snapshot()["last_stop"]["meeting_id"], "m1")
+
+    def test_a_pending_stop_from_before_sessions_names_none(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text(json.dumps({"version": 1, "last_stop": None, "stopping": {
+            "meeting_id": "m1", "stopped_at": "2027-01-15T08:00:00+00:00", "until": "2027-01-15T08:00:30+00:00"}}))
+        run = Recorder()
+        control = self.control(run)
+        self.now[0] = T0 + 10**8
+        control.tick()
+        self.assertEqual(run.argv, [["record", "stop"]])
 
     def test_loop_ticks_until_the_event(self):
         control = self.control(Recorder())

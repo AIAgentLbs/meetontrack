@@ -531,6 +531,9 @@ public sealed class AmanuRuntime : IAsyncDisposable
     public bool IsLocalModelReady(string model) => models.IsReady(model);
     public bool IsLocalModelDownloading(string model) => models.IsDownloading(model);
     public bool LocalRuntimePresent => models.CliPath is not null;
+
+    /// <summary>The meeting_id the live file carries for this recording: what `record --session` names.</summary>
+    public string LiveSessionId => copilotExporter.MeetingId;
     public long? LocalModelBytes(string model) => models.DownloadedBytes(model);
 
     public Task CompleteSetupAsync(CancellationToken cancellationToken = default) =>

@@ -11,6 +11,8 @@ namespace Amanu.App;
 /// <summary>Same-user named pipe. Contains commands and health metadata, never credentials.</summary>
 public static class CopilotControl
 {
+    private const string SessionMismatch = "session_mismatch";
+
     private static string PipeName => "MeetingCopilot-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(WindowsIdentity.GetCurrent().User!.Value)))[..16] + App.Scope;
 
     public static async Task ServeAsync(AmanuRuntime runtime, CancellationToken lifetime)
@@ -25,10 +27,16 @@ public static class CopilotControl
                 timeout.CancelAfter(TimeSpan.FromSeconds(8));
                 using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen:true);
                 using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen:true) { AutoFlush=true };
-                var command = await reader.ReadLineAsync(timeout.Token);
+                var (command, session) = RecordVerbs.Parse(await reader.ReadLineAsync(timeout.Token) ?? "");
                 object result;
                 try
                 {
+                    // J1: a command for a session that is no longer the live one (the next call began) does nothing.
+                    if (!RecordVerbs.Accepts(session, runtime.State.IsRecording ? runtime.LiveSessionId : ""))
+                    {
+                        await writer.WriteLineAsync(JsonSerializer.Serialize(new { ok=false, error=SessionMismatch }));
+                        continue;
+                    }
                     switch (command)
                     {
                         case "status": break;
@@ -76,7 +84,9 @@ public static class CopilotControl
             var result = await reader.ReadLineAsync(timeout.Token);
             Console.WriteLine(result);
             using var json=JsonDocument.Parse(result!);
-            return json.RootElement.GetProperty("ok").GetBoolean() ? 0 : 1;
+            if (json.RootElement.GetProperty("ok").GetBoolean()) return 0;
+            // Exit 3: the recorder is live with another session; the server reads it as "that recording ended".
+            return json.RootElement.TryGetProperty("error", out var error) && error.GetString() == SessionMismatch ? 3 : 1;
         }
         catch (Exception) { Console.WriteLine("{\"ok\":false,\"error\":\"Capture is not running or did not respond\"}"); return 1; }
     }

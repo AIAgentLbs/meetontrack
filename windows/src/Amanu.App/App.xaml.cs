@@ -1,3 +1,4 @@
+using Amanu.Core.Recording;
 using System.IO;
 using System.Threading;
 using System.Windows;
@@ -35,9 +36,10 @@ public partial class App : System.Windows.Application
     private static void Main()
     {
         var arguments = Environment.GetCommandLineArgs()[1..];
-        if (arguments.Length == 2 && arguments[0] == "record")
+        if (arguments.Length >= 2 && arguments[0] == "record")
         {
-            Environment.ExitCode = CopilotControl.SendAsync(arguments[1]).GetAwaiter().GetResult();
+            var line = RecordVerbs.PipeLine(arguments[1..]);
+            Environment.ExitCode = line is null ? 2 : CopilotControl.SendAsync(line).GetAwaiter().GetResult();
             return;
         }
         if (arguments.Length == 5 && arguments[0] == "--live-worker")
