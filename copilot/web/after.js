@@ -20,8 +20,9 @@ function afterBoard(state, after) {
   const start = callStartIso(state);
   const removed = new Set(after?.removed || []);
   const memo = after?.memo_check || null;
-  const row = (key, raw, tag, extra = {}) => ({ key, text: callLine(raw).rest, tag, memo: false, quote: "", speaker: "", other: "",
-    ...extra, at: afterTime(extra.at, start), removed: removed.has(key) });
+  // A hint's line loses its verb (as in Call); what was said on the call keeps its own words (speakable: the first line).
+  const row = (key, raw, tag, extra = {}, said = false) => ({ key, text: said ? speakable(raw) : callLine(raw).rest, tag, memo: false,
+    quote: "", speaker: "", other: "", ...extra, at: afterTime(extra.at, start), removed: removed.has(key) });
   const lanes = Object.fromEntries(["ask", "asked", "risks", "facts"].map(lane => [lane, { lane, rows: [], folded: [] }]));
   const put = (lane, item, fold = false) => lanes[lane][fold ? "folded" : "rows"].push(item);
 
@@ -61,14 +62,14 @@ function afterBoard(state, after) {
     const said = String(item.quote || item.claim || "");
     put("facts", row(`fact:${item.id}`, item.claim || said, item.status === "refuted" ? "differs" : "confirmed", { quote: said,
       speaker: String(item.segment?.speaker || item.segment?.speaker_label || ""), at: item.timestamp || item.checked_at,
-      other: String(item.fact || "") }), item.status === "confirmed");
+      other: String(item.fact || "") }, true), item.status === "confirmed");
   }
   // What was said against what the memo says: `other` is the memo's whole line, with where the memo came from.
   const source = String(state?.call_plan?.source_label || "");
   for (const item of checked ? memo.differs || [] : []) {
     const said = String(item.quote || "");
     put("facts", row(String(item.key), said, "differs", { quote: said, speaker: String(item.speaker || ""), at: item.at,
-      other: source ? t("after.differs_memo", { source, memo: item.memo }) : String(item.memo || "") }));
+      other: source ? t("after.differs_memo", { source, memo: item.memo }) : String(item.memo || "") }, true));
   }
 
   const memoLine = !memo ? "" : memo.state === "done" ? t("after.memo_checked") : memo.state === "waiting" ? t("after.memo_waiting")
@@ -97,8 +98,12 @@ function afterSend(after) {
     rules: AFTER_WAITS.includes(state) ? [t("after.rule.changes"), t("after.rule.keep")] : [],
     recipients: state === "no_channels" || !parts.length ? "" : t("after.to", { list: parts.join(", ") }),
     actions: stuck ? [] : AFTER_ACTIONS[state] || [],
-    channels: ["sent", "edited", "failed", "held"].includes(state) ? channels.map(row => t(`after.ch.${row.status}`,
-      { channel: t(`after.channel.${row.channel}`), time: afterClock(row.status === "failed" ? row.retry_at : row.at) })) : [],
+    channels: ["sent", "edited", "failed", "held"].includes(state) ? channels.map(row => {
+      // A line never ends on "at": without a time the time clause goes.
+      const time = afterClock(row.status === "failed" ? row.retry_at : row.at);
+      const plain = !time && (row.status === "sent" || row.status === "failed");
+      return t(`after.ch.${row.status}${plain ? "_plain" : ""}`, { channel: t(`after.channel.${row.channel}`), time });
+    }) : [],
   };
 }
 

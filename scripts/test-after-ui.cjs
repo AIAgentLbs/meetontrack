@@ -88,6 +88,25 @@ async function functions(browser) {
   });
   assert.deepEqual(crmOnly, [[], [], 'The report goes by itself once the final transcript is ready, usually in 2-3 minutes.']);
 
+  // A channel line never ends on "at": with no time the time clause goes.
+  const timeless = await page.evaluate(() => afterSend({ send: { state: 'failed', channels: [
+    { channel: 'email', to: '', status: 'sent', at: null, retry_at: null },
+    { channel: 'telegram', to: '', status: 'failed', at: null, retry_at: null }] } }).channels);
+  assert.deepEqual(timeless, ['E-mail: sent', 'Telegram: not delivered']);
+  const timelessRu = await page.evaluate(() => ['after.ch.sent_plain', 'after.ch.failed_plain'].map(key => translations.ru[key]));
+  assert.deepEqual(timelessRu, ['{channel}: отправлено', '{channel}: не доставлено']);
+
+  // The rule that keeps the person's text says so in Russian too: the refined summary is the subject.
+  assert.equal(await page.evaluate(() => translations.ru['after.rule.keep']), 'Уточненный итог не заменяет ваш текст.');
+
+  // Quote rows show what was said, verbatim: no verb stripped, no "?" added.
+  const said = await page.evaluate(({ state, after }) => {
+    const board = afterBoard({ ...state, fact_checks: { items: [{ ...state.fact_checks.items[0], claim: 'Скажите, когда старт?' }] } },
+      { ...after, memo_check: { ...after.memo_check, differs: [{ ...after.memo_check.differs[0], quote: 'Ask Maria first' }] } });
+    return board.lanes.find(lane => lane.lane === 'facts').rows.map(row => row.text);
+  }, data);
+  assert.deepEqual(said, ['Скажите, когда старт?', 'Ask Maria first']);
+
   assert.deepEqual(await page.evaluate(() => [afterTime('2026-11-22T10:05:12Z', '2026-11-22T10:00:00Z'),
     afterTime('', '2026-11-22T10:00:00Z'), afterTime('2026-11-22T10:05:12Z', ''), afterTime('2026-11-22T11:05:12Z', '2026-11-22T10:00:00Z')]),
   ['05:12', '', '', '1:05:12']);
