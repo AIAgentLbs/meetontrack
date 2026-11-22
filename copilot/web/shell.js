@@ -202,8 +202,6 @@ function renderStatus(view) {
   // Stop recording: during a live call until it is pressed; one click, no dialog.
   $("call-stop").hidden = !isLive(window.appState) || status.kind === "stopped";
   $("call-stop").disabled = homeBusy.has("status|stop");
-  $("call-more-stop").hidden = $("call-stop").hidden;
-  $("call-more-stop").disabled = $("call-stop").disabled;
   // R34: the bar owns a call that is not being recorded, and How to fix sits beside its button.
   $("call-status-help").hidden = status.kind !== "not_recording";
   $("menu-notes").hidden = view === "home";
@@ -356,6 +354,15 @@ document.addEventListener("keydown", event => {
     items.at(index < 0 ? (down ? 0 : -1) : (index + (down ? 1 : -1)) % items.length)?.focus();
   }
 }, true);
+// More lives only under 700 px: a window widened past that closes it, and focus left in it goes to the ask field.
+const MORE_WIDTH = matchMedia("(max-width: 700px)");
+MORE_WIDTH.addEventListener("change", () => {
+  const [list, button] = MENUS[1];
+  if (MORE_WIDTH.matches || list.hidden) return;
+  const inside = list.contains(document.activeElement);
+  toggleMenu(list, button, false);
+  if (inside) $("call-question").focus();
+});
 document.addEventListener("click", event => {
   for (const [list, button] of MENUS) {
     if (!list.hidden && !list.contains(event.target) && !button.contains(event.target)) toggleMenu(list, button, false);
@@ -407,7 +414,6 @@ $("call-status-action").addEventListener("click", event => {
   renderShell();
 });
 $("call-stop").addEventListener("click", event => statusAction(event.currentTarget, "stop"));
-$("call-more-stop").addEventListener("click", () => $("call-stop").click());
 $("call-stop").querySelector("kbd").textContent = STOP_KEY;
 $("menu-notes").addEventListener("click", () => (document.body.dataset.view === "call" ? openCallPanel("notes")
   : document.querySelector('[data-content-view="notes"]').click()));

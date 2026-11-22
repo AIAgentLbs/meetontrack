@@ -1,5 +1,6 @@
 :root {
   --bar-h: 60px;
+  --dock-h: 80px;
   --on-accent: #ffffff;
   --danger-soft: #f6e3df;
 }
@@ -275,7 +276,9 @@ body[data-view="call"] :is(#transcript-show, #swap-panels) { display: none; }
 .ask-field kbd { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); }
 /* More: the dock's row in a narrow window, as a menu opening upwards over the feed. */
 #call-more { display: none; }
-#call-more-menu { top: auto; bottom: calc(100% + 6px); right: 16px; }
+#call-more-menu { top: auto; bottom: calc(100% + 6px); right: 16px; max-height: calc(100dvh - var(--bar-h) - var(--dock-h) - 12px); }
+/* Earlier, scrolled to from More, stops clear of the sticky bar and dock. */
+#call-earlier { scroll-margin: var(--bar-h) 0 var(--dock-h); }
 body[data-view="call"]:not([data-call-panel]) .workspace { display: none; }
 body[data-view="call"][data-call-panel] main.workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
 body[data-view="call"][data-call-panel] :is(.transcript-pane, .copilot-pane) { grid-row: 2; grid-column: 1; border: 0; }

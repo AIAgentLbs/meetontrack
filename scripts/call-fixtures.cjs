@@ -149,9 +149,9 @@ const states = Object.defineProperties({}, Object.fromEntries(NAMES.map(name => 
 
 // A page with the fixture: page.api is the route's recorder, page.errors the script errors.
 // `at` pins both clocks: the fixture is built for that moment and the page's clock starts there (and runs on).
-async function open(browser, { fixture, width = 1440, scheme = 'light', lang = 'ru', data: dataLang = 'en', at = null }) {
+async function open(browser, { fixture, width = 1440, height = 900, scheme = 'light', lang = 'ru', data: dataLang = 'en', at = null }) {
   const origin = 'http://call-ui.test';
-  const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme, locale: lang });
+  const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, locale: lang });
   const data = build(fixture, dataLang, at ?? Date.now());
   data.state.preferences.interface_language = lang;
   const api = await route(context, data, origin);

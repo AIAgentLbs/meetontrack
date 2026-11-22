@@ -731,7 +731,9 @@ async function narrow(browser) {
     const dock = await box(page, '.dock');
     const bar = await box(page, '.topbar');
     assert.ok(slot.top >= bar.bottom && slot.bottom <= dock.top, `${label}: the slot is in view ${JSON.stringify([slot, bar.bottom, dock.top])}`);
-    // Stop stays in the bar with its short label; stopped, it is gone from the bar and from More.
+    // Stop stays in the bar with its short label, the only Stop: More never has one; stopped, the bar has none either.
+    assert.equal(await page.locator('#call-more-menu [role="menuitem"]').count(), 3, `${label}: three items in More`);
+    assert.equal(await page.locator('#call-more-stop').count(), 0);
     const stop = await visible(page, '#call-stop');
     assert.equal(stop, fixture !== 'stopped', `${label}: Stop`);
     if (stop) {
@@ -750,6 +752,12 @@ async function narrow(browser) {
       cut: node.scrollWidth > node.clientWidth, overflow: getComputedStyle(node).textOverflow }));
     assert.ok(name.height > 0 && name.height < name.line * 1.5, `${label}: one line ${JSON.stringify(name)}`);
     assert.deepEqual([name.cut, name.overflow], [true, 'ellipsis'], label);
+    // The bar says what the card says: the other side not heard, still Recording (at 400 px too).
+    if (fixture === 'other_lost') {
+      assert.equal(await text(page, '#call-status-text'), 'Recording', label);
+      assert.deepEqual(await beatTexts(page), ['You: heard', 'Other side: not heard'], label);
+      assert.match(await text(page, '#call-problem .problem h3'), /^The other side is not heard/, label);
+    }
     if (width === 520 && fixture !== 'stopped') {
       // 480-600 px: the clock and the sides on their own row under the record line, words kept, the last line heard on one.
       const record = await box(page, '#call-status-text');
@@ -764,7 +772,7 @@ async function narrow(browser) {
     await page.context().close();
   }
 
-  // More at 400 px: four items in order, opened on the first, arrows move, Escape closes it back on More.
+  // More at 400 px: three items in order, opened on the first, arrows move, Escape closes it back on More.
   let page = await callPage(browser, 'more_open', { width: 400 });
   const more = page.locator('#call-more');
   assert.equal(await more.getAttribute('aria-haspopup'), 'menu');
@@ -772,13 +780,13 @@ async function narrow(browser) {
   assert.equal(await visible(page, '#call-more-menu'), true);
   assert.equal(await more.getAttribute('aria-expanded'), 'true');
   assert.deepEqual(await items(page), ['Earlier hints (1)', 'Transcript the whole conversation as text',
-    'Board questions, risks and fact checks', 'Stop recording']);
+    'Board questions, risks and fact checks']);
   assert.equal(await focused(page), '#call-more-earlier');
   await page.keyboard.press('ArrowDown');
   assert.equal(await focused(page), '#call-more-transcript');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowUp');
-  assert.equal(await focused(page), '#call-more-stop');
+  assert.equal(await focused(page), '#call-more-board');
   const menuBox = await box(page, '#call-more-menu');
   const barBox = await box(page, '.topbar');
   assert.ok(menuBox.top >= barBox.bottom && menuBox.bottom <= 900 && menuBox.left >= 0 && menuBox.right <= 400,
@@ -809,17 +817,37 @@ async function narrow(browser) {
     assert.equal(await visible(page, '#call'), true, `${item}: Escape`);
     assert.equal(await focused(page), '#call-more');
   }
-  // Stop recording in More does what the bar's Stop does.
+  // The window widens past 700 px with More open: More closes, and focus goes to the ask field, never to the page.
   await more.click();
-  await page.click('#call-more-stop');
-  await expectPost(page, '/api/recording/stop', { meeting_id: 'm1' });
+  assert.equal(await focused(page), '#call-more-earlier');
+  await page.setViewportSize({ width: 900, height: 900 });
+  await page.waitForFunction(() => document.getElementById('call-more-menu').hidden, null, { timeout: 2000 });
+  assert.equal(await more.getAttribute('aria-expanded'), 'false');
+  assert.equal(await focused(page), '#call-question');
   assert.deepEqual(page.errors, []);
   await page.context().close();
 
-  // Stopped: More has no Stop.
-  page = await callPage(browser, 'stopped', { width: 400 });
+  // A short window (400x560): the menu opens between the bar and the dock, its height capped by both.
+  page = await callPage(browser, 'other_lost', { width: 400, height: 560 });
   await page.click('#call-more');
-  assert.equal((await items(page)).includes('Stop recording'), false);
+  const short = await page.evaluate(() => {
+    const menu = document.getElementById('call-more-menu').getBoundingClientRect();
+    const bar = document.querySelector('.topbar').getBoundingClientRect().bottom;
+    const dock = document.querySelector('.dock').getBoundingClientRect();
+    return { top: menu.top, bottom: menu.bottom, bar, dockTop: dock.top, dockHeight: dock.height,
+      max: parseFloat(getComputedStyle(document.getElementById('call-more-menu')).maxHeight) };
+  });
+  assert.ok(short.top >= short.bar && short.bottom <= short.dockTop, `short window: ${JSON.stringify(short)}`);
+  assert.ok(short.max <= 560 - short.bar - short.dockHeight, `max-height leaves the bar and the dock: ${JSON.stringify(short)}`);
+  // Earlier from More scrolls the list into view, between the bar and the dock.
+  await page.click('#call-more-earlier');
+  // The list starts below the dock at this height, so seeing it means the page scrolled to it.
+  assert.ok(await page.evaluate(() => scrollY) > 0, 'scrolled to Earlier');
+  const list = await box(page, '#call-earlier');
+  const barNow = await box(page, '.topbar');
+  const dockNow = await box(page, '.dock');
+  assert.ok(list.top >= barNow.bottom - 1 && list.top < dockNow.top - 20, `Earlier in view: ${JSON.stringify([list, barNow.bottom, dockNow.top])}`);
+  assert.deepEqual(page.errors, []);
   await page.context().close();
 
   // RU: the item notes.

@@ -357,6 +357,10 @@ function callFitWhere() {
   if (actions && why && !why.hidden) actions.hidden = why.scrollWidth <= why.clientWidth;
 }
 addEventListener("resize", callFitWhere);
+// The dock's height, for More's menu above it and for scrolling to Earlier past it (as --bar-h for the bar).
+const callDock = document.querySelector("#call .dock");
+new ResizeObserver(() => document.documentElement.style.setProperty("--dock-h", `${Math.ceil(callDock.getBoundingClientRect().height)}px`))
+  .observe(callDock);
 
 // The transcript or the board (and the chat and notes tabs) opened as a panel over the feed. Focus goes to the
 // panel's heading, and back to the control that opened it when the panel closes (an item of More: More itself).
@@ -388,6 +392,8 @@ addEventListener("DOMContentLoaded", () => {
   for (const [item, control] of [["earlier", "earlier-open"], ["transcript", "transcript-open"], ["board", "board-open"]]) {
     $(`call-more-${item}`).addEventListener("click", () => $(`call-${control}`).click());
   }
+  // Earlier opened from More can start below the dock: it scrolls into view.
+  $("call-more-earlier").addEventListener("click", () => callEarlierOpen && $("call-earlier").scrollIntoView({ block: "nearest" }));
   $("call-back").addEventListener("click", () => openCallPanel(null));
   // A tab switched inside a panel: the panel follows it, so the composer rule (F5) holds.
   document.querySelectorAll("[data-content-view]").forEach(button => button.addEventListener("click", () => {
