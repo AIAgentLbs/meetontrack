@@ -2547,6 +2547,8 @@ def _archive_plan(detail: dict) -> dict | None:
         "started_at": detail.get("started_at"),
         "remote_attendees": detail.get("remote_attendees", []),
         "meeting_link": detail.get("meeting_link", ""),
+        # A split call never inherits the previous part's memo (CallPlans._plan_for).
+        **{key: detail[key] for key in ("explicit_boundary", "physical_meeting_id") if key in detail},
     })
 
 
@@ -2554,7 +2556,7 @@ def _archive_plan(detail: dict) -> dict | None:
 ARCHIVE.memo_plan = _archive_plan
 ARCHIVE.memo_checker = lambda detail: memo_check.check(
     detail, ARCHIVE.memo_plan(detail),
-    lambda prompt: AI.run("memo_check", prompt, web=False, timeout=memo_check.TIMEOUT).text)
+    lambda prompt: AI.run("memo_check", prompt, web=False, timeout=memo_check.TIMEOUT))
 DELIVERY_RETRY = DeliveryRetry(ARCHIVE)
 GOOGLE_CONTEXT.delivery_settings = ARCHIVE.delivery_settings
 
@@ -3046,7 +3048,7 @@ DELIVERY_WAKE = threading.Event()
 # meeting_id -> last GET /api/after payload, answered with "stale" while the archive is busy.
 AFTER_CACHE: dict[str, dict] = {}  # ponytail: one entry per meeting opened in After; tiny, never pruned
 AFTER_ROUTES = {"/api/after/hold", "/api/after/send", "/api/after/edit", "/api/after/remove",
-                "/api/after/send-again"}
+                "/api/after/send-again", "/api/after/editing"}
 
 
 def after_post(path: str, payload: dict) -> tuple[dict, int]:
@@ -3054,32 +3056,44 @@ def after_post(path: str, payload: dict) -> tuple[dict, int]:
     meeting_id = payload.get("meeting_id")
     if not isinstance(meeting_id, str) or not 0 < len(meeting_id) <= 1024:
         raise ValueError("bad_meeting_id")
-    if path == "/api/after/hold" and meeting_id in AFTER_CACHE:
-        # A Hold never waits: retry takes the (unfair) archive lock again for each queued report,
-        # so a Hold that waited could lose to the next send. Every send re-checks the gate first.
-        return {"ok": True, **after_action(path, AFTER_CACHE[meeting_id]["meeting_id"], payload)}, HTTPStatus.OK
-    if not ARCHIVE.lock.acquire(timeout=1):
-        # Act on the report the page last showed; its after.json needs only AfterState's lock,
-        # and every send re-checks the gate under the archive lock first.
-        cached = AFTER_CACHE.get(meeting_id)
-        if cached is None:
-            return {"ok": False, "error": "busy"}, HTTPStatus.SERVICE_UNAVAILABLE
-        return {"ok": True, **after_action(path, cached["meeting_id"], payload)}, HTTPStatus.OK
-    try:  # written while holding the archive, so no send slips in between
-        if ARCHIVE.detail(meeting_id) is None:
-            return {"ok": False, "error": "not_found"}, HTTPStatus.NOT_FOUND
-        return {"ok": True, **after_action(path, ARCHIVE.report_identity(meeting_id), payload)}, HTTPStatus.OK
-    finally:
-        ARCHIVE.lock.release()
+    # Taken on arrival: a Send now that waits below never undoes a Hold pressed after it.
+    ticket = ARCHIVE.after.ticket()
+    try:
+        if path == "/api/after/hold" and meeting_id in AFTER_CACHE:
+            # A Hold never waits: retry takes the (unfair) archive lock again for each queued report,
+            # so a Hold that waited could lose to the next send. Every send takes the gate first.
+            return {"ok": True, **after_action(path, AFTER_CACHE[meeting_id]["meeting_id"], payload, ticket)}, HTTPStatus.OK
+        if not ARCHIVE.lock.acquire(timeout=1):
+            # Act on the report the page last showed; its after.json needs only AfterState's lock,
+            # and every send takes the gate under the archive lock first.
+            cached = AFTER_CACHE.get(meeting_id)
+            if cached is None:
+                return {"ok": False, "error": "busy"}, HTTPStatus.SERVICE_UNAVAILABLE
+            return {"ok": True, **after_action(path, cached["meeting_id"], payload, ticket)}, HTTPStatus.OK
+        try:  # written while holding the archive, so no send slips in between
+            if ARCHIVE.detail(meeting_id) is None:
+                return {"ok": False, "error": "not_found"}, HTTPStatus.NOT_FOUND
+            return {"ok": True, **after_action(path, ARCHIVE.report_identity(meeting_id), payload, ticket)}, HTTPStatus.OK
+        finally:
+            ARCHIVE.lock.release()
+    except ValueError as error:
+        if str(error) != "sending":
+            raise
+        # The report is going out right now: a Hold can no longer stop it, and says so.
+        return {"ok": False, "error": "sending"}, HTTPStatus.CONFLICT
 
 
-def after_action(path: str, identity: str, payload: dict) -> dict:
+def after_action(path: str, identity: str, payload: dict, ticket: int | None = None) -> dict:
     """Hold, Send now, an edit, a board removal or Send again for one report (MEETONTRACK-163)."""
     if path == "/api/after/hold":
-        ARCHIVE.after.hold(identity)
+        ARCHIVE.after.hold(identity, ticket)
     elif path == "/api/after/send":
-        ARCHIVE.after.send_now(identity)
+        ARCHIVE.after.send_now(identity, ticket)
         DELIVERY_WAKE.set()
+    elif path == "/api/after/editing":
+        # Typing started: the report waits before the text is saved (the save follows 1 s after the last key).
+        send_at = ARCHIVE.after.touch(identity)
+        return {"send_at": datetime.fromtimestamp(send_at).astimezone().isoformat(timespec="seconds")}
     elif path == "/api/after/edit":
         text = payload.get("text")
         if not isinstance(text, str) or len(text) > 4000:
@@ -3094,14 +3108,17 @@ def after_action(path: str, identity: str, payload: dict) -> dict:
         from delivery_settings import enabled
         settings = ARCHIVE.delivery_settings.read()
         channels = [name for name in ("email", "telegram", "drive") if enabled(settings, name)]
-        if "channels" in payload:
+        retry = "channels" in payload
+        if retry:
             asked = payload["channels"]
             if not isinstance(asked, list) or any(name not in channels for name in asked):
                 raise ValueError("invalid_retry_channels")
             channels = [name for name in channels if name in asked]
-        # The job records resent_at itself, only once the report went out.
+        # The job records resent_at itself, only once the report went out. Retry rechecks the
+        # channels under the delivery lock: one sent since the page showed it is not sent again.
         return {"job": DELIVERY_RETRY.submit({"meeting_id": identity, "request_id": uuid.uuid4().hex,
-                                              "channels": channels, "confirm": True, "after": True})}
+                                              "channels": channels, "confirm": True, "after": True,
+                                              "retry": retry})}
     return {}
 
 

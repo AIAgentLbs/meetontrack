@@ -26,7 +26,7 @@ class AfterStateTests(unittest.TestCase):
 
     def defaults(self):
         return {"version": 1, "held": False, "send_now_at": None, "changed_at": None,
-                "summary": None, "next_steps": None, "removed": [], "resent_at": None}
+                "summary": None, "next_steps": None, "removed": [], "resent_at": None, "delivered_at": None}
 
     def test_defaults_and_bad_file(self):
         self.assertEqual(self.after.read("m1"), self.defaults())
@@ -139,6 +139,38 @@ class AfterStateTests(unittest.TestCase):
         self.assertEqual(self.after.due(), set())
         self.after.send_now("m1")
         self.assertEqual(self.after.due(), {"m1"})
+
+    def test_hold_during_a_send_is_refused(self):
+        """The gate check and the sending mark are one step: a Hold after it answers "sending" (final I1)."""
+        taken = self.after.begin_send("m1", None)
+        self.assertEqual(taken, self.clock.now)
+        with self.assertRaises(ValueError) as caught:
+            self.after.hold("m1")
+        self.assertEqual(str(caught.exception), "sending")
+        self.assertFalse(self.after.read("m1")["held"])
+        self.after.end_send("m1")
+        self.after.hold("m1")
+        self.assertTrue(self.after.read("m1")["held"])
+        self.assertIsNone(self.after.begin_send("m1", None), "a held report is not taken")
+
+    def test_older_send_now_never_undoes_a_later_hold(self):
+        """Commands apply in the order they arrived, not the order they got through (Codex P1)."""
+        send_now, hold = self.after.ticket(), self.after.ticket()
+        self.after.hold("m1", hold)
+        self.after.send_now("m1", send_now)  # queued behind the archive lock
+        self.assertTrue(self.after.read("m1")["held"])
+        self.after.send_now("m1", self.after.ticket())
+        self.assertFalse(self.after.read("m1")["held"])
+
+    def test_editing_closes_the_gate_before_the_text_is_saved(self):
+        self.after.touch("m1")
+        self.assertEqual(self.after.gate("m1", None)["reason"], "changes")
+        self.assertIsNone(self.after.read("m1")["summary"])
+
+    def test_delivered_keeps_the_first_revision(self):
+        self.after.delivered("m1", 10.5)
+        self.after.delivered("m1", 20.0)
+        self.assertEqual(self.after.read("m1")["delivered_at"], 10.5)
 
 
 if __name__ == "__main__":

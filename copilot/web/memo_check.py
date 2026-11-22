@@ -12,6 +12,7 @@ import json
 from typing import Callable
 
 from ai_providers import AIChoiceError
+from speaker_edits import segment_id
 
 TIMEOUT = 90
 MAX_PROMPT = 200_000
@@ -24,6 +25,23 @@ NOT_CHECKED = {"state": "unavailable", "reason": "not_checked"}
 
 def _norm(text) -> str:
     return " ".join(str(text or "").casefold().split())
+
+
+def _speaker(segment: dict) -> str:
+    return str(segment.get("speaker") or segment.get("speaker_label") or "")
+
+
+def current(memo, segments: list[dict]):
+    """A stored check with each quote's speaker as the transcript names that line now."""
+    if not isinstance(memo, dict) or memo.get("state") != "done":
+        return memo
+    names = {str(segment.get("segment_id") or segment_id(segment)): _speaker(segment) for segment in segments}
+
+    def named(item):
+        name = names.get(item.get("segment_id")) if isinstance(item, dict) else None
+        return {**item, "speaker": name} if name else item
+    return {**memo, "questions": [named(item) for item in memo.get("questions") or []],
+            "differs": [named(item) for item in memo.get("differs") or []]}
 
 
 def memo_questions(plan: dict | None) -> list[dict]:
@@ -82,7 +100,9 @@ def parse(text: str, plan: dict, segments: list[dict]) -> dict:
         return quote, segments[index]
 
     def where(segment: dict) -> dict:
-        return {"speaker": str(segment.get("speaker") or ""), "at": str(segment.get("timestamp") or "")}
+        # The line's id stays through a speaker correction; current() shows its speaker as named then.
+        return {"speaker": _speaker(segment), "at": str(segment.get("timestamp") or ""),
+                "segment_id": str(segment.get("segment_id") or segment_id(segment))}
 
     answers: dict[str, dict] = {}
     for entry in data.get("questions") if isinstance(data.get("questions"), list) else []:
@@ -106,15 +126,23 @@ def parse(text: str, plan: dict, segments: list[dict]) -> dict:
     return {"state": "done", "questions": questions, "differs": list(differs.values())}
 
 
-def check(detail: dict, plan: dict | None, run: Callable[[str], str]) -> dict | None:
-    """None without memo questions (no AI call); otherwise the outcome to keep with the report."""
+def check(detail: dict, plan: dict | None, run: Callable[[str], object]) -> dict | None:
+    """None without memo questions (no AI call); otherwise the outcome to keep with the report.
+
+    ``run`` answers with the AI service's reply (text and the model that wrote it) or plain text.
+    A verdict the AI gave keeps that exact model (the owner's audit-trail rule)."""
     if not memo_questions(plan):
         return None
     segments = list(detail.get("transcript") or [])
+    model = ""
     try:
-        result = parse(str(run(prompt(plan, segments)) or ""), plan, segments)
-    except AIChoiceError:
-        result = {"state": "unavailable", "reason": "ai_needs_choice"}
+        reply = run(prompt(plan, segments))
+        model = str(getattr(reply, "model", "") or "")
+        result = parse(str(getattr(reply, "text", reply) or ""), plan, segments)
+    except AIChoiceError as error:
+        # No complete choice, or the chosen AI cannot run now (signed out, model gone): say which.
+        result = ({"state": "unavailable", "reason": "ai_needs_choice"} if error.state == "needs_choice"
+                  else {"state": "unavailable", "reason": "ai_unavailable", "detail": str(error.reason or "")[:300]})
     except TimeoutError:
         result = {"state": "failed", "reason": "timeout"}
     except ValueError as error:
@@ -122,5 +150,7 @@ def check(detail: dict, plan: dict | None, run: Callable[[str], str]) -> dict | 
         result = {"state": "failed", "reason": reason}
     except Exception:  # noqa: BLE001 - any other failure is a failed check, never a lost report
         result = {"state": "failed", "reason": "error"}
+    if model:
+        result["model"] = model
     print(f"memo check {detail.get('meeting_id')}: {result['state']}", flush=True)
     return result

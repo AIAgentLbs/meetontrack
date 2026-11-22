@@ -87,6 +87,45 @@ class MemoCheckTests(unittest.TestCase):
                                                     "quote": "start in March"}]), PLAN, SEGMENTS)["differs"]
         self.assertEqual(dropped, [])
 
+    def test_verdict_keeps_the_model_that_made_it(self):
+        """Owner audit rule: the stored verdict names the exact model the AI service reported (L)."""
+        from ai_providers import Reply
+        detail = {"meeting_id": "m1", "transcript": SEGMENTS}
+        reply = Reply(answer([{"id": "q1", "status": "answered", "segment": 0, "quote": "budget is approved"}]),
+                      "synthetic-model-7", "")
+        result = memo_check.check(detail, PLAN, lambda prompt: reply)
+        self.assertEqual((result["state"], result["model"]), ("done", "synthetic-model-7"))
+        failed = memo_check.check(detail, PLAN, lambda prompt: Reply("no json", "synthetic-model-7", ""))
+        self.assertEqual(failed, {"state": "failed", "reason": "ai_no_answer", "model": "synthetic-model-7"})
+
+    def test_server_passes_the_reply_with_its_model(self):
+        import server
+        from ai_providers import Reply
+        detail = {"meeting_id": "m1", "transcript": SEGMENTS}
+        reply = Reply(answer(), "synthetic-model-7", "")
+        with patch.object(server.ARCHIVE, "memo_plan", return_value=PLAN), \
+                patch.object(server.AI, "run", return_value=reply) as run:
+            result = server.ARCHIVE.memo_checker(detail)
+        self.assertEqual(run.call_args.args[0], "memo_check")
+        self.assertEqual(result["model"], "synthetic-model-7")
+
+    def test_split_call_does_not_take_the_earlier_part_memo(self):
+        """The memo lookup keeps the logical call boundaries (C, Codex P1)."""
+        import server
+        from call_plan import CallPlans
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "plans.json").write_text(json.dumps({"version": 1, "plans": [{
+                "id": "plan-a", "starts_at": "2026-09-29T10:00:00+02:00", "attendee_aliases": ["Alex Sample"],
+                "title": "Sample preparation", "items": [{"id": "q1", "kind": "question", "text": "Budget?"}]}]}))
+            plans = CallPlans(root / "plans.json", root / "state.json")
+            first = {"meeting_id": "part-a", "title": "Generic video call", "started_at": "2026-09-29T08:04:00Z",
+                     "remote_attendees": ["Alex Sample"]}
+            with patch.object(server, "PLANS", plans):
+                self.assertEqual(server._archive_plan(first)["id"], "plan-a")
+                second = {**first, "meeting_id": "part-b", "physical_meeting_id": "part-a", "explicit_boundary": True}
+                self.assertIsNone(server._archive_plan(second))
+
     def test_outcomes(self):
         detail = {"meeting_id": "m1", "transcript": SEGMENTS}
 
@@ -101,6 +140,10 @@ class MemoCheckTests(unittest.TestCase):
                          {"state": "failed", "reason": "timeout"})
         self.assertEqual(memo_check.check(detail, PLAN, raising(AIChoiceError("needs_choice", ""))),
                          {"state": "unavailable", "reason": "ai_needs_choice"})
+        # A choice exists, but the provider cannot run it now: that reason is kept, not "no AI chosen" (M).
+        why = "Synthetic AI does not offer the model synthetic-1 now. Choose a model again."
+        self.assertEqual(memo_check.check(detail, PLAN, raising(AIChoiceError("unavailable", why))),
+                         {"state": "unavailable", "reason": "ai_unavailable", "detail": why})
         self.assertEqual(memo_check.check(detail, PLAN, raising(RuntimeError("boom"))),
                          {"state": "failed", "reason": "error"})
         calls = []
@@ -230,6 +273,19 @@ class MemoCheckReportTests(unittest.TestCase):
         self.archive.memo_plan = lambda detail: PLAN
         self.assertEqual(after_payload(self.archive, "m1", {}, self.now)["memo_check"], memo_check.NOT_CHECKED)
         self.assertNotIn("memo-check", self.page())
+
+    def test_report_names_the_speaker_as_corrected(self):
+        """The report shows the quoted line's current speaker, not the one stored with the check (N)."""
+        line = self.archive.report_detail("m1")["transcript"][0]
+        self.result["questions"][0].update(speaker="Speaker 1", segment_id=line["segment_id"])
+        self.archive.generate_report("m1")
+        self.assertIn("Anna Petrova", self.page())
+        self.assertNotIn("Speaker 1", self.page())
+
+    def test_report_says_the_chosen_ai_is_unavailable(self):
+        self.result = {"state": "unavailable", "reason": "ai_unavailable", "detail": "Synthetic AI is signed out."}
+        self.archive.generate_report("m1")
+        self.assertIn("Сверки с мемо нет: выбранный ИИ сейчас недоступен.", self.page())
 
     def test_checker_error_does_not_hold_report(self):
         def broken(detail):

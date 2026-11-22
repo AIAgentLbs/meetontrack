@@ -99,6 +99,18 @@ class AfterArchiveTests(unittest.TestCase):
         self.assertEqual(self.sent, 1)
         self.assertTrue(self.report().get("delivery_started_at"))
 
+    def test_held_report_with_the_crm_is_not_a_failure(self):
+        """A held report waits on every channel, the CRM included: no delivery failure after 15 min (J, final M1)."""
+        settings = {"email_enabled": True, "email_to": "synthetic@example.test", "twenty_enabled": True,
+                    "twenty_url": "https://crm.example.test", "twenty_key_saved": True}
+        (self.archive.config_root / "delivery.json").write_text(json.dumps(settings))
+        self.archive.after.hold("m1")
+        self.archive.generate_report("m1")
+        self.assertEqual(self.report()["twenty_status"], "waiting_for_end")
+        later = datetime.now().astimezone() + timedelta(minutes=20)
+        twenty = self.archive.delivery_monitor.snapshot(settings, now=later)["channels"]["twenty"]
+        self.assertEqual(twenty["failed"] + twenty["action_required"], 0)
+
     def test_send_now_waits_for_final_transcript(self):
         self.ready = False
         self.archive.after.send_now("m1")

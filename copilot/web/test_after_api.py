@@ -122,7 +122,8 @@ class AfterAPITests(unittest.TestCase):
         self.assertEqual(self.state(), "sending")
 
         retry_at = local(self.now + 900)
-        self.write_report(ready_at=local(self.now - 60), mail_status="failed", delivery_retry_at=retry_at)
+        self.write_report(ready_at=local(self.now - 60), mail_status="failed", delivery_retry_at=retry_at,
+                          delivery_started_at=local(self.now - 60))
         payload = self.payload()
         self.assertEqual(payload["send"]["state"], "failed")
         self.assertEqual(payload["send"]["channels"][0],
@@ -146,7 +147,7 @@ class AfterAPITests(unittest.TestCase):
         self.write_report(**sent)
 
         self.archive.after.edit("m1", "summary", "Pilot starts in March.")
-        self.assertEqual(self.state(), "preparing")  # until the report is made again (C10)
+        self.assertEqual(self.state(), "sent")  # it went; Send again comes once the report is made again (H)
         self.write_report(**sent)
         self.assertEqual(self.state(), "edited")
         self.archive.after.resent("m1")
@@ -434,6 +435,188 @@ class AfterAPITests(unittest.TestCase):
             holder.join(5)
             scan.join(5)
         self.assertEqual(sent, [])
+
+    # -- fix wave (MEETONTRACK-163) -------------------------------------------
+
+    def ready_report(self, **fields) -> None:
+        (self.reports / "m1").mkdir(parents=True, exist_ok=True)
+        (self.reports / "m1" / "meeting-report.pdf").write_bytes(b"%PDF synthetic")
+        self.write_report(ready_at=local(self.now - 60), pdf_path=str(self.reports / "m1" / "meeting-report.pdf"),
+                          generated_at=local(self.now - 60), **fields)
+
+    def test_hold_while_the_report_is_sending_is_refused(self):
+        """A Hold answered 200 is never followed by a send: during the send it answers 409 "sending" (A, final I1)."""
+        self.serve()
+        self.ready_report()
+        entered, release, sent = threading.Event(), threading.Event(), []
+
+        def deliver(detail, meta, **kwargs):
+            sent.append(1)
+            entered.set()
+            release.wait(10)
+            return {"mail_status": "sent"}
+        patcher = patch.object(self.archive, "deliver", side_effect=deliver)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        scan = threading.Thread(target=self.archive.retry_pending_deliveries)
+        scan.start()
+        try:
+            self.assertTrue(entered.wait(5))
+            # Without a cached page the route waits 1 s for the archive, then has nothing to act on.
+            self.assertEqual(self.request("POST", "/api/after/hold", {"meeting_id": "m1"}),
+                             (503, {"ok": False, "error": "busy"}))
+            server.AFTER_CACHE["m1"] = {"meeting_id": "m1"}  # the page has shown it: Hold goes at once
+            self.assertEqual(self.request("POST", "/api/after/hold", {"meeting_id": "m1"}),
+                             (409, {"ok": False, "error": "sending"}))
+            self.assertFalse(self.stored()["held"])
+        finally:
+            release.set()
+            scan.join(5)
+        self.assertEqual(sent, [1])
+        self.assertEqual(self.request("POST", "/api/after/hold", {"meeting_id": "m1"}), (200, {"ok": True}))
+
+    def test_queued_send_now_never_undoes_a_later_hold(self):
+        """Send now waits behind another report's send; a Hold pressed after it wins (A, Codex P1)."""
+        self.serve()
+        self.ready_report()
+        self.assertEqual(self.request("GET", "/api/after?meeting_id=m1")[0], 200)
+        held, release, answers = threading.Event(), threading.Event(), []
+
+        def sending():
+            with self.archive.lock:
+                held.set()
+                release.wait(10)
+        holder = threading.Thread(target=sending)
+        holder.start()
+        held.wait(5)
+        press = threading.Thread(target=lambda: answers.append(
+            self.request("POST", "/api/after/send", {"meeting_id": "m1"})))
+        press.start()
+        try:
+            time.sleep(0.2)  # Send now is waiting for the archive
+            self.assertEqual(self.request("POST", "/api/after/hold", {"meeting_id": "m1"}), (200, {"ok": True}))
+        finally:
+            release.set()  # within the 1 s wait: Send now gets the archive after the Hold
+            holder.join(5)
+            press.join(5)
+        self.assertEqual(answers[0][0], 200)
+        self.assertTrue(self.stored()["held"])
+        self.assertIsNone(self.stored()["send_now_at"])
+
+    def test_retry_checks_the_report_again_right_before_it_sends(self):
+        """A board item removed and Send now pressed while the retry prepared: the old attachment stays (A, Codex P1)."""
+        self.ready_report()
+        sent = []
+        archive = self.archive
+
+        class Racing:
+            def acquire(self, blocking=True):
+                archive.after.remove("m1", "journal:j1", True)
+                archive.after.send_now("m1")
+                return True
+
+            def release(self):
+                pass
+        with patch.object(self.archive, "deliver", side_effect=lambda *a, **k: sent.append(1) or {}), \
+                patch.object(self.archive, "report_gate", return_value=Racing()):
+            self.archive.retry_pending_deliveries()
+        self.assertEqual(sent, [])
+
+    def test_first_delivery_records_the_text_it_took(self):
+        """An edit and Send now in the same second: the report that went includes the edit, so it is not "edited" (E)."""
+        self.now = int(self.now) + 0.6
+        self.archive.after.edit("m1", "summary", "Pilot starts in March.")
+        self.archive.after.send_now("m1")
+        self.ready = True
+        with patch.object(self.archive, "_print_pdf", side_effect=lambda html, pdf: pdf.write_bytes(b"%PDF synthetic")), \
+                patch.object(self.archive, "deliver", return_value={"mail_status": "sent", "telegram_status": "sent",
+                                                                    "twenty_status": "sent"}):
+            self.archive.generate_report("m1")
+        self.assertEqual(self.stored()["delivered_at"], self.now)
+        self.assertEqual(self.state(), "sent")
+
+    def test_send_again_that_reached_nobody_is_not_marked_sent(self):
+        """resent_at moves only when a channel confirmed the edited report (E, Codex P2)."""
+        retry = DeliveryRetry(self.archive)
+        self.ready_report(mail_status="sent", telegram_status="sent", twenty_status="sent",
+                          delivery_started_at=local(self.now - 60))
+        with patch.object(self.archive, "deliver", return_value={"mail_status": "failed", "telegram_status": "failed"}):
+            retry._run("m1", "r" * 16, {"email", "telegram"}, True, True)
+        self.assertEqual(retry.snapshot()["state"], "complete")
+        self.assertIsNone(self.stored()["resent_at"])
+        with patch.object(self.archive, "deliver", return_value={"mail_status": "sent", "telegram_status": "failed"}):
+            retry._run("m1", "s" * 16, {"email", "telegram"}, True, True)
+        self.assertEqual(self.stored()["resent_at"], self.now)
+
+    def test_retry_skips_a_channel_that_went_since_the_page_showed_it(self):
+        """Retry names the failed channels the page saw; one that an automatic retry sent since is not sent twice (G)."""
+        self.serve()
+        retry = DeliveryRetry(self.archive)
+        patcher = patch.object(server, "DELIVERY_RETRY", retry)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.ready_report(mail_status="sent", telegram_status="sent", twenty_status="sent",
+                          delivery_started_at=local(self.now - 60))
+        sent = []
+        with patch.object(self.archive, "deliver", side_effect=lambda d, m, **k: sent.append(k["channels"]) or {}):
+            status, body = self.request("POST", "/api/after/send-again", {"meeting_id": "m1", "channels": ["telegram"]})
+            self.assertEqual(status, 200)
+            self.assertRegex(body["job"]["request_id"], r"^[0-9a-f]{32}$")
+            deadline = time.monotonic() + 5
+            while retry.snapshot()["state"] == "sending" and time.monotonic() < deadline:
+                time.sleep(0.02)
+        self.assertEqual(sent, [])
+        self.assertEqual(retry.snapshot()["state"], "complete")
+
+    def test_editing_pauses_the_report_at_once(self):
+        """The page says the person started typing before the text is saved (F)."""
+        self.serve()
+        status, body = self.request("POST", "/api/after/editing", {"meeting_id": "m1"})
+        self.assertEqual((status, body), (200, {"ok": True, "send_at": local(self.now + 30)}))
+        self.assertEqual(self.stored()["changed_at"], self.now)
+
+    def test_channels_and_destinations(self):
+        """A channel turned on after the call began is not listed; a sent row names where it went (I)."""
+        began = self.archive.report_detail("m1")["started_at"]
+        later = (datetime.fromisoformat(began.replace("Z", "+00:00")) + timedelta(minutes=5)).isoformat()
+        settings = {**SETTINGS, "telegram_enabled_at": later}
+        self.write_report()
+        self.assertEqual([row["channel"] for row in self.payload(settings)["send"]["channels"]], ["email", "twenty"])
+        self.write_report(telegram_status="sent")  # sent on request: it did go
+        self.assertIn("telegram", [row["channel"] for row in self.payload(settings)["send"]["channels"]])
+
+        sent = {"mail_status": "sent", "telegram_status": "sent", "twenty_status": "sent",
+                "delivery_started_at": local(self.now - 60)}
+        self.write_report(**sent, mail_to="earlier@example.org", telegram_to="@synthetic_chat")
+        rows = {row["channel"]: row["to"] for row in self.payload({**SETTINGS, "email_to": "new@example.org"})["send"]["channels"]}
+        self.assertEqual((rows["email"], rows["telegram"]), ("earlier@example.org", "@synthetic_chat"))
+        self.write_report(**sent)  # delivered before destinations were recorded
+        rows = {row["channel"]: row["to"] for row in self.payload({**SETTINGS, "email_to": "new@example.org"})["send"]["channels"]}
+        self.assertEqual(rows["email"], "")
+
+    def test_next_try_only_when_one_comes(self):
+        """"Next try at" only for a channel the app will retry: never unknown, auth_required or past the window (K)."""
+        retry_at = local(self.now + 900)
+        base = {"ready_at": local(self.now - 60), "delivery_started_at": local(self.now - 60), "delivery_retry_at": retry_at}
+        self.write_report(**base, mail_status="unknown", telegram_status="auth_required")
+        payload = self.payload()
+        rows = {row["channel"]: row for row in payload["send"]["channels"]}
+        self.assertEqual((rows["email"]["status"], rows["email"]["retry_at"]), ("unknown", None))
+        self.assertEqual((rows["telegram"]["status"], rows["telegram"]["retry_at"]), ("failed", None))
+        self.assertEqual(payload["send"]["state"], "failed")
+        self.write_report(**{**base, "delivery_started_at": local(self.now - 4 * 86400)}, mail_status="failed")
+        self.assertIsNone(self.payload()["send"]["channels"][0]["retry_at"])
+        self.write_report(**base, mail_status="failed")
+        self.assertEqual(self.payload()["send"]["channels"][0]["retry_at"], retry_at)
+
+    def test_memo_quote_follows_a_speaker_correction(self):
+        """The memo check keeps the line it quoted; the speaker shown is that line's current one (N)."""
+        self.archive.memo_plan = lambda detail: {"items": [{"kind": "question", "id": "q1", "text": "Budget?"}]}
+        line = self.archive.report_detail("m1")["transcript"][0]
+        quote = {"id": "q1", "text": "Budget?", "status": "answered", "quote": "approve the budget",
+                 "speaker": "Speaker 1", "at": "", "segment_id": line["segment_id"]}
+        self.write_report(memo_check={"state": "done", "questions": [quote], "differs": []})
+        self.assertEqual(self.payload()["memo_check"]["questions"][0]["speaker"], line["speaker_label"])
 
     def test_busy_archive_returns_last_payload(self):
         self.serve()

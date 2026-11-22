@@ -183,6 +183,16 @@ class DeliveryTests(unittest.TestCase):
         marker.write_text("{}", encoding="utf-8")
         self.assertFalse(self.archive._ready_for_delivery(self.detail))
 
+    def test_delivery_records_where_it_went(self):
+        """After names the address a report went to, even after the settings change (MEETONTRACK-163)."""
+        report = {"pdf_path": str(self.pdf)}
+        with patch.object(self.archive, "_upload_drive_report_gws", return_value=("auth_required", {})), \
+             patch.object(self.archive, "_gws_call", return_value={"id": "sent-id"}):
+            result = self.archive.deliver(self.detail, report)
+        self.assertEqual(result["mail_to"], "owner@example.com")
+        (self.config / "delivery.json").write_text(json.dumps({"email_to": "new@example.com"}), encoding="utf-8")
+        self.assertEqual(self.archive.deliver(self.detail, report, previous=result)["mail_to"], "owner@example.com")
+
     def test_named_gws_account_delivers_without_gog(self):
         report = {"pdf_path": str(self.pdf)}
         links = {

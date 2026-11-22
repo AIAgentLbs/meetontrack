@@ -8,6 +8,7 @@ The gate tells the archive whether an automatic send may go now
 
 from __future__ import annotations
 
+import itertools
 import re
 import threading
 import time
@@ -23,7 +24,9 @@ KEY = re.compile(r"^(journal|fact|memo|differs):[A-Za-z0-9_-]{1,80}$")
 
 def _defaults() -> dict:
     return {"version": 1, "held": False, "send_now_at": None, "changed_at": None,
-            "summary": None, "next_steps": None, "removed": [], "resent_at": None}
+            "summary": None, "next_steps": None, "removed": [], "resent_at": None,
+            # The moment the text of the first delivery was taken: an edit after it is not in that report.
+            "delivered_at": None}
 
 
 class AfterState:
@@ -33,6 +36,10 @@ class AfterState:
         self.pause = pause
         self.lock = threading.Lock()
         self._blocked: dict[str, float | None] = {}
+        self._sending: set[str] = set()  # reports between begin_send and end_send: a Hold can no longer stop them
+        # Hold and Send now apply in the order they arrived: identity -> ticket of the last one applied.
+        self._order: dict[str, int] = {}
+        self._tickets = itertools.count(1)
 
     def _path(self, identity: str) -> Path:
         from archive import _safe  # archive imports this module; import at call time
@@ -47,7 +54,7 @@ class AfterState:
         if isinstance(stored, dict):
             state.update({key: stored[key] for key in state if key in stored})
         # A wrong-typed field reads as its default: gate() runs inside the delivery path.
-        for key in ("send_now_at", "changed_at", "resent_at"):
+        for key in ("send_now_at", "changed_at", "resent_at", "delivered_at"):
             if isinstance(state[key], bool) or not isinstance(state[key], (int, float)):
                 state[key] = None
         for key in FIELDS:
@@ -71,11 +78,37 @@ class AfterState:
         with self.lock:
             return self._read(identity)
 
-    def hold(self, identity: str) -> None:
-        self._change(identity, lambda s: s.update(held=True, send_now_at=None))
+    def ticket(self) -> int:
+        """Taken when a Hold or Send now arrives, before it waits for anything."""
+        with self.lock:
+            return next(self._tickets)
 
-    def send_now(self, identity: str) -> None:
-        self._change(identity, lambda s: s.update(held=False, send_now_at=self.clock()))
+    def _ordered(self, identity: str, ticket: int | None, update: dict) -> Callable[[dict], None]:
+        def apply(state: dict) -> None:
+            if ticket is not None:
+                if ticket < self._order.get(identity, 0):
+                    return  # a later Hold or Send now already applied: this older press changes nothing
+                self._order[identity] = ticket
+            state.update(update)
+        return apply
+
+    def hold(self, identity: str, ticket: int | None = None) -> None:
+        def apply(state: dict) -> None:
+            if identity in self._sending:
+                raise ValueError("sending")
+            self._ordered(identity, ticket, {"held": True, "send_now_at": None})(state)
+        self._change(identity, apply)
+
+    def send_now(self, identity: str, ticket: int | None = None) -> None:
+        self._change(identity, lambda s: self._ordered(identity, ticket, {"held": False, "send_now_at": self.clock()})(s))
+
+    def touch(self, identity: str) -> float:
+        """The person started typing: the report waits before the text is even saved."""
+        return self._change(identity, lambda s: s.update(changed_at=self.clock()))["changed_at"] + self.pause
+
+    def delivered(self, identity: str, at: float) -> None:
+        """The first delivery went out with the text current at ``at``; later ones keep it."""
+        self._change(identity, lambda s: s.update(delivered_at=at) if s["delivered_at"] is None else None)
 
     def resent(self, identity: str, at: float | None = None) -> None:
         """Send again went out with the text current at ``at`` (default now)."""
@@ -103,7 +136,22 @@ class AfterState:
         return self._change(identity, apply)["changed_at"] + self.pause
 
     def gate(self, identity: str, ready_at: float | None) -> dict:
-        state = self.read(identity)
+        return self._gate(self.read(identity), ready_at)
+
+    def begin_send(self, identity: str, ready_at: float | None) -> float | None:
+        """The gate check and the "sending" mark in one step (call end_send after): None when it is closed,
+        else the moment the report's text was taken. A Hold after it answers "sending" (MEETONTRACK-163)."""
+        with self.lock:
+            if not self._gate(self._read(identity), ready_at)["open"]:
+                return None
+            self._sending.add(identity)
+            return self.clock()
+
+    def end_send(self, identity: str) -> None:
+        with self.lock:
+            self._sending.discard(identity)
+
+    def _gate(self, state: dict, ready_at: float | None) -> dict:
         now = self.clock()
         changed_at, send_now_at = state["changed_at"], state["send_now_at"]
         if state["held"]:
@@ -146,7 +194,7 @@ def after_payload(archive, meeting_id: str, settings: dict, now: float) -> dict 
     ``now`` is unused: the gate keeps its own clock, the one ``ready_at`` was written with.
     """
     import memo_check
-    from archive import _date, _safe
+    from archive import _date, _safe, auto_send_allowed
     from delivery_settings import enabled
 
     detail = archive.report_detail(meeting_id)
@@ -160,25 +208,35 @@ def after_payload(archive, meeting_id: str, settings: dict, now: float) -> dict 
     ready_at = _date(str(report.get("ready_at") or ""))
     gate = archive.after.gate(identity, ready_at.timestamp() if ready_at else None)
 
-    on = [name for name, _ in CHANNELS if enabled(settings, name)]
+    started = _date(str(report.get("delivery_started_at") or ""))
+    # The app retries a failed channel on its own only inside the window from the first send (as retry does).
+    window = started or _date(str(report.get("generated_at") or ""))
+    retrying = bool(window) and (datetime.now().astimezone() - window).total_seconds() \
+        <= archive.delivery_retry_days * 86400
     channels = []
     for name, field in CHANNELS:
         status = report.get(field)
-        if name not in on or status == "not_configured":
+        went = status in {"sent", "uploaded"}
+        # The sender's own rule: a channel turned on after the call began does not send it by itself.
+        if not enabled(settings, name) or status == "not_configured" or not (
+                went or auto_send_allowed(settings, name, detail.get("started_at"))):
             continue
         row = {"channel": name, "to": "", "status": "failed", "at": None, "retry_at": None}
-        if status in {"sent", "uploaded"}:
+        if went:
             row.update(status="sent", at=report.get("delivery_checked_at") or None)
         elif status in {None, "pending", "waiting_for_end"}:
             row["status"] = "held" if after["held"] else "waiting"
         elif status == "needs_choice":
             row["status"] = "needs_choice"
-        else:
+        elif status == "unknown":
+            row["status"] = "unknown"  # may already have arrived; never retried on its own (MEETONTRACK-122)
+        elif status != "auth_required" and retrying:
             row["retry_at"] = report.get("delivery_retry_at") or None
+        # A delivered row names where it went (recorded then); older deliveries recorded none.
         if name == "email":
-            row["to"] = str(settings.get("email_to") or "")
+            row["to"] = str((report.get("mail_to") if went else settings.get("email_to")) or "")
         elif name == "telegram":
-            target = str(settings.get("telegram_target") or "")
+            target = str((report.get("telegram_to") if went else settings.get("telegram_target")) or "")
             row["to"] = "" if target == "me" else target
         elif name == "twenty":
             target = report.get("twenty_target")
@@ -188,31 +246,33 @@ def after_payload(archive, meeting_id: str, settings: dict, now: float) -> dict 
     # A CRM record the person must choose never goes on its own, so it does not hold "sent" back.
     sent = any(row["status"] == "sent" for row in channels) \
         and all(row["status"] in {"sent", "needs_choice"} for row in channels)
-    changed, resent = after["changed_at"], after["resent_at"]
-    started = _date(str(report.get("delivery_started_at") or ""))
-    edited = changed is not None and (not started or changed > started.timestamp()) \
-        and (resent is None or changed > resent)
+    # Later than the text that went: the first delivery's (precise), Send again's, else the send's start (older reports).
+    went_with = [mark for mark in (after["delivered_at"], after["resent_at"]) if mark is not None] \
+        or ([started.timestamp()] if started else [])
+    changed = after["changed_at"]
+    edited = changed is not None and all(changed > mark for mark in went_with)
     # First rule that matches; the gate's "changes" before "preparing" (ruling C10).
-    if not on:
+    if not channels:
         state = "no_channels"
     elif after["held"] and not sent:
         state = "held"
     elif sent:
-        state = ("edited" if matches else "preparing") if edited else "sent"
+        # While the edited report is made again it stays "sent": Send again comes once it is ready (H).
+        state = "edited" if edited and matches else "sent"
     elif not ready:
         state = "draft"
     elif gate["reason"] == "changes":
         state = "changes"
     elif not matches:
         state = "preparing"
-    elif any(row["status"] == "failed" for row in channels):
+    elif any(row["status"] in {"failed", "unknown"} for row in channels):
         state = "failed"
     elif gate["reason"] == "showing":
         state = "showing"
     else:
         state = "sending"
 
-    memo = report.get("memo_check")
+    memo = memo_check.current(report.get("memo_check"), detail.get("transcript") or [])
     if not isinstance(memo, dict) or memo == memo_check.NOT_CHECKED:
         # Waiting until the check has run; "not checked" is final, and shown only with memo questions.
         memo = (memo or {"state": "waiting"}) if memo_check.memo_questions(archive.memo_plan(detail)) else None

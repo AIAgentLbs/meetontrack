@@ -5,6 +5,10 @@ from datetime import datetime, timezone
 from delivery_settings import read_json, write_json, enabled
 
 
+class _Nothing(Exception):
+    """Every channel the request named has been delivered since: nothing to send."""
+
+
 class DeliveryRetry:
     def __init__(self, archive):
         self.archive = archive
@@ -30,11 +34,12 @@ class DeliveryRetry:
                 raise ValueError("delivery_busy")
             self.job = {"state": "sending", "request_id": request, "meeting_id": identity}
             thread = threading.Thread(target=self._run, args=(identity, request, set(channels), payload.get("confirm") is True,
-                                                              payload.get("after") is True), daemon=True)
+                                                              payload.get("after") is True, payload.get("retry") is True),
+                                      daemon=True)
             thread.start()
             return dict(self.job)
 
-    def _run(self, identity, request, channels, confirm, after=False):
+    def _run(self, identity, request, channels, confirm, after=False, retry=False):
         result = {"state": "failed", "request_id": request, "meeting_id": identity}
         try:
             with self.archive.report_gate(self.archive.report_identity(identity)), self.archive.lock:
@@ -68,6 +73,10 @@ class DeliveryRetry:
                         # Unreadable receipts may hide a send: ask before resending (MEETONTRACK-122).
                         receipts = {"mail_status": "unknown", "telegram_status": "unknown", "twenty_status": "unknown"}
                     acknowledged = {**report, **receipts}
+                    if retry:  # After's Retry: a channel sent since the page showed it is not sent twice (C9)
+                        channels = {c for c in channels if acknowledged.get(fields[c]) not in {"sent", "uploaded"}}
+                    if not channels:
+                        raise _Nothing
                     if not confirm and any(acknowledged.get(fields[c]) in {"sent", "uploaded", "unknown"} for c in channels):
                         raise ValueError("resend_confirmation_required")
                     previous = dict(report)
@@ -92,8 +101,12 @@ class DeliveryRetry:
                     report["last_delivery_result"] = delivery
                     write_json(path, report)
                     result.update(state="complete", report=delivery)
-                    if after:  # After's Send again: an edit made before this check is now sent (MEETONTRACK-163)
+                    if after and any(delivery.get(fields[c]) in {"sent", "uploaded"} for c in channels):
+                        # After's Send again reached someone: an edit made before this check is now sent
+                        # (MEETONTRACK-163). One that reached no channel changes nothing.
                         self.archive.after.resent(identity, checked)
+        except _Nothing:
+            result.update(state="complete", report={})
         except ValueError as error:
             result["error"] = str(error)
         except Exception:

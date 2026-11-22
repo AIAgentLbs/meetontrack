@@ -26,7 +26,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 from speaker_edits import SpeakerEdits, carry_corrections, segment_id, _seconds
 from fact_check import with_speakers
-from memo_check import NOT_CHECKED
+from memo_check import NOT_CHECKED, current as memo_current
 from delivery_health import DeliveryHealth, drive_links_ready
 from recording_health import RecordingLocations
 from question_quality import register_question
@@ -53,6 +53,19 @@ def _date(value: str | None) -> datetime | None:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def auto_send_allowed(settings: dict, channel: str, started_at: str | None) -> bool:
+    """A channel turned on after the meeting began never sends it on its own (only on request)."""
+    boundary = _date(settings.get(channel + "_enabled_at"))
+    started = _date(started_at)
+    return not boundary or bool(started and started >= boundary)
+
+
+def _went(report: dict) -> bool:
+    """At least one channel confirmed the report."""
+    return any(report.get(key) in {"sent", "uploaded"}
+               for key in ("mail_status", "telegram_status", "twenty_status", "drive_status"))
 
 
 def _atomic_json(path: Path, payload: Any) -> None:
@@ -1293,66 +1306,79 @@ class MeetingArchive:
                     meta["ready_at"] = datetime.fromtimestamp(self.after.clock()).astimezone().isoformat()
                 ready_at = _date(str(meta.get("ready_at") or ""))
                 ready_epoch = ready_at.timestamp() if ready_at else None
-                gate = self.after.gate(identity, ready_epoch)
-                sending = deliver and not meta.get("delivery_on_request") and ready and gate["open"]
-                if ready and not gate["open"]:
+                # Never send text older than what is on disk now (the last print attempt keeps it).
+                current = not fresh or self.source_signature(fresh) == source_signature
+                # The gate check and the "sending" mark in one step: a Hold after it answers "sending".
+                taken = (self.after.begin_send(identity, ready_epoch)
+                         if deliver and not meta.get("delivery_on_request") and ready and current else None)
+                sending = taken is not None
+                if ready and not sending and not self.after.gate(identity, ready_epoch)["open"]:
                     self.after.blocked(identity, ready_epoch)
                 # ponytail: sending holds the archive lock (settings and the Google
                 # profile must not change mid-send); a slow Drive upload still blocks it.
-                if sending:
-                    delivery = self.deliver(detail, meta, previous=previous_delivery)
-                elif deliver and not meta.get("delivery_on_request"):
-                    # "unknown" (a send whose outcome was lost) stays: only the person resends it.
-                    delivery = {
-                        "drive_status": (
-                            "uploaded" if previous_report.get("drive_status") == "uploaded"
-                            else "waiting_for_end"
-                        ),
-                        "mail_status": (
-                            previous_report["mail_status"] if previous_report.get("mail_status") in {"sent", "unknown"}
-                            else "waiting_for_end"
-                        ),
-                        "telegram_status": (
-                            previous_report["telegram_status"]
-                            if previous_report.get("telegram_status") in {"sent", "unknown"}
-                            else "waiting_for_end"
-                        ),
-                        **{key: previous_report[key] for key in TWENTY_OUTCOME if key in previous_report},
-                    }
-                else:
-                    # Nothing is sent: the earlier outcome stays as it was, with
-                    # its dates, so expiry and auto-close still apply (MEETONTRACK-99).
-                    delivery = {key: previous_delivery[key] for key in DELIVERY_OUTCOME if key in previous_delivery}
-                    if delivery.get("drive_status") in {None, "not_configured", "waiting_for_end"}:
-                        delivery["drive_status"] = "pending"  # A finished call no longer waits for its end.
-                    for key in ("mail_status", "telegram_status", "twenty_status"):
-                        if delivery.get(key) == "waiting_for_end" and meta.get("delivery_on_request"):
-                            delivery[key] = "pending"
-                meta.update(delivery)
-                checked_at = datetime.now().astimezone()
-                if sending:
-                    meta["delivery_checked_at"] = checked_at.isoformat(timespec="seconds")
-                    meta["delivery_retry_at"] = (
-                        checked_at + timedelta(minutes=15)
-                    ).isoformat(timespec="seconds")
-                else:
-                    meta.update({key: previous_delivery[key] for key in ("delivery_checked_at", "delivery_retry_at")
-                                 if key in previous_delivery})
-                # The retry window runs from the first send; older reports have no
-                # such date, so a report that already had an outcome keeps its own.
-                started = previous_delivery.get("delivery_started_at") or (
-                    previous_report.get("generated_at") if any(
-                        previous_report.get(key) not in {None, "not_configured", "pending", "waiting_for_end"}
-                        for key in ("drive_status", "mail_status", "telegram_status", "twenty_status")) else None)
-                # A send past the window is the person's own request ("Create the report
-                # again"): it starts a new window, so its failure is retried and shown.
-                if sending and (previous_report.get("delivery_on_request") or (
-                        _date(str(started or "")) and (checked_at - _date(str(started))).total_seconds()
-                        > self.delivery_retry_days * 86400)):
-                    started = None
-                if started or sending:
-                    meta["delivery_started_at"] = started or checked_at.isoformat(timespec="seconds")
-                _atomic_json(report_dir / "report.json", meta)
+                try:
+                    if sending:
+                        delivery = self.deliver(detail, meta, previous=previous_delivery)
+                    elif deliver and not meta.get("delivery_on_request"):
+                        # "unknown" (a send whose outcome was lost) stays: only the person resends it.
+                        delivery = {
+                            "drive_status": (
+                                "uploaded" if previous_report.get("drive_status") == "uploaded"
+                                else "waiting_for_end"
+                            ),
+                            "mail_status": (
+                                previous_report["mail_status"] if previous_report.get("mail_status") in {"sent", "unknown"}
+                                else "waiting_for_end"
+                            ),
+                            "telegram_status": (
+                                previous_report["telegram_status"]
+                                if previous_report.get("telegram_status") in {"sent", "unknown"}
+                                else "waiting_for_end"
+                            ),
+                            **{key: previous_report[key] for key in TWENTY_OUTCOME if key in previous_report},
+                        }
+                        if "twenty_status" not in delivery and delivery_enabled(
+                                _json(self.config_root / "delivery.json", {}), "twenty"):
+                            delivery["twenty_status"] = "waiting_for_end"  # a held report is never a CRM failure
+                    else:
+                        # Nothing is sent: the earlier outcome stays as it was, with
+                        # its dates, so expiry and auto-close still apply (MEETONTRACK-99).
+                        delivery = {key: previous_delivery[key] for key in DELIVERY_OUTCOME if key in previous_delivery}
+                        if delivery.get("drive_status") in {None, "not_configured", "waiting_for_end"}:
+                            delivery["drive_status"] = "pending"  # A finished call no longer waits for its end.
+                        for key in ("mail_status", "telegram_status", "twenty_status"):
+                            if delivery.get(key) == "waiting_for_end" and meta.get("delivery_on_request"):
+                                delivery[key] = "pending"
+                    meta.update(delivery)
+                    checked_at = datetime.now().astimezone()
+                    if sending:
+                        meta["delivery_checked_at"] = checked_at.isoformat(timespec="seconds")
+                        meta["delivery_retry_at"] = (
+                            checked_at + timedelta(minutes=15)
+                        ).isoformat(timespec="seconds")
+                    else:
+                        meta.update({key: previous_delivery[key] for key in ("delivery_checked_at", "delivery_retry_at")
+                                     if key in previous_delivery})
+                    # The retry window runs from the first send; older reports have no
+                    # such date, so a report that already had an outcome keeps its own.
+                    started = previous_delivery.get("delivery_started_at") or (
+                        previous_report.get("generated_at") if any(
+                            previous_report.get(key) not in {None, "not_configured", "pending", "waiting_for_end"}
+                            for key in ("drive_status", "mail_status", "telegram_status", "twenty_status")) else None)
+                    # A send past the window is the person's own request ("Create the report
+                    # again"): it starts a new window, so its failure is retried and shown.
+                    if sending and (previous_report.get("delivery_on_request") or (
+                            _date(str(started or "")) and (checked_at - _date(str(started))).total_seconds()
+                            > self.delivery_retry_days * 86400)):
+                        started = None
+                    if started or sending:
+                        meta["delivery_started_at"] = started or checked_at.isoformat(timespec="seconds")
+                    _atomic_json(report_dir / "report.json", meta)
+                    if sending and _went(meta):
+                        self.after.delivered(identity, taken)  # the text of this first delivery (E)
+                finally:
+                    if sending:
+                        self.after.end_send(identity)
             return {**meta, "meeting_id": detail["meeting_id"]}
         raise AssertionError("unreachable")  # The last attempt always saves.
 
@@ -1370,7 +1396,8 @@ class MeetingArchive:
             previous_delivery["drive_status"] = "pending"
         meta = {
             **{key: previous_report[key] for key in ("last_delivery_request", "last_delivery_result", "mail_error",
-                                                     "ready_at", "memo_check") if key in previous_report},
+                                                     "ready_at", "memo_check", "mail_to", "telegram_to")
+               if key in previous_report},
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "html": f"/api/archive/report/{detail['meeting_id']}/index.html",
             "pdf": f"/api/archive/report/{detail['meeting_id']}/meeting-report.pdf" if pdf_path else "",
@@ -1461,14 +1488,25 @@ class MeetingArchive:
                         # Report generation may have completed while we prepared
                         # the retry. Re-check next scan instead of resending it.
                         continue
-                    if not self.after.gate(path.parent.name, ready_epoch)["open"]:
+                    # The person may have changed the report since the check above (a removal and Send now):
+                    # the attachment must still be made from the text on disk now (MEETONTRACK-94, -163).
+                    detail = self.report_detail(path.parent.name)
+                    if not detail or not self.report_matches(detail, meta) or not self._ready_for_delivery(detail):
+                        continue
+                    taken = self.after.begin_send(path.parent.name, ready_epoch)
+                    if taken is None:
                         self.after.blocked(path.parent.name, ready_epoch)
                         continue  # A Hold pressed since the check above wins.
-                    meta.update(self.deliver(detail, meta, previous=meta))
-                    meta.setdefault("delivery_started_at", now.isoformat(timespec="seconds"))
-                    meta["delivery_checked_at"] = now.isoformat(timespec="seconds")
-                    meta["delivery_retry_at"] = (now + timedelta(minutes=15)).isoformat(timespec="seconds")
-                    _atomic_json(path, meta)
+                    try:
+                        meta.update(self.deliver(detail, meta, previous=meta))
+                        meta.setdefault("delivery_started_at", now.isoformat(timespec="seconds"))
+                        meta["delivery_checked_at"] = now.isoformat(timespec="seconds")
+                        meta["delivery_retry_at"] = (now + timedelta(minutes=15)).isoformat(timespec="seconds")
+                        _atomic_json(path, meta)
+                        if _went(meta):
+                            self.after.delivered(path.parent.name, taken)
+                    finally:
+                        self.after.end_send(path.parent.name)
             finally:
                 gate.release()
             retried += 1
@@ -2008,9 +2046,7 @@ class MeetingArchive:
                 return False
             if not delivery_enabled(settings, channel):
                 return False
-            boundary = _date(settings.get(channel + "_enabled_at"))
-            started = _date(detail.get("started_at"))
-            return manual or not boundary or bool(started and started >= boundary)
+            return manual or auto_send_allowed(settings, channel, detail.get("started_at"))
         local_drive_setting = str(settings.get("drive_local_path") or "").strip()
         local_drive = Path(local_drive_setting).expanduser() if local_drive_setting else None
         remote = str(settings.get("drive_remote") or "").strip()
@@ -2127,6 +2163,7 @@ class MeetingArchive:
 
         mail_status = str(previous.get("mail_status") or "not_configured")
         gmail_message_id = previous.get("gmail_message_id")
+        mail_to = previous.get("mail_to")
         mail_error = {
             key: value for key, value in (previous.get("mail_error") or {}).items()
             if key in {"provider", "reason", "exit_code"}
@@ -2200,9 +2237,12 @@ class MeetingArchive:
                     mail_status = "unknown"
             receipt({"mail_status": mail_status,
                      "gmail_message_id": gmail_message_id if mail_status == "sent" else None})
+            if mail_status == "sent":
+                mail_to = recipient
 
         telegram_status = str(previous.get("telegram_status") or "not_configured")
         telegram_message_id = previous.get("telegram_message_id")
+        telegram_to = previous.get("telegram_to")
         telegram_config = Path(
             str(settings.get("telegram_config") or "")
         ).expanduser()
@@ -2250,6 +2290,8 @@ class MeetingArchive:
                 telegram_status = "failed"
             receipt({"telegram_status": telegram_status,
                      "telegram_message_id": telegram_message_id if telegram_status == "sent" else None})
+            if telegram_status == "sent":
+                telegram_to = telegram_target
         twenty = {key: previous[key] for key in TWENTY_OUTCOME if key in previous}
         if (allowed("twenty") and twenty.get("twenty_status") not in {"sent", "unknown"}
                 and (manual or twenty.get("twenty_status") != "needs_choice")):
@@ -2269,6 +2311,9 @@ class MeetingArchive:
             "mail_error": mail_error,
             "telegram_status": telegram_status,
             "telegram_message_id": telegram_message_id,
+            # Where each confirmed delivery went: After names it even after the settings change.
+            **({"mail_to": mail_to} if mail_to else {}),
+            **({"telegram_to": telegram_to} if telegram_to else {}),
         }
         return outcome
 
@@ -2488,6 +2533,7 @@ class MeetingArchive:
             return ""  # never checked (an old call): the report says nothing about it
         if memo_check["state"] != "done":
             reasons = {"ai_needs_choice": "ИИ не выбран или не может выполнить сверку",
+                       "ai_unavailable": "выбранный ИИ сейчас недоступен",
                        "timeout": "ИИ не ответил вовремя", "ai_no_answer": "ИИ не дал ответа",
                        "too_long": "расшифровка слишком длинная для сверки"}
             return (f'<section id="memo-check"><h2>Сверка с мемо</h2><p class="empty">Сверки с мемо нет: '
@@ -2633,7 +2679,8 @@ class MeetingArchive:
             '<li><a href="#followups">Следующие шаги</a></li>',
             '<li><a href="#summary">Краткое резюме</a></li>',
         ]
-        memo_html = self._memo_check_html((detail.get("report") or {}).get("memo_check"),
+        memo_html = self._memo_check_html(memo_current((detail.get("report") or {}).get("memo_check"),
+                                                       detail.get("transcript") or []),
                                           (detail.get("after_edits") or {}).get("removed"), esc)
         if memo_html:
             toc.append('<li><a href="#memo-check">Сверка с мемо</a></li>')
