@@ -203,7 +203,8 @@ function callSlot(state, current, now, stopped = null) {
   if (heard?.text) {
     const speaker = String(heard.speaker || "").trim();
     const label = speaker ? t("call.asks", { name: speaker }) : t("call.asks_plain");
-    return { type: "heard", label: callLabel(label, callAt(heard.at)), question: String(heard.text) };
+    const later = analysisSkipped !== null && analysisSkipped === state?.transcript?.meeting_id;
+    return { type: "heard", label: callLabel(label, callAt(heard.at)), question: String(heard.text), later };
   }
   if (current) {
     const key = callHintKey(current);
@@ -218,7 +219,7 @@ function callSlotNodes(slot) {
   if (slot.type === "stopped") return [textNode("p", "waiting", slot.text)];
   if (slot.type === "waiting") return [textNode("p", "waiting", slot.text), textNode("p", "heard-wait", t("call.waiting_help"))];
   if (slot.question) nodes.push(textNode("p", "heard-q", slot.question));
-  if (slot.type === "pending" || slot.type === "heard") nodes.push(textNode("p", "heard-wait", t("call.heard_wait")));
+  if (slot.type === "pending" || slot.type === "heard") nodes.push(textNode("p", "heard-wait", t(slot.later ? "call.heard_later" : "call.heard_wait")));
   if (slot.type === "ask_error") nodes.push(textNode("p", "heard-wait fail", slot.text));
   if (slot.type === "own") {
     nodes.push(textNode("p", "own-answer", readableAnswer(slot.text)));

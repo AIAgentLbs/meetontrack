@@ -884,6 +884,21 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // B5: the server skipped the automatic analysis (the start of an automatic recording): a heard question is not
+  // promised an answer, and the page asks again while it waits.
+  {
+    const page = await callPage(browser, 'heard');
+    page.api.responses['/api/analyze'] = { status: 200, json: { ok: true, skipped: true, reason: 'short_automatic_recording' } };
+    page.api.fixture.state.copilot.busy = false;
+    await refresh(page);
+    for (let tries = 0; tries < 50 && !posts(page, '/api/analyze').length; tries++) await page.waitForTimeout(20);
+    await refresh(page);
+    const wait = await text(page, '#call-slot .heard-wait');
+    assert.doesNotMatch(wait, /being prepared/);
+    assert.equal(wait, 'The answer comes later: the AI skips the first minutes of an automatic recording.');
+    assert.ok(await page.evaluate(() => urgentRetryAt > Date.now()), 'asks again after the gap');
+    await page.context().close();
+  }
   // B3: a question typed while an analysis runs is queued: it shows as waiting at once and goes out when the
   // analysis ends. A failed Ask says so in the feed and gives the question back for another try.
   {

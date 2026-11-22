@@ -149,6 +149,7 @@ const translations = {
     "call.where": "Откуда подсказка",
     "call.where_hide": "Свернуть",
     "call.heard_wait": "Ответ готовится, обычно несколько секунд. Появится здесь же.",
+    "call.heard_later": "Ответ появится позже: первые минуты автоматической записи ИИ не разбирает.",
     "call.waiting_heard": "Разговор слышно. Подсказка появится здесь, когда будет что сказать или спросить.",
     "call.waiting": "Запись идет. Подсказка появится здесь, когда будет что сказать или спросить.",
     "call.stopped": "Запись остановлена. Подсказок по этому звонку больше не будет.",
@@ -512,6 +513,7 @@ const translations = {
     "call.where": "Where this comes from",
     "call.where_hide": "Hide",
     "call.heard_wait": "The answer is being prepared, usually a few seconds. It will appear here.",
+    "call.heard_later": "The answer comes later: the AI skips the first minutes of an automatic recording.",
     "call.waiting_heard": "The conversation is heard. A hint appears here when there is something to say or ask.",
     "call.waiting": "Recording. A hint appears here when there is something to say or ask.",
     "call.stopped": "The recording is stopped. No more hints for this call.",
@@ -916,6 +918,7 @@ let transcriptSignature = "";
 let renderedMessages = "";
 let requestBusy = false;
 let autoAnalysisPrimed = false;
+let analysisSkipped = null; // the meeting whose last automatic analysis the server skipped as a short automatic recording
 let heardPrimed = ""; // the heard question the last automatic analysis was started for
 // After an urgent request the server skipped (inside its 15 s gap), the time from which the next
 // poll asks again while a heard question still waits, even if the transcript has not changed.
@@ -3547,7 +3550,10 @@ async function analyze(force, urgent = false) {
   elements.help.classList.remove("error");
   try {
     const result = await post("/api/analyze", { force, urgent });
-    if (urgent && result.skipped && !result.reason) urgentRetryAt = Date.now() + URGENT_GAP_MS;
+    // The start of an automatic recording is not analysed: the Call view says so instead of promising an answer,
+    // and a waiting question is asked again after the gap like any skip (B5).
+    analysisSkipped = result.reason === "short_automatic_recording" ? window.appState?.transcript?.meeting_id || "" : null;
+    if (urgent && result.skipped && (!result.reason || analysisSkipped !== null)) urgentRetryAt = Date.now() + URGENT_GAP_MS;
   } catch (error) {
     elements.help.textContent = plainError(error);
     elements.help.classList.add("error");
