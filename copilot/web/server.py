@@ -3054,6 +3054,10 @@ def after_post(path: str, payload: dict) -> tuple[dict, int]:
     meeting_id = payload.get("meeting_id")
     if not isinstance(meeting_id, str) or not 0 < len(meeting_id) <= 1024:
         raise ValueError("bad_meeting_id")
+    if path == "/api/after/hold" and meeting_id in AFTER_CACHE:
+        # A Hold never waits: retry takes the (unfair) archive lock again for each queued report,
+        # so a Hold that waited could lose to the next send. Every send re-checks the gate first.
+        return {"ok": True, **after_action(path, AFTER_CACHE[meeting_id]["meeting_id"], payload)}, HTTPStatus.OK
     if not ARCHIVE.lock.acquire(timeout=1):
         # Act on the report the page last showed; its after.json needs only AfterState's lock,
         # and every send re-checks the gate under the archive lock first.
@@ -3250,7 +3254,7 @@ class Handler(BaseHTTPRequestHandler):
             self._static("getting-started.js", "text/javascript; charset=utf-8")
         elif path == "/speech.js":
             self._static("speech.js", "text/javascript; charset=utf-8")
-        elif path in ("/shell.js", "/home.js", "/call.js"):
+        elif path in ("/shell.js", "/home.js", "/call.js", "/after.js"):
             self._static(path[1:], "text/javascript; charset=utf-8")
         elif path == "/screens.css":
             self._static("screens.css", "text/css; charset=utf-8")

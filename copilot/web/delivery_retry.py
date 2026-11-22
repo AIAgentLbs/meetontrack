@@ -45,6 +45,8 @@ class DeliveryRetry:
                 if report.get("last_delivery_request") == request:
                     result.update(state="complete", report=report.get("last_delivery_result", {}))
                 else:
+                    # Before the text is read: an edit after this moment is not in what goes out.
+                    checked = self.archive.after.clock() if after else None
                     detail = self.archive.report_detail(identity)
                     if not detail or not self.archive._ready_for_delivery(detail):
                         # MEETONTRACK-94: only a final transcript is ever sent, also on request.
@@ -55,7 +57,6 @@ class DeliveryRetry:
                     standalone = self.archive.report_path(identity, "meeting-report.html")
                     if not (pdf or standalone) or not self.archive.report_matches(detail, report):
                         raise ValueError("report_not_ready")
-                    checked = self.archive.after.clock() if after else None  # the text that goes out is this one
                     settings = self.archive.delivery_settings.read()
                     if any(not enabled(settings, c) for c in channels):
                         raise ValueError("channel_disabled")

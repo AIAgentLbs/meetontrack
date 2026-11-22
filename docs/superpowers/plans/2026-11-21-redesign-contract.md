@@ -275,7 +275,9 @@ Each takes `{"meeting_id"}` plus the fields below, resolves the report
 identity (unknown meeting: 404) and answers `{"ok": true}` unless stated.
 None waits for a send: after 1 s on the archive lock the control acts on the
 report of the last `GET /api/after` for that meeting, or answers 503
-`{"ok": false, "error": "busy"}` when there was none.
+`{"ok": false, "error": "busy"}` when there was none. Hold on a meeting the
+page has shown is written at once, without the archive lock, so a send queued
+behind another one sees it.
 
 | Route | Body adds | Effect |
 |---|---|---|

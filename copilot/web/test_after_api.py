@@ -350,6 +350,19 @@ class AfterAPITests(unittest.TestCase):
         self.assertEqual(self.stored()["resent_at"], self.now)
         self.assertEqual(self.state(), "sent")
 
+        # An edit that lands while the job reads the report is not in what went out: still later.
+        real = self.archive.report_matches
+
+        def racing(detail, report):
+            matched = real(detail, report)
+            self.now += 1
+            self.archive.after.edit("m1", "next_steps", "Call back on Monday.")
+            return matched
+        self.now += 5
+        with patch.object(self.archive, "report_matches", side_effect=racing):
+            self.assertEqual(send_again()["state"], "complete")
+        self.assertLess(self.stored()["resent_at"], self.stored()["changed_at"])
+
     def test_controls_answer_while_a_send_holds_the_archive(self):
         """Hold is stored within 1 s while a send holds the archive, and the queued report keeps it (I2)."""
         self.serve()
@@ -384,6 +397,42 @@ class AfterAPITests(unittest.TestCase):
         sent = []
         with patch.object(self.archive, "deliver", side_effect=lambda *a, **k: sent.append(1) or {}):
             self.archive.retry_pending_deliveries()  # the scan that was queued behind the send
+        self.assertEqual(sent, [])
+
+    def test_hold_never_waits_for_the_archive(self):
+        """Retry takes the archive lock again for each queued report and the lock is not fair:
+        a Hold that waited for it could lose to the queued send. A shown meeting's Hold is written at once."""
+        self.serve()
+        (self.reports / "m1").mkdir(parents=True)
+        (self.reports / "m1" / "meeting-report.pdf").write_bytes(b"%PDF synthetic")
+        self.write_report(ready_at=local(self.now - 60), pdf_path=str(self.reports / "m1" / "meeting-report.pdf"),
+                          generated_at=local(self.now - 60))
+        self.assertEqual(self.request("GET", "/api/after?meeting_id=m1")[0], 200)
+        sent = []
+        patcher = patch.object(self.archive, "deliver", side_effect=lambda *a, **k: sent.append(1) or {})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        held, release = threading.Event(), threading.Event()
+
+        def sending():
+            with self.archive.lock:  # another report's send
+                held.set()
+                release.wait(10)
+        holder = threading.Thread(target=sending)
+        holder.start()
+        held.wait(5)
+        scan = threading.Thread(target=self.archive.retry_pending_deliveries)
+        scan.start()  # m1 is queued behind that send
+        try:
+            time.sleep(0.2)
+            began = time.monotonic()
+            self.assertEqual(self.request("POST", "/api/after/hold", {"meeting_id": "m1"}), (200, {"ok": True}))
+            self.assertLess(time.monotonic() - began, 0.5)
+            self.assertTrue(self.stored()["held"])
+        finally:
+            release.set()
+            holder.join(5)
+            scan.join(5)
         self.assertEqual(sent, [])
 
     def test_busy_archive_returns_last_payload(self):
