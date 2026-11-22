@@ -358,7 +358,7 @@ async function interactions(browser) {
 
   // Nothing to say yet: the waiting line and where else to look; no hint. No Earlier while there is none (ruling 4).
   page = await callPage(browser, 'waiting');
-  assert.match(await text(page, '#call-slot .waiting'), /^The conversation is heard\. A hint appears here/);
+  assert.match(await text(page, '#call-slot .waiting'), /^Listening\. A hint appears here/);
   assert.match(await text(page, '#call-slot .heard-wait'), /You can ask your own question below/);
   assert.equal(await page.locator('#call .hint').count(), 0);
   assert.equal(await visible(page, '#call-note'), false);
@@ -397,7 +397,7 @@ async function interactions(browser) {
 
   // The other side not heard: since when, the sound output first, How to fix on the guide's audio step.
   page = await callPage(browser, 'other_lost', { at: Date.now() });
-  assert.equal(await text(page, '#call-problem .problem h3'), 'The other side is not heard since 12:00');
+  assert.equal(await text(page, '#call-problem .problem h3'), 'The other side has not been heard since 12:00');
   assert.match(await text(page, '#call-problem .problem p'), /^You are heard\./);
   assert.equal(await text(page, '#call-problem button.primary'), 'Choose where to listen to the call from');
   await page.click('#call-problem button.primary');
@@ -415,7 +415,7 @@ async function interactions(browser) {
 
   // Your microphone not heard: the microphone settings.
   page = await callPage(browser, 'you_lost');
-  assert.match(await text(page, '#call-problem .problem h3'), /^You are not heard since \d\d:\d\d$/);
+  assert.match(await text(page, '#call-problem .problem h3'), /^You have not been heard since \d\d:\d\d$/);
   await page.click('#call-problem button.primary');
   await expectPost(page, '/api/permissions/open', { which: 'microphone' });
   await page.context().close();
@@ -451,13 +451,13 @@ async function interactions(browser) {
   await expectPost(page, '/api/chat', { question: 'What did Anna say about the budget?' });
   await page.context().close();
 
-  // The answer to your own question, and Open in chat.
+  // The answer to your own question, and the link to all questions and answers.
   page = await callPage(browser, 'own_answer');
   assert.equal(await text(page, '#call-slot .say').then(value => value.split(' · ')[0]), 'Answer to your question');
   assert.equal(await text(page, '#call-slot .heard-q'), 'What did Anna say about the budget?');
   assert.equal(await text(page, '#call-slot .own-answer'), 'Anna said the budget is approved for one quarter and needs the committee to extend it.');
   assert.equal(await page.$eval('#call-slot .own-answer', node => getComputedStyle(node).fontSize), '18px');
-  assert.equal(await text(page, '#call-slot button.ql'), 'Open in chat');
+  assert.equal(await text(page, '#call-slot button.ql'), 'All questions and answers');
   await page.click('#call-slot button.ql');
   assert.equal(await page.evaluate(() => document.body.dataset.callPanel), 'chat');
   assert.equal(await visible(page, '#chat'), true);
@@ -768,7 +768,7 @@ async function narrow(browser) {
     if (fixture === 'other_lost') {
       assert.equal(await text(page, '#call-status-text'), 'Recording', label);
       assert.deepEqual(await beatTexts(page), ['You: heard', 'Other side: not heard'], label);
-      assert.match(await text(page, '#call-problem .problem h3'), /^The other side is not heard/, label);
+      assert.match(await text(page, '#call-problem .problem h3'), /^The other side has not been heard/, label);
     }
     if (width === 520 && fixture !== 'stopped') {
       // 480-600 px: the clock and the sides on their own row under the record line, words kept, the last line heard on one.
@@ -887,6 +887,19 @@ async function narrow(browser) {
 
 // The fix wave after the final review (fix-wave.md), one block per item.
 async function fixWave(browser) {
+  // D6: plain copy in both languages, each key once.
+  {
+    const page = await callPage(browser, 'waiting', { lang: 'ru' });
+    assert.match(await text(page, '#call-slot .waiting'), /^Слушаю разговор\. Подсказка появится здесь/);
+    const copy = await page.evaluate(() => ['call.open_chat', 'call.you_lost', 'call.other_lost'].map(key => [translations.ru[key], translations.en[key]]));
+    assert.deepEqual(copy, [['Все вопросы и ответы', 'All questions and answers'], ['Вас не слышно с {time}', 'You have not been heard since {time}'],
+      ['Собеседника не слышно с {time}', 'The other side has not been heard since {time}']]);
+    for (const lang of ['ru', 'en']) assert.doesNotMatch(build('earlier_open', lang).state.journal.map(item => item.text).join(' '), /контекст|background/);
+    await page.context().close();
+    const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../copilot/web/app.js'), 'utf8');
+    for (const key of ['call.waiting_heard', 'call.open_chat', 'call.you_lost', 'call.other_lost'])
+      assert.equal(source.split(`"${key}":`).length - 1, 2, `${key}: once per language`);
+  }
   // D5: the ask button says Send, so it never clashes with the hint's Ask; the placeholder keeps its wording.
   for (const [lang, send, placeholder] of [['en', 'Send', 'Ask about this call'], ['ru', 'Отправить', 'Спросить про звонок']]) {
     const page = await callPage(browser, 'hint', { lang });
@@ -926,7 +939,7 @@ async function fixWave(browser) {
     assert.equal(await text(page, '#call-slot .say'), 'Ask · 12:35');
     await page.context().close();
     page = await callPage(browser, 'other_lost', { at });
-    assert.equal(await text(page, '#call-problem .problem h3'), 'The other side is not heard since 12:00');
+    assert.equal(await text(page, '#call-problem .problem h3'), 'The other side has not been heard since 12:00');
     await page.context().close();
     page = await callPage(browser, 'stopped', { at });
     assert.match(await text(page, '#call-status-text'), /^Recording stopped at 12:30\. /);
