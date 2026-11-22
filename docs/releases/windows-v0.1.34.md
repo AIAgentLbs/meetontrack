@@ -78,11 +78,11 @@ Install button or the command above starts it.
 
 ## Build identity
 
-Application source: `70000342a190f28fd02a2f639c81f1830c33e91f`.
+Application source: `194b48c5e95be3d7eb572c332f24304868dc8359`.
 Native recorder: built from this repository's `windows/` at the same revision
-([windows-candidate run 45050885657](https://github.com/AIAgentLbs/meetontrack/actions/runs/45050885657),
-`managed.zip` SHA-256 `6e1c1340601520b06805d54cc3f03ce2bd63b195d7aeef6b0721d6628f87a270`).
-ZIP SHA-256: `144a2541504d253aac353a3956b7f12a18e02135a551cc9d63c33b433b2a1d6f`.
+([windows-candidate run 45064826795](https://github.com/AIAgentLbs/meetontrack/actions/runs/45064826795),
+`managed.zip` SHA-256 `9a885e4cb51c2a3f0b6d76caf6d2424c32ffca56392115fd7940655893b8b01b`).
+ZIP SHA-256: `6225b9711a4ccc5505fac276baa6a06c2733b7b3b28ec24331a447b0688893e2`.
 The integrated package version is 0.1.34 (`0.1.34-windows-beta.1`); its
 independently versioned native component retains 0.6.6. The web update
 checker compares integrated versions.
