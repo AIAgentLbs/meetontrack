@@ -5,6 +5,7 @@ All names, texts and addresses are invented.
 
 import http.client
 import json
+import os
 import tempfile
 import threading
 import time
@@ -73,11 +74,16 @@ class AfterAPITests(unittest.TestCase):
         """A report.json made from the meeting's current text, with the given outcome fields."""
         folder = self.reports / "m1"
         folder.mkdir(parents=True, exist_ok=True)
-        meta = {"html": "/api/archive/report/m1/index.html",
+        # A healthy report (generated_at), written atomically as the archive does. A delivery job
+        # ends with a health check that runs after its result is published; reading a half-written
+        # report.json, it "repaired" it into one without source_signature (MEETONTRACK-189 flake).
+        meta = {"html": "/api/archive/report/m1/index.html", "generated_at": local(self.now),
                 "source_signature": self.archive.source_signature(self.archive.report_detail("m1")),
                 "mail_status": "waiting_for_end", "telegram_status": "waiting_for_end",
                 "twenty_status": "waiting_for_end", "drive_status": "pending", **fields}
-        (folder / "report.json").write_text(json.dumps(meta))
+        staged = folder / "report.json.tmp"
+        staged.write_text(json.dumps(meta))
+        os.replace(staged, folder / "report.json")
 
     def payload(self, settings: dict = SETTINGS) -> dict:
         return after_payload(self.archive, "m1", settings, self.now)
@@ -346,7 +352,8 @@ class AfterAPITests(unittest.TestCase):
         self.assertEqual(self.state(), "edited")
 
         self.now += 5
-        self.assertEqual(send_again()["state"], "complete")
+        job = send_again()
+        self.assertEqual(job["state"], "complete", job)
         self.assertEqual(sent, [{"email", "telegram"}])
         self.assertEqual(self.stored()["resent_at"], self.now)
         self.assertEqual(self.state(), "sent")
