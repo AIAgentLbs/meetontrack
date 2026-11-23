@@ -681,12 +681,28 @@ final class AppController {
 
         autoRecord.enabled = Config.autoRecord().enabled
         let shouldStart = autoRecord.enabled
-        Task { [weak self] in
-            if requestCalendarAccess { await self?.calendar?.requestAccess() }
-            if shouldStart { self?.autoRecord.start() }
+        var start: (() -> Void)?
+        if shouldStart { start = { [weak self] in self?.autoRecord.start() } }
+        var askCalendar: (@MainActor () async -> Void)?
+        if requestCalendarAccess {
+            askCalendar = { [weak self] in await self?.calendar?.requestAccess() }
         }
+        Self.beginWatching(startAutoRecord: start, requestCalendarAccess: askCalendar)
         menuBar.updateAutoRecord(enabled: autoRecord.enabled, decision: nil)
         window.updateAutoRecord(enabled: autoRecord.enabled, decision: nil)
+    }
+
+    /// Auto-record first, the calendar prompt second. After a reinstall the
+    /// calendar grant is "not asked yet", and the system prompt waits for an
+    /// answer for as long as nobody gives one; a call that starts meanwhile
+    /// must still be recorded (MEETONTRACK-189 P0-3). The calendar trigger
+    /// already tolerates "not authorized yet".
+    static func beginWatching(
+        startAutoRecord: (() -> Void)?,
+        requestCalendarAccess: (@MainActor () async -> Void)?
+    ) {
+        startAutoRecord?()
+        if let requestCalendarAccess { Task { @MainActor in await requestCalendarAccess() } }
     }
 
     /// Start or stop by signal — `kill -USR1 $(pgrep -x meetingcopilot)` — so a hotkey
