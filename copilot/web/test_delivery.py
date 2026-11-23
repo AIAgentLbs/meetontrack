@@ -141,7 +141,7 @@ class DeliveryTests(unittest.TestCase):
         with patch.object(self.archive, "_upload_drive_report_gws", return_value=("auth_required", {})), \
              patch.object(self.archive, "_gws_call", return_value={"id": "mail-2"}) as gws:
             self.assertEqual(self.archive.deliver(self.detail, report)["mail_status"], "sent")
-        gws.assert_called_once()
+        self.assertEqual([call.args[1] for call in gws.call_args_list].count("+send"), 1)
 
     def test_telegram_missing_dependency_and_invalid_ack_are_not_sent(self):
         self.telegram_setup()
@@ -207,7 +207,52 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(result["mail_status"], "sent")
         self.assertEqual(result["gmail_message_id"], "sent-id")
         self.assertEqual(result["drive_pdf_url"], links["drive_pdf_url"])
-        self.assertEqual(gws.call_args.args[:2], ("gmail", "+send"))
+        self.assertEqual(gws.call_args_list[0].args[:2], ("gmail", "+send"))
+
+    UNREAD_IN_INBOX = ("gmail", "users", "messages", "modify",
+                       "--params", json.dumps({"userId": "me", "id": "sent-id"}),
+                       "--json", json.dumps({"addLabelIds": ["UNREAD", "INBOX"]}))
+
+    def test_self_send_lands_unread_in_inbox(self):
+        """Gmail files mail to its own account as read; the memo must notify (MEETONTRACK-188)."""
+        with patch.object(self.archive, "_upload_drive_report_gws", return_value=("auth_required", {})), \
+             patch.object(self.archive, "_gws_call", return_value={"id": "sent-id"}) as gws:
+            result = self.archive.deliver(self.detail, {"pdf_path": str(self.pdf)})
+        self.assertEqual(result["mail_status"], "sent")
+        self.assertEqual([call.args[:2] for call in gws.call_args_list], [("gmail", "+send"), ("gmail", "users")])
+        self.assertEqual(gws.call_args.args, self.UNREAD_IN_INBOX)
+        self.assertEqual(result["mail_unread"], {"status": "added"})
+
+    def test_send_to_another_address_keeps_gmail_labels(self):
+        settings = json.loads((self.config / "delivery.json").read_text())
+        (self.config / "delivery.json").write_text(json.dumps({**settings, "email_to": "colleague@example.com"}))
+        with patch.object(self.archive, "_upload_drive_report_gws", return_value=("auth_required", {})), \
+             patch.object(self.archive, "_gws_call", return_value={"id": "sent-id"}) as gws:
+            result = self.archive.deliver(self.detail, {"pdf_path": str(self.pdf)})
+        self.assertEqual(result["mail_status"], "sent")
+        self.assertEqual(gws.call_count, 1)
+        self.assertNotIn("mail_unread", result)
+
+    def test_failed_unread_label_keeps_the_mail_sent_and_never_resends(self):
+        def gws(*args, diagnostics=None, **kwargs):
+            if args[:2] == ("gmail", "+send"):
+                return {"id": "sent-id"}
+            diagnostics.update(provider="gws", reason="permission_missing", exit_code=1)
+            return None
+        with patch.object(self.archive, "_upload_drive_report_gws", return_value=("auth_required", {})), \
+             patch.object(self.archive, "_gws_call", side_effect=gws), \
+             patch("builtins.print") as log:
+            result = self.archive.deliver(self.detail, {"pdf_path": str(self.pdf)})
+        self.assertEqual(result["mail_status"], "sent")
+        self.assertEqual(result["gmail_message_id"], "sent-id")
+        self.assertEqual(result["mail_error"], {})
+        self.assertEqual(result["mail_unread"], {"status": "failed", "provider": "gws", "reason": "permission_missing"})
+        self.assertIn("permission_missing", " ".join(str(call.args) for call in log.call_args_list))
+        with patch.object(self.archive, "_upload_drive_report_gws", return_value=("auth_required", {})), \
+             patch.object(self.archive, "_gws_call") as again:
+            later = self.archive.deliver(self.detail, {"pdf_path": str(self.pdf)}, previous=result)
+        again.assert_not_called()
+        self.assertEqual(later["mail_unread"], result["mail_unread"])
 
     def test_missing_drive_links_are_repaired_without_resending_successes(self):
         report_dir = self.archive.reports_root / "meeting-1"

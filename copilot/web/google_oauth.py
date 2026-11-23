@@ -19,7 +19,9 @@ TOKEN_URI = "https://oauth2.googleapis.com/token"
 USERINFO = "https://openidconnect.googleapis.com/v1/userinfo"
 PREFIX = "https://www.googleapis.com/auth/"
 PERMISSIONS = {
-    "mail": [PREFIX + "gmail.send"],
+    # gmail.modify only marks a memo sent to the signed-in account itself unread in its inbox
+    # (MEETONTRACK-188); gmail.send cannot change labels.
+    "mail": [PREFIX + "gmail.send", PREFIX + "gmail.modify"],
     # User chooses an existing destination folder, not just files created by us.
     "drive": [PREFIX + "drive"],
     "context": [PREFIX + "gmail.readonly", PREFIX + "drive.readonly",
