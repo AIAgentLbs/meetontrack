@@ -1,9 +1,12 @@
 import json
 import tempfile
+import threading
+import time
 import unittest
 from datetime import datetime
 from pathlib import Path
 
+from calendar_meetings import CalendarMeetings
 from call_plan import CallPlans
 from repo_preparations import RepositoryPreparations
 
@@ -462,6 +465,32 @@ call_date: 2026-09-29
         generic = {**self.meeting, "meeting_id": "live-generic", "meeting": "Google Chrome Helper",
                    "remote_attendees": [], "started_at": "2026-09-29T08:02:00Z"}
         self.assertEqual(plans.snapshot(generic)["id"], APP_PLAN_FOR_EV1["id"])
+
+    def test_live_poll_with_two_memos_finishes_while_a_token_refresh_runs(self):
+        # MEETONTRACK-183 review P1: each matching memo checks the day; a refresh holding the sign-in's lock must
+        # cost one bounded wait per poll, not one per memo (the browser abandons /api/state after 8 s).
+        class SignIn:
+            lock = threading.RLock()
+
+            def status(self):
+                return {"state": "connected", "account": "me@example.com", "permissions": ["context"]}
+        sign_in, held, release = SignIn(), threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+
+        def refresh():
+            with sign_in.lock:
+                held.set()
+                release.wait(30)
+        threading.Thread(target=refresh, daemon=True).start()
+        held.wait(2)
+        memos = [APP_PLAN_FOR_EV1, {**APP_PLAN_FOR_EV1, "id": "app-fedcba9876543210", "event_id": "ev2"}]
+        plans = CallPlans(self.root / "absent.json", self.state, None,
+                          CalendarMeetings(executable="", oauth=lambda: sign_in), app_plans=lambda: memos)
+        live = {**self.meeting, "meeting_id": "live", "meeting": "Pilot review", "remote_attendees": [],
+                "started_at": "2026-09-29T08:02:00Z"}
+        started = time.monotonic()
+        plans.snapshot(live)
+        self.assertLess(time.monotonic() - started, 8)
 
     def test_app_plan_without_event_id_stays_chosen(self):
         calendar = calendar_of({"2026-09-29": [{"id": "ev1", "title": "Pilot review",

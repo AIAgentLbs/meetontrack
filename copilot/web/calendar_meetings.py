@@ -99,9 +99,17 @@ class CalendarMeetings:
     def for_day(self, day: date) -> list[dict]:
         if self.enabled is not None and not self.enabled():
             return []
+        busy_key = "busy|" + day.isoformat()
+        with self._lock:
+            busy = self._cache.get(busy_key)
+            # A refresh is still holding the sign-in: later checks (one per matching memo) fail at once.
+            if busy and time.monotonic() - busy[0] < 15:
+                raise CalendarUnavailable()
         deadline = time.monotonic() + self.READ_SECONDS  # the sign-in's lock and the read share one bound
         oauth, status = self._native(deadline)
         if status.get("busy"):
+            with self._lock:
+                self._cache[busy_key] = (time.monotonic(), None)
             raise CalendarUnavailable()
         if oauth is not None and not status.get("ready"):
             return []  # the chosen sign-in needs reconnecting (state() says so); never another account's gws
