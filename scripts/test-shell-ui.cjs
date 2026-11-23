@@ -148,6 +148,7 @@ const errors = [];
       const captured = (state, age = 5) => ({ recording_health: { checked_at: now / 1000 - age,
         capture: { state, audio_recording: state === 'recording' } },
       transcript: { meeting_id: 'm3', status: state === 'paused' ? 'paused' : 'recording', live: false, updated_at: at(-1) } });
+      const stopped = minutes => ({ recording_control: { stopping: null, last_stop: { meeting_id: 'm1', stopped_at: at(minutes) } } });
       const short = status => [status.kind, status.text, status.action && `${status.action.id}${status.action.primary ? '!' : ''}`];
       const cases = {
         live: [live, agenda(call(40)), perms('denied')],
@@ -159,6 +160,15 @@ const errors = [];
         startedOneMinuteAgo: [{}, agenda(call(-1)), perms()],
         runningSkipped: [{}, agenda(call(-3, 30, { skip_recording: true })), perms()],
         skippedThenNext: [{}, agenda(call(-3, 30, { skip_recording: true }), call(60)), perms('denied')],
+        // Stopped by the user while the call's event still runs: that call is handled, like a skipped one. A stop
+        // before the event began, or during an earlier event, leaves the alarm for this one.
+        runningStopped: [stopped(-1), agenda(call(-7)), perms()],
+        runningStoppedThenNext: [stopped(-1), agenda(call(-7), call(60)), perms()],
+        stoppedBeforeCall: [stopped(-5), agenda(call(-3)), perms()],
+        stoppedEarlierCall: [stopped(-20), agenda(call(-30, 15), call(-3)), perms()],
+        stoppedInactive: [{ ...stopped(-1), transcript: { meeting_id: 'm1', status: 'stopped', live: false } }, agenda(call(-7)), perms()],
+        // Recording started again after the stop, then its recorder went quiet: the old stop hides nothing.
+        restartedAfterStop: [{ ...stopped(-6.5), transcript: { meeting_id: 'm1', status: 'recording', live: false, started_at: at(-6.4), updated_at: at(-5.5) } }, agenda(call(-7)), perms()],
         ended: [{}, agenda(call(-40)), perms('denied', 'denied', 'stopped')],
         micMissing: [{}, agenda(call(40)), perms('denied', 'denied')],
         // On macOS a denied microphone still records the call audio (only the owner's voice is lost); Windows does not start.
@@ -219,6 +229,12 @@ const errors = [];
       startedOneMinuteAgo: ['waiting', `Ждет звонка в ${started}, запись включится сама`, 'start'],
       runningSkipped: ['waiting', 'Запись включится сама, когда начнется звонок', 'start'],
       skippedThenNext: ['mic_missing', `Нет доступа к микрофону: запись в ${later} не включится`, 'open_mic!'],
+      runningStopped: ['waiting', 'Запись включится сама, когда начнется звонок', 'start'],
+      runningStoppedThenNext: ['waiting', `Ждет звонка в ${later}, запись включится сама`, 'start'],
+      stoppedBeforeCall: ['not_recording', 'Запись не идет: звонок не замечен', 'start!'],
+      stoppedEarlierCall: ['not_recording', 'Запись не идет: звонок не замечен', 'start!'],
+      stoppedInactive: ['waiting', 'Запись включится сама, когда начнется звонок', 'start'],
+      restartedAfterStop: ['not_recording', 'Запись не идет: звонок не замечен', 'start!'],
       ended: ['waiting', 'Ждет звонка', null],
       micMissing: ['mic_missing', `Нет доступа к микрофону: запись в ${time} не включится`, 'open_mic!'],
       micMissingMac: ['mic_missing', `Нет доступа к микрофону: ваш голос в звонке в ${time} не запишется`, 'open_mic!'],
