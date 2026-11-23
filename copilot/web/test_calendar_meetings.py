@@ -5,6 +5,7 @@ import threading
 import time
 import unittest
 from datetime import date
+from pathlib import Path
 from unittest import mock
 
 from calendar_meetings import CalendarMeetings, CalendarUnavailable
@@ -152,7 +153,7 @@ class NamedProfileCalendarTests(unittest.TestCase):
         from google_context import GoogleContext
         home = tempfile.TemporaryDirectory()
         self.addCleanup(home.cleanup)
-        env = mock.patch.dict(os.environ, {"HOME": home.name})
+        env = mock.patch.dict(os.environ, {"HOME": home.name, "USERPROFILE": home.name})
         env.start()
         self.addCleanup(env.stop)
         root = Path(home.name) / ".config/meeting-copilot"
@@ -173,7 +174,8 @@ class NamedProfileCalendarTests(unittest.TestCase):
         return CalendarMeetings(executable=lambda: self.context.executable, oauth=lambda: self.context.native_oauth())
 
     def test_reads_through_the_chosen_profile_never_the_default_gws(self):
-        done = subprocess.CompletedProcess([], 0, stdout=json.dumps({"items": [EVENT]}), stderr="")
+        answer = "Using keyring backend: keyring\n" + json.dumps({"items": [EVENT]})
+        done = subprocess.CompletedProcess([], 0, stdout=answer, stderr="")
         with mock.patch("calendar_meetings.subprocess.run", return_value=done) as run:
             calendar = self.calendar()
             self.assertEqual(calendar.state(), "connected")
@@ -188,6 +190,12 @@ class NamedProfileCalendarTests(unittest.TestCase):
             self.assertEqual(calendar.state(), "tool_missing")
             self.assertEqual(calendar.for_day(date(2026, 11, 26)), [])
         run.assert_not_called()
+
+    def test_no_profile_chosen_offers_connect(self):
+        (Path(self.wrapper.parents[2]) / ".config/meeting-copilot/delivery.json").write_text("{}")
+        calendar = CalendarMeetings(executable=lambda: self.context.executable,
+                                    enabled=lambda: "calendar" in self.context.enabled_sources())
+        self.assertEqual(calendar.state(), "not_connected")
 
 
 if __name__ == "__main__":

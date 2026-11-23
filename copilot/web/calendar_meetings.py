@@ -10,6 +10,8 @@ import threading
 import time
 from datetime import date, datetime, time as clock_time, timedelta
 
+from google_context import json_payload
+
 
 MEETING_URL_RE = re.compile(
     r"https://(?:telemost\.yandex\.ru|meet\.google\.com|zoom\.us|teams\.microsoft\.com)/[^\s<>\"']+",
@@ -78,9 +80,9 @@ class CalendarMeetings:
             if not status.get("ready"):
                 return "not_connected"
             return "not_connected" if self.enabled is not None and not self.enabled() else "connected"
-        if not self._gws():
-            return "tool_missing"
-        return "not_connected" if self.enabled is not None and not self.enabled() else "connected"
+        if self.enabled is not None and not self.enabled():
+            return "not_connected"  # first: with no Google profile chosen, Home offers Connect, not installing gws
+        return "connected" if self._gws() else "tool_missing"
 
     def _read_signed_in(self, oauth, params: dict, deadline: float):
         """google_api.read bounded by the deadline: a token refresh alone may take 20 s. A late answer is dropped
@@ -149,7 +151,7 @@ class CalendarMeetings:
                     [gws, "calendar", "events", "list", "--params", json.dumps(params)],
                     capture_output=True, text=True, timeout=self.READ_SECONDS, check=False,
                 )
-                payload = json.loads(result.stdout) if result.returncode == 0 else None
+                payload = json_payload(result.stdout) if result.returncode == 0 else None  # keyring line first
             if not isinstance(payload, dict):
                 raise ValueError("no calendar answer")
             raw_items = payload.get("items", [])
