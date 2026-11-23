@@ -39,7 +39,8 @@ Public Mac/Windows 0.1.10 packages and remaining hardware gates:
 - [ ] [MEETONTRACK-183](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-183/) (shipped in v0.1.35 on 2026-11-23, in Review): Home reads the calendar through the app's own Google sign-in instead of the gws default profile.
 - [ ] [MEETONTRACK-184](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-184/): Home calendar sign-in states and token edge cases left after 183 (gws hint without sign-in, 401 not cleared, slow token refresh paths). copilot/web/calendar_meetings.py, google_oauth.py.
 - [ ] [MEETONTRACK-185](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-185/): Recorder after a reinstall does not ask for missing macOS grants, misses auto-record and hangs on a manual start. capture/.
-- [ ] [MEETONTRACK-186](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-186/): Home calendar ignores the chosen gws profile (personal/work) and runs bare gws (default profile); on the owner's Mac 0.1.35 still answers calendar_state "failed". Read through DeliverySettings.executable() (gws-<profile>). copilot/web/calendar_meetings.py.
+- [ ] [MEETONTRACK-186](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-186/) (shipped in v0.1.36 on 2026-11-23, in Review): Home calendar reads through the chosen gws profile (gws-<profile>) instead of bare gws; on the owner's Mac 0.1.36 answers calendar_state "connected".
+- [ ] [MEETONTRACK-187](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-187/): UI script `copilot/web/test_meeting_boundary_ui.cjs` fails: the Call view hides the transcript (and its boundary note) behind the Transcript toggle; open the panel in the test before checking.
 - [x] MEETONTRACK-1 (done and verified, closed 2026-11-14): `scripts/check-note-ui.cjs` fails at 0.1.11 and identically at the 0.1.10
   source (`ae27f2b`): `#note-help` shows `--:--` where the test expects the
   fixture's elapsed time `02:44`. Decide whether the hint must render the call
