@@ -29,7 +29,28 @@ actor LiveTranscriptionCoordinator {
     struct CaptureWarning: Sendable, Encodable {
         let started_at: String
         var ended_at: String? = nil
-        let reason = "system-audio-lost"
+        var reason = "system-audio-lost"
+        /// Why, when it is known: "system_audio_permission" for a far-end tap
+        /// that has delivered nothing but exact zeros.
+        var cause: String? = nil
+    }
+
+    /// A capture problem the recorder found itself, raised whether or not live
+    /// recognition is running. One open warning per reason.
+    func noteCaptureWarning(reason: String, cause: String? = nil, since: Date = Date()) {
+        guard isRecording,
+              !captureWarnings.contains(where: { $0.reason == reason && $0.ended_at == nil })
+        else { return }
+        captureWarnings.append(CaptureWarning(
+            started_at: ISO8601DateFormatter().string(from: since), reason: reason, cause: cause))
+        publish()
+    }
+
+    func endCaptureWarning(reason: String) {
+        guard let index = captureWarnings.lastIndex(where: { $0.reason == reason && $0.ended_at == nil })
+        else { return }
+        captureWarnings[index].ended_at = ISO8601DateFormatter().string(from: Date())
+        publish()
     }
 
     struct SessionSinks: Sendable {
@@ -410,14 +431,15 @@ actor LiveTranscriptionCoordinator {
     private func observeAudio(peak: Float?, from source: Source, epoch: Int) {
         guard transcript.epoch == epoch, source == .system, let peak else { return }
         let now = Date()
+        let lost = captureWarnings.lastIndex { $0.reason == "system-audio-lost" }
         if peak > 0.00001 {
             lastSystemSignal = now
-            if let index = captureWarnings.indices.last, captureWarnings[index].ended_at == nil {
+            if let index = lost, captureWarnings[index].ended_at == nil {
                 captureWarnings[index].ended_at = ISO8601DateFormatter().string(from: now)
                 publish()
             }
         } else if let lastSystemSignal, now.timeIntervalSince(lastSystemSignal) >= 45,
-                  captureWarnings.last?.ended_at != nil || captureWarnings.isEmpty {
+                  lost.map({ captureWarnings[$0].ended_at != nil }) ?? true {
             captureWarnings.append(CaptureWarning(started_at: ISO8601DateFormatter().string(from: lastSystemSignal)))
             publish()
         }

@@ -808,8 +808,10 @@ final class AppController {
 
     private func startSession(trigger: RecordingSession.Trigger, context: MeetingContext) {
         guard session == nil else { return }
+        var created: RecordingSession?
         do {
             let newSession = try RecordingSession(root: root, context: context, trigger: trigger)
+            created = newSession
             try newSession.start()
             session = newSession
             FileHandle.standardError.write(Data(
@@ -826,6 +828,8 @@ final class AppController {
             }
         } catch {
             FileHandle.standardError.write(Data("recording start failed: \(error)\n".utf8))
+            // A start that recorded nothing leaves no folder behind (P3-7).
+            if let created { RecordingSession.removeIfNothingRecorded(created.dir) }
             window.showStartFailure(error.localizedDescription)
             window.bringToFront()
             notifyUser(
@@ -852,7 +856,7 @@ final class AppController {
             recordingDirectory: newSession.dir.path
         )
         liveSessionID = liveExportContext.meetingID
-        Task { [weak self, liveTranscription, liveTranscriptExporter] in
+        let liveBegan = Task { [weak self, liveTranscription, liveTranscriptExporter] in
             await liveTranscription.beginRecording(
                 enabled: liveEnabled,
                 update: { [weak self] snapshot in
@@ -876,6 +880,27 @@ final class AppController {
         }
 
         present(.recording, elapsed: "0:00")
+
+        // The microphone starts off the main thread behind a watchdog: a
+        // CoreAudio call that hangs must never freeze the menu, the ticker and
+        // Stop again (MEETONTRACK-189 P0-4, 2026.11.23-1235).
+        Task { [weak self, liveTranscription] in
+            let result = await newSession.startMicrophone()
+            guard result != .started else { return }
+            FileHandle.standardError.write(Data(
+                "mic: \(RecordingSession.describe(result)) — recording the far end only\n".utf8))
+            // After the live state is reset for this session, or the reset
+            // would wipe the warning.
+            await liveBegan.value
+            await liveTranscription.noteCaptureWarning(reason: "microphone-not-started")
+            guard let self, self.session === newSession else { return }
+            if result == .denied {
+                // Automatic starts already said so (AutoRecordController.begin).
+                if trigger == .manual { Notifications.microphoneMissing() }
+            } else {
+                Notifications.microphoneFailed()
+            }
+        }
     }
 
     private func stopSession(reason: String = "manual") {

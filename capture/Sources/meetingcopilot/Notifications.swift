@@ -77,6 +77,17 @@ enum Notifications {
              url: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"))
     }
 
+    /// The microphone did not start (an error, or no answer within the
+    /// watchdog): the far end is still recorded, your voice is not.
+    @MainActor
+    static func microphoneFailed() {
+        post(title: localised("Not recording your voice: the microphone did not start",
+                              "Ваш голос не записывается: микрофон не запустился"),
+             body: localised("The other side is still being recorded. Stop and start the recording to try again.",
+                             "Собеседник записывается. Остановите и снова начните запись, чтобы попробовать ещё раз."),
+             opening: nil)
+    }
+
     /// The folder a banner was about, or nil when it named none.
     static func session(in userInfo: [AnyHashable: Any]) -> URL? {
         (userInfo[sessionKey] as? String).map { URL(fileURLWithPath: $0) }

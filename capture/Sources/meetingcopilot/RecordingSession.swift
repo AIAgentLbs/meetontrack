@@ -1,3 +1,4 @@
+@preconcurrency import AVFoundation
 import Foundation
 
 /// A session that is being recorded, as far as the filesystem can tell: the
@@ -21,13 +22,10 @@ struct RecordingInProgress: Sendable {
 final class RecordingSession {
     enum StartFailure: Error, CustomStringConvertible {
         case systemAudio(Error)
-        case microphone(Error)
-
 
         var description: String {
             switch self {
             case .systemAudio(let error): return "system audio: \(error)"
-            case .microphone(let error): return "microphone: \(error)"
             }
         }
     }
@@ -125,8 +123,28 @@ final class RecordingSession {
         dir = candidate
     }
 
-    /// Start both tracks. If the mic fails after the system tap started, the
-    /// tap is torn down so we never run half a session silently.
+    /// How the microphone half of a session started.
+    enum MicStart: Equatable, Sendable {
+        case started
+        /// No microphone grant: only the far end is recorded.
+        case denied
+        case failed(String)
+        /// The start did not return within the watchdog. It keeps running in
+        /// the background and is adopted if it finishes while still wanted.
+        case timedOut
+    }
+
+    /// The microphone half's state, owned by the main actor. Until it is
+    /// `.running` nothing on the main thread touches the recorder, because
+    /// its start may still be in flight on another thread.
+    private enum MicState { case starting, running, notRunning(MicStart) }
+    private var micState = MicState.starting
+    private var stopped = false
+    static let micStartTimeout: TimeInterval = 10
+
+    /// Start the far-end track. The microphone starts separately, in
+    /// `startMicrophone()`, so a hanging CoreAudio call can never freeze the
+    /// app (MEETONTRACK-189 P0-4).
     func start() throws {
         // Point the tap at the call app when we know it. Everything else the
         // Mac plays — music, notifications, the video you open afterwards —
@@ -146,17 +164,6 @@ final class RecordingSession {
                 at: dir.appendingPathComponent(Self.manifestFile))
             throw StartFailure.systemAudio(error)
         }
-        do {
-            // The mic track follows the same call the tap does: the microphone
-            // that app is listening to is the one being spoken into, and it is
-            // not always the system default.
-            try mic.start(writingTo: dir.appendingPathComponent("mic.caf"), callApps: tapFamilies)
-        } catch {
-            system.stop()
-            try? FileManager.default.removeItem(
-                at: dir.appendingPathComponent(Self.manifestFile))
-            throw StartFailure.microphone(error)
-        }
         watchdog = Timer.scheduledTimer(
             withTimeInterval: Self.watchdogInterval, repeats: true
         ) { [weak self] _ in
@@ -167,12 +174,113 @@ final class RecordingSession {
         }
     }
 
+    /// Start the microphone track off the main thread, after checking the
+    /// grant, behind a `micStartTimeout` watchdog. A missing grant, a failure
+    /// or a timeout leaves the far-end track recording; the caller says so.
+    func startMicrophone() async -> MicStart {
+        let mic = self.mic
+        let url = dir.appendingPathComponent("mic.caf")
+        // The mic track follows the same call the tap does: the microphone
+        // that app is listening to is the one being spoken into, and it is
+        // not always the system default.
+        let families = tapFamilies
+        let result = await Self.startMicrophone(
+            status: AVCaptureDevice.authorizationStatus(for: .audio),
+            requestAccess: { await AVCaptureDevice.requestAccess(for: .audio) },
+            timeout: Self.micStartTimeout,
+            start: { try mic.start(writingTo: url, callApps: families) },
+            late: { [weak self] error in
+                Task { @MainActor in self?.microphoneStartedLate(error: error) }
+            })
+        if stopped {
+            // Stopped while the start was in flight: put the engine down again.
+            if result == .started { mic.stop() }
+        } else if result == .started {
+            micState = .running
+        } else if case .starting = micState {
+            // A late start may already have been adopted; it wins.
+            micState = .notRunning(result)
+        }
+        return result
+    }
+
+    /// A start that outlived the watchdog finally returned.
+    private func microphoneStartedLate(error: Error?) {
+        guard error == nil else { return }
+        if stopped { mic.stop(); return }
+        micState = .running
+        FileHandle.standardError.write(Data("mic: started late, adopted\n".utf8))
+    }
+
+    /// The microphone start, as pure control flow: preflight the grant, run
+    /// `start` on a background thread, and give up waiting after `timeout`.
+    /// `late` receives the outcome of a start that returned after the timeout.
+    nonisolated static func startMicrophone(
+        status: AVAuthorizationStatus,
+        requestAccess: @Sendable () async -> Bool,
+        timeout: TimeInterval,
+        start: @escaping @Sendable () throws -> Void,
+        late: @escaping @Sendable (Error?) -> Void
+    ) async -> MicStart {
+        switch status {
+        case .denied, .restricted: return .denied
+        case .notDetermined: guard await requestAccess() else { return .denied }
+        default: break
+        }
+        final class Once: @unchecked Sendable {
+            private let lock = NSLock()
+            private var taken = false
+            func claim() -> Bool {
+                lock.lock(); defer { lock.unlock() }
+                if taken { return false }
+                taken = true
+                return true
+            }
+        }
+        let once = Once()
+        // Dedicated threads, not the shared pool: a busy pool must not be able
+        // to delay the watchdog, and a hung start must not hold a pool thread.
+        return await withCheckedContinuation { continuation in
+            Thread.detachNewThread {
+                var failure: Error?
+                do { try start() } catch { failure = error }
+                if once.claim() {
+                    continuation.resume(returning: failure.map { .failed(String(describing: $0)) } ?? .started)
+                } else {
+                    late(failure)
+                }
+            }
+            Thread.detachNewThread {
+                Thread.sleep(forTimeInterval: timeout)
+                if once.claim() { continuation.resume(returning: .timedOut) }
+            }
+        }
+    }
+
+    /// Delete a session folder whose tracks hold nothing beyond their headers
+    /// and that has no meta.json (MEETONTRACK-189 P3-7). True when removed.
+    @discardableResult
+    nonisolated static func removeIfNothingRecorded(_ dir: URL) -> Bool {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: dir.appendingPathComponent("meta.json").path) else { return false }
+        for name in ["mic.caf", "system.caf"] {
+            let size = (try? fm.attributesOfItem(
+                atPath: dir.appendingPathComponent(name).path))?[.size] as? Int64 ?? 0
+            if size > headerOnlyBytes { return false }
+        }
+        return (try? fm.removeItem(at: dir)) != nil
+    }
+
+    /// A CAF with nothing in it: the header AVAudioFile writes before audio.
+    nonisolated static let headerOnlyBytes: Int64 = 4096
+
     /// Stop both tracks, write meta.json, and drop the in-progress manifest.
     func stop(reason: String = "manual") {
         watchdog?.invalidate()
         watchdog = nil
+        stopped = true
         if pausedSince != nil { resume() }
-        mic.stop()
+        if case .running = micState { mic.stop() }
         system.stop()
 
         let ended = Date()
@@ -206,13 +314,18 @@ final class RecordingSession {
         meta.merge(context.metaFields) { current, _ in current }
         if pausedFor > 0 { meta["paused_seconds"] = Int(pausedFor) }
         if !trackEverStalled.isEmpty { meta["stalled_tracks"] = trackEverStalled.sorted() }
-        meta["mic_capture"] = mic.capture.meta
+        switch micState {
+        case .running: meta["mic_capture"] = mic.capture.meta
+        case .starting: meta["mic_start"] = "still-starting"
+        case .notRunning(let outcome): meta["mic_start"] = Self.describe(outcome)
+        }
         if !system.recoveryEvents.isEmpty { meta["system_recoveries"] = system.recoveryEvents }
         // Every route change the mic track survived: headphones connecting,
         // AirPods leaving an ear, a call app taking the device. Each one is a
         // seam in the track, and a transcript that goes strange after one is
         // explained here rather than guessed at.
-        let restarts = mic.restarts
+        let restarts: [MicRecorder.Restart]
+        if case .running = micState { restarts = mic.restarts } else { restarts = [] }
         if !restarts.isEmpty {
             meta["mic_restarts"] = restarts.map { $0.meta(iso: iso) }
         }
@@ -529,8 +642,10 @@ final class RecordingSession {
         // engine is silent in every other way, so the question is asked again
         // on every tick. Both are cheap; being on the wrong microphone for an
         // hour is not.
-        mic.follow(callApps: tapFamilies)
-        mic.checkRoute()
+        if case .running = micState {
+            mic.follow(callApps: tapFamilies)
+            mic.checkRoute()
+        }
 
         // Refresh the manifest once both first buffers have landed, so a crash
         // recovers with the same clock alignment a clean stop would have had.
@@ -593,6 +708,15 @@ final class RecordingSession {
                 "meetingcopilot: nothing from the far end", "meetingcopilot: от дальней стороны ничего нет"),
             body: localised(detail.0, detail.1)
         )
+    }
+
+    nonisolated static func describe(_ outcome: MicStart) -> String {
+        switch outcome {
+        case .started: return "started"
+        case .denied: return "denied"
+        case .timedOut: return "timed-out"
+        case .failed(let detail): return "failed: " + detail
+        }
     }
 
     nonisolated static func shouldWarnAboutFarEndSilence(
