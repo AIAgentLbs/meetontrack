@@ -90,7 +90,12 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
     return reason ? { kind: "not_recording", text: t("status.not_recording", { reason: t(`status.reason.${reason}`) }), action: null }
       : { kind: "recording", text: t("status.recording"), action: null };
   }
-  const next = (agenda?.meetings || []).find(meeting => Date.parse(meeting.end) > now && !meeting.skip_recording && homeIsCall(meeting));
+  // A call the user stopped recording while its event ran is handled, like a skipped one: no alarm for the rest
+  // of the event. A stop before the event began is another call's; a recording started since is live above (MEETONTRACK-191).
+  const stoppedAt = Date.parse(control.last_stop?.stopped_at || "");
+  const stoppedIn = meeting => stoppedAt >= Date.parse(meeting.start) && stoppedAt < Date.parse(meeting.end);
+  const next = (agenda?.meetings || []).find(meeting => Date.parse(meeting.end) > now && !meeting.skip_recording
+    && !stoppedIn(meeting) && homeIsCall(meeting));
   const time = next && homeClock(next.start);
   const mic = permissions?.microphone === "denied";
   if (next && Date.parse(next.start) + 120000 <= now) {
