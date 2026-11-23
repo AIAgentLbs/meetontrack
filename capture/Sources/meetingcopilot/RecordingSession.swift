@@ -314,6 +314,11 @@ final class RecordingSession {
         meta.merge(context.metaFields) { current, _ in current }
         if pausedFor > 0 { meta["paused_seconds"] = Int(pausedFor) }
         if !trackEverStalled.isEmpty { meta["stalled_tracks"] = trackEverStalled.sorted() }
+        let problems = currentCaptureProblems(now: ended)
+        if !problems.isEmpty {
+            meta["capture_problems"] = problems
+            if let cause = farEndProblem(now: ended) { meta["far_end_cause"] = cause.rawValue }
+        }
         switch micState {
         case .running: meta["mic_capture"] = mic.capture.meta
         case .starting: meta["mic_start"] = "still-starting"
@@ -394,6 +399,37 @@ final class RecordingSession {
     /// samples, and a browser keeps a silent stream open after a call.
     var callTrackStalled: Bool { trackStalled.contains("system") }
     private(set) var callAppHasOutput = false
+
+    // MARK: - far end not recorded
+
+    /// The far end has carried nothing audible all session (see
+    /// `SystemAudioRecorder.farEndProblem`). Vetoes the no-call-audio stop.
+    func farEndProblem(now: Date = Date()) -> SystemAudioRecorder.FarEndProblem? {
+        system.farEndProblem(sessionStartedAt: startedAt, now: now)
+    }
+
+    /// Told when the far end turns out not to be recorded while you talk, and
+    /// again (with nil) if it is heard after all.
+    var onFarEndProblem: ((SystemAudioRecorder.FarEndProblem?) -> Void)?
+    private var reportedFarEndProblem: SystemAudioRecorder.FarEndProblem?
+
+    /// A session expected to have a far end: one we started for a call, or
+    /// one a call app was holding the mic for. A voice memo has none.
+    private var expectsFarEnd: Bool { trigger != .manual || !tapFamilies.isEmpty }
+
+    /// What meta.json's `capture_problems` says, and whether the live warning
+    /// is up: the far end was never heard in a call while you were heard.
+    nonisolated static func captureProblems(
+        expectsFarEnd: Bool, micHeard: Bool, farEnd: SystemAudioRecorder.FarEndProblem?
+    ) -> [String] {
+        expectsFarEnd && micHeard && farEnd != nil ? ["far_end_not_recorded"] : []
+    }
+
+    private func currentCaptureProblems(now: Date) -> [String] {
+        Self.captureProblems(
+            expectsFarEnd: expectsFarEnd, micHeard: mic.lastSoundAt != nil,
+            farEnd: farEndProblem(now: now))
+    }
 
     // MARK: - discarding
 
@@ -635,6 +671,7 @@ final class RecordingSession {
         }
 
         followCallApp(now: now)
+        noticeFarEndProblem(now: now)
 
         // Which microphone is the right one is not settled once at the start.
         // The call app can move to another device without anything
@@ -657,6 +694,15 @@ final class RecordingSession {
     }
 
     private var manifestOffsetsWritten = false
+
+    private func noticeFarEndProblem(now: Date) {
+        let problem = currentCaptureProblems(now: now).isEmpty ? nil : farEndProblem(now: now)
+        guard problem != reportedFarEndProblem else { return }
+        reportedFarEndProblem = problem
+        // This warning replaces the later, vaguer one below.
+        if problem != nil { farEndWarningShown = true }
+        onFarEndProblem?(problem)
+    }
 
     /// Keep the tap pointed at the call as its processes come and go, and
     /// notice if that leaves us recording silence.
@@ -691,18 +737,11 @@ final class RecordingSession {
         ) else { return }
         let farEndSilentFor = now.timeIntervalSince(system.lastSoundAt ?? startedAt)
         farEndWarningShown = true
-        let detail: (String, String)
-        if case .apps = system.scope {
-            detail = (
-                "Recording only \(tapFamilies.joined(separator: ", ")) and it has been silent for \(Int(farEndSilentFor / 60)) min. Set system_audio to \"all\" if this is wrong.",
-                "Пишется только \(tapFamilies.joined(separator: ", ")), и там тихо уже \(Int(farEndSilentFor / 60)) мин. Если это неверно, поставьте system_audio в \"all\"."
-            )
-        } else {
-            detail = (
-                "Nothing has been heard on the system track for \(Int(farEndSilentFor / 60)) min. Check the call output and System Audio Recording permission.",
-                "На системной дорожке ничего не слышно уже \(Int(farEndSilentFor / 60)) мин. Проверьте выход звука звонка и разрешение на запись системного аудио."
-            )
-        }
+        // No config advice: the person reading this is not editing files.
+        let detail = (
+            "Nothing has been heard from the other side for \(Int(farEndSilentFor / 60)) min. Check the call's sound output and System Audio Recording permission.",
+            "От собеседника ничего не слышно уже \(Int(farEndSilentFor / 60)) мин. Проверьте вывод звука звонка и разрешение на запись системного аудио."
+        )
         notifyUser(
             title: localised(
                 "meetingcopilot: nothing from the far end", "meetingcopilot: от дальней стороны ничего нет"),

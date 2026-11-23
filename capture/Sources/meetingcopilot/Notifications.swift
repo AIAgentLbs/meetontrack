@@ -88,6 +88,19 @@ enum Notifications {
              opening: nil)
     }
 
+    /// The other side of the call is not being recorded: the far-end track
+    /// has carried nothing while you talk. A click opens the pane that grants
+    /// System Audio Recording, its usual cause.
+    @MainActor
+    static func farEndNotRecorded() {
+        post(title: localised("The other side is not being recorded",
+                              "Собеседник не записывается"),
+             body: localised("Allow MeetOnTrack to record system audio in System Settings. Click to open.",
+                             "Разрешите MeetOnTrack запись системного звука в Системных настройках. Нажмите, чтобы открыть."),
+             opening: nil,
+             url: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"))
+    }
+
     /// The folder a banner was about, or nil when it named none.
     static func session(in userInfo: [AnyHashable: Any]) -> URL? {
         (userInfo[sessionKey] as? String).map { URL(fileURLWithPath: $0) }

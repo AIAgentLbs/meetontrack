@@ -42,7 +42,7 @@ const TEXT = {
 };
 
 const NAMES = ['just_stopped', 'draft', 'refining', 'showing', 'changes', 'held', 'sending', 'sent', 'edited', 'failed',
-  'no_channels', 'no_memo', 'memo_failed', 'removed', 'answered_open', 'transcript_open'];
+  'no_channels', 'no_memo', 'memo_failed', 'removed', 'answered_open', 'transcript_open', 'far_end_not_recorded'];
 
 // `after` is the /api/after answer, or a list of answers for successive polls (the last one repeats; null is a 404).
 function build(name, lang = 'en', now = Date.now()) {
@@ -130,6 +130,8 @@ function build(name, lang = 'en', now = Date.now()) {
     no_memo: () => payload('draft', { memo_check: null }),
     memo_failed: () => payload('draft', { memo_check: { state: 'failed', reason: 'timeout' } }),
     removed: () => payload('draft', { removed: ['memo:q2'] }),
+    // MEETONTRACK-189 P1-10: the recorder never heard the other side.
+    far_end_not_recorded: () => payload('sent', { capture_problems: ['far_end_not_recorded'] }, { final: true, channels: sent }),
   };
   if (name === 'no_memo') state.call_plan = null;
   const permissions = { ok: true, microphone: 'granted', call_audio: 'granted', recorder: live ? 'running' : 'stopped', auto_record: true,

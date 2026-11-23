@@ -881,6 +881,23 @@ final class AppController {
 
         present(.recording, elapsed: "0:00")
 
+        // The far end never heard while you talk: a live capture warning (Call
+        // and Home show it), and one banner that opens the System Audio pane
+        // (MEETONTRACK-189 P0-2). It closes if the far end is heard after all.
+        newSession.onFarEndProblem = { [liveTranscription] problem in
+            Task {
+                await liveBegan.value
+                if let problem {
+                    await liveTranscription.noteCaptureWarning(
+                        reason: "system-audio-lost", cause: problem.rawValue,
+                        since: newSession.startedAt)
+                } else {
+                    await liveTranscription.endCaptureWarning(reason: "system-audio-lost")
+                }
+            }
+            if problem != nil { Notifications.farEndNotRecorded() }
+        }
+
         // The microphone starts off the main thread behind a watchdog: a
         // CoreAudio call that hangs must never freeze the menu, the ticker and
         // Stop again (MEETONTRACK-189 P0-4, 2026.11.23-1235).

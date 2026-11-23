@@ -62,6 +62,19 @@ def auto_send_allowed(settings: dict, channel: str, started_at: str | None) -> b
     return not boundary or bool(started and started >= boundary)
 
 
+# What the recorder found wrong with its own capture (meta.json "capture_problems",
+# MEETONTRACK-189 P1-10), said plainly at the top of the report and the memo.
+CAPTURE_PROBLEM_TEXT = {
+    "far_end_not_recorded": "Собеседник не записан: звук звонка не поступал всю встречу. "
+                            "Отчет составлен только по вашему микрофону.",
+}
+
+
+def capture_problem_lines(detail: dict) -> list[str]:
+    return [CAPTURE_PROBLEM_TEXT[code] for code in detail.get("capture_problems") or []
+            if code in CAPTURE_PROBLEM_TEXT]
+
+
 def _went(report: dict) -> bool:
     """At least one channel confirmed the report."""
     return any(report.get(key) in {"sent", "uploaded"}
@@ -743,6 +756,7 @@ class MeetingArchive:
                     "duration_seconds": candidate["duration_seconds"],
                     "recording_trigger": candidate["meta"].get("trigger", ""),
                     "stop_reason": candidate["meta"].get("stop_reason", ""),
+                    "capture_problems": list(candidate["meta"].get("capture_problems") or []),
                     "recording_dir": candidate["dir"],
                     "audio_file": self._audio_file(candidate),
                     "transcript": [], "journal": [], "frames": [], "meeting_chat": [],
@@ -792,6 +806,7 @@ class MeetingArchive:
             "duration_seconds": duration,
             "recording_trigger": (recording or {}).get("meta", {}).get("trigger") or snapshot.get("recording_trigger", ""),
             "stop_reason": (recording or {}).get("meta", {}).get("stop_reason", ""),
+            "capture_problems": list((recording or {}).get("meta", {}).get("capture_problems") or []),
             "recording_discarded": bool(snapshot.get("recording_dir") and not Path(snapshot["recording_dir"]).exists()),
             "recording_dir": (recording or {}).get("dir") or capture_directory,
             "audio_file": self._audio_file(recording),
@@ -2194,6 +2209,8 @@ class MeetingArchive:
                    "в любом браузере. Приложение продолжит попытки создать PDF.")
                 + links_text
             )
+            if problems := capture_problem_lines(detail):
+                body = "\n".join(problems) + "\n\n" + body
             if smtp:
                 message = EmailMessage()
                 message["From"] = settings.get("smtp", {}).get("from", "")
@@ -2260,8 +2277,11 @@ class MeetingArchive:
                 "--title", detail["title"],
                 "--date", stamp,
             ]
-            if not has_pdf:
-                command.extend(["--note", "PDF создать не удалось; отчет приложен как HTML-файл."])
+            note = "" if has_pdf else "PDF создать не удалось; отчет приложен как HTML-файл."
+            if problems := capture_problem_lines(detail):
+                note = " ".join([*problems, note or "PDF приложен к сообщению."])
+            if note:
+                command.extend(["--note", note])
             for key, flag in (
                 ("drive_folder_url", "--drive-folder-url"),
                 ("drive_html_url", "--drive-html-url"),
@@ -2798,10 +2818,12 @@ h1{{font-size:26pt;line-height:1.1;margin:0 0 8mm;color:#174c3e}} h2{{font-size:
 .note,.chat,.utterance{{break-inside:avoid;border-bottom:1px solid #e0e5e2;padding:2.5mm 0}} .note p,.chat p,.utterance p{{margin:1mm 0 0}} .time,time,.chat span{{font-size:8.5pt;color:#707b77;margin-left:3mm}}
 .utterance .translated{{border-left:2px solid #2c6958;padding-left:3mm;background:#eff5f2}}
 .frames{{display:grid;grid-template-columns:1fr 1fr;gap:5mm}} figure{{margin:0;break-inside:avoid}} img{{width:100%;height:auto;border:1px solid #d5ddd9;border-radius:5px}} figcaption{{font-size:8.5pt;color:#65706c;margin-top:1mm}}
+.capture-problem{{background:#fbe9e7;border-left:4px solid #b3261e;color:#5f1410;padding:2mm 4mm;margin:2mm 0 4mm;font-weight:600}}
 .empty{{color:#6c7773;font-style:italic}} .page-break{{break-before:page}}
 </style></head><body>
 <div class="brand">MeetOnTrack by aiagentlbs.com</div><h1>{title}</h1>
 <div class="meta"><span>{esc(date_label)}</span><span>Длительность {esc(duration)}</span><span>{len(detail['transcript'])} реплик</span></div>
+{''.join(f'<p class="capture-problem" role="alert">{esc(line)}</p>' for line in capture_problem_lines(detail))}
 <section id="overview" class="opening"><h2>Участники</h2>
 <p class="main-speaker">Основной спикер по объему распознанной речи: <strong>{esc(main_speaker)}</strong></p>
 <ul class="roster">{roster or '<li>Имена участников не подтверждены записью или чатом.</li>'}</ul>

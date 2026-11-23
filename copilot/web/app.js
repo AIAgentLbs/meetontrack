@@ -1714,6 +1714,7 @@ Object.assign(translations.en, {
 Object.assign(translations.ru, {
   "after.report": "Отчет", "after.back": "Назад", "after.open_transcript": "Открыть расшифровку",
   "after.meta": "{day}, {time}.", "after.stopped": "Запись остановлена на {time}.",
+  "after.capture.far_end_not_recorded": "Собеседник не записан: звук звонка не поступал всю встречу. Отчет составлен только по вашему микрофону.",
   "after.change": "Изменить получателей", "after.change_setup": "Настроить отправку", "after.send_now": "Отправить сейчас", "after.hold": "Не отправлять",
   "after.send_again": "Отправить еще раз",
   "after.send_again_note": "Письмо и сообщение в Telegram придут повторно, заметка в CRM останется прежней.",
@@ -1738,6 +1739,7 @@ Object.assign(translations.ru, {
 Object.assign(translations.en, {
   "after.report": "Report", "after.back": "Back", "after.open_transcript": "Open the transcript",
   "after.meta": "{day}, {time}.", "after.stopped": "Recording stopped at {time}.",
+  "after.capture.far_end_not_recorded": "The other side was not recorded: no call audio came in for the whole meeting. The report is built from your microphone only.",
   "after.change": "Change recipients", "after.change_setup": "Set up delivery", "after.send_now": "Send now", "after.hold": "Do not send", "after.send_again": "Send again",
   "after.send_again_note": "The e-mail and the Telegram message arrive a second time, the CRM note stays as it was.",
   "after.retry": "Retry", "after.channel_settings": "Check the delivery settings",

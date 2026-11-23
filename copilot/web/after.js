@@ -445,6 +445,11 @@ function renderAfter(state) {
     day: new Date(start).toLocaleDateString(homeLocale(), { day: "numeric", month: "long" }) }),
   clock ? t("after.stopped", { time: clock }) : ""].filter(Boolean).join(" ");
   if ($("after-meta").textContent !== meta) $("after-meta").textContent = meta;
+  // A capture failure the recorder found: the report says it at the top, and so does this screen.
+  const capture = (after?.capture_problems || []).map(code => t(`after.capture.${code}`))
+    .filter(line => !line.startsWith("after.capture.")).join(" ");
+  if ($("after-capture").textContent !== capture) $("after-capture").textContent = capture;
+  $("after-capture").hidden = !capture;
   afterFields(after);
 
   const send = afterSend(after);

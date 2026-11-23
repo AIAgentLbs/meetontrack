@@ -271,6 +271,7 @@ final class AutoRecordController {
             trigger: session.trigger, levelsMeasurable: session.levelsMeasurable,
             callTrackStalled: session.callTrackStalled,
             callAppHasOutput: session.callAppHasOutput, paused: session.isPaused,
+            farEndNeverHeard: session.farEndProblem(now: now) != nil,
             micQuietFor: micQuietFor, farEndQuietFor: farEndQuietFor, settings: settings) {
             let minutes = Int(settings.silenceStop / 60)
             lastDecision = reason == "silence"
@@ -327,6 +328,7 @@ final class AutoRecordController {
         callTrackStalled: Bool = false,
         callAppHasOutput: Bool = false,
         paused: Bool = false,
+        farEndNeverHeard: Bool = false,
         micQuietFor: TimeInterval,
         farEndQuietFor: TimeInterval,
         settings: Config.AutoRecordSettings
@@ -338,6 +340,11 @@ final class AutoRecordController {
         // A stalled call-track file is our outage, not the call ending.
         // A paused recording is the user's choice; stopping it would make it unresumable.
         if callTrackStalled || paused { return nil }
+        // A far end never heard all session while you keep talking is our
+        // capture failing, not the call ending: on 2026.11.23 a dead tap ended
+        // a live call at 20 minutes (MEETONTRACK-189 P0-1). Silence on both
+        // tracks and the duration ceiling still apply.
+        if farEndNeverHeard { return nil }
         // Open output I/O is not audible samples: a browser keeps a silent
         // stream open after a call. It buys one more window, long after tap
         // recovery (3 attempts, 20 s apart) has had its chance, then the rule

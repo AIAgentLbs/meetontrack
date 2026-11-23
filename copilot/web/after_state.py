@@ -280,6 +280,8 @@ def after_payload(archive, meeting_id: str, settings: dict, now: float) -> dict 
         "ok": True, "meeting_id": identity, "title": detail.get("title") or "",
         "started_at": detail.get("started_at") or "", "ended_at": detail.get("ended_at") or "",
         "duration_seconds": detail.get("duration_seconds") or 0,
+        # Codes the page words itself (MEETONTRACK-189 P1-10): "far_end_not_recorded".
+        "capture_problems": list(detail.get("capture_problems") or []),
         "send": {"state": state, "send_at": _iso(gate["send_at"]), "send_now": after["send_now_at"] is not None,
                  "channels": channels},
         "summary": {"lines": archive.report_summary(detail), "edited": after["summary"] is not None, "final": ready},
