@@ -2520,7 +2520,8 @@ RECORDING_CONTROL = RecordingControl(RECOGNITION_GUARD.binary, RECORDING_STOP_FI
 # Recognition recovery never runs during a Stop's undo window: only an explicit Resume unpauses.
 RECOGNITION_GUARD.hold = lambda: RECORDING_CONTROL.stopping is not None
 PLANS = CallPlans(PREPARATIONS_FILE, CALL_PLAN_STATE_FILE, ACTIVE_REPOS_FILE,
-                 CalendarMeetings(enabled=lambda: "calendar" in GOOGLE_CONTEXT.enabled_sources(),
+                 CalendarMeetings(lambda: GOOGLE_CONTEXT.executable,  # the chosen gws profile, never the default
+                                  enabled=lambda: "calendar" in GOOGLE_CONTEXT.enabled_sources(),
                                   oauth=lambda: GOOGLE_CONTEXT.native_oauth()),
                  app_plans=lambda: MEMOS.plans(),  # late-bound: MEMOS is defined further down
                  bound_dir=BOUND_MEMOS_DIR)

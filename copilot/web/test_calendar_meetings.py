@@ -141,5 +141,54 @@ class OAuthCalendarTests(unittest.TestCase):
         self.assertEqual(CalendarMeetings(executable="/bin/gws", oauth=lambda: mail_only).state(), "not_connected")
 
 
+class NamedProfileCalendarTests(unittest.TestCase):
+    """MEETONTRACK-186: a chosen gws profile is read through its own wrapper, as Google context is."""
+
+    def setUp(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from delivery_settings import DeliverySettings
+        from google_context import GoogleContext
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        env = mock.patch.dict(os.environ, {"HOME": home.name})
+        env.start()
+        self.addCleanup(env.stop)
+        root = Path(home.name) / ".config/meeting-copilot"
+        root.mkdir(parents=True)
+        (root / "delivery.json").write_text(json.dumps({"google_profile": "personal"}))
+        self.wrapper = Path(home.name) / ".local/bin/gws-personal"
+        self.wrapper.parent.mkdir(parents=True)
+        self.wrapper.write_text("#!/bin/sh\n")
+        self.wrapper.chmod(0o700)
+        self.context = GoogleContext(root / "google-context.json")
+        self.context.delivery_settings = DeliverySettings(root)
+        # Only the default gws is on PATH: it holds another account and must never be read.
+        which = mock.patch("shutil.which", side_effect=lambda name: "/opt/default/gws" if name == "gws" else None)
+        which.start()
+        self.addCleanup(which.stop)
+
+    def calendar(self):  # wired as server.py wires it
+        return CalendarMeetings(executable=lambda: self.context.executable, oauth=lambda: self.context.native_oauth())
+
+    def test_reads_through_the_chosen_profile_never_the_default_gws(self):
+        done = subprocess.CompletedProcess([], 0, stdout=json.dumps({"items": [EVENT]}), stderr="")
+        with mock.patch("calendar_meetings.subprocess.run", return_value=done) as run:
+            calendar = self.calendar()
+            self.assertEqual(calendar.state(), "connected")
+            self.assertEqual(len(calendar.for_day(date(2026, 11, 26))), 1)
+        self.assertEqual(run.call_args[0][0][:4], [str(self.wrapper), "calendar", "events", "list"])
+        self.assertNotIn("/opt/default/gws", [call[0][0][0] for call in run.call_args_list])
+
+    def test_missing_profile_wrapper_is_not_replaced_by_the_default_gws(self):
+        self.wrapper.unlink()
+        with mock.patch("calendar_meetings.subprocess.run") as run:
+            calendar = self.calendar()
+            self.assertEqual(calendar.state(), "tool_missing")
+            self.assertEqual(calendar.for_day(date(2026, 11, 26)), [])
+        run.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

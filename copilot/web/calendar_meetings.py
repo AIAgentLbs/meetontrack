@@ -26,12 +26,14 @@ class CalendarMeetings:
 
     READ_SECONDS = 5  # like the gws timeout: the live-state poll waits on this read and gives up after 8 s
 
-    def __init__(self, executable: str | None = None, enabled=None, oauth=None) -> None:
+    def __init__(self, executable=None, enabled=None, oauth=None) -> None:
         # oauth: returns the app's own Google sign-in (GoogleOAuth) when it is the chosen Google profile, else None.
-        # Then the calendar is read only through it, never through gws, which may hold another account; the gws
-        # default profile is the reader only when no app sign-in is chosen (MEETONTRACK-183).
+        # Then the calendar is read only through it, never through gws, which may hold another account (MEETONTRACK-183).
+        # executable: a gws path, or a callable giving the chosen profile's gws wrapper (None when there is none);
+        # the server passes Google context's own (MEETONTRACK-186), so the default gws is never read in its place.
         self.oauth = oauth
-        self.executable = executable if executable is not None else shutil.which("gws")
+        self._reader = executable if callable(executable) else None
+        self.executable = None if self._reader else executable if executable is not None else shutil.which("gws")
         self._look_up = executable is None  # found on PATH: looked up again until it is there
         self.enabled = enabled
         self._cache: dict[str, tuple[float, list[dict] | None]] = {}  # None: the read failed
@@ -58,9 +60,16 @@ class CalendarMeetings:
         ready = status.get("state") == "connected" and "context" in (status.get("permissions") or [])
         return oauth, {**status, "ready": ready}
 
+    def _gws(self) -> str | None:
+        if self._reader is not None:
+            return self._reader()
+        if not self.executable and self._look_up:
+            self.executable = shutil.which("gws")  # installed after start (Home's Check again)
+        return self.executable
+
     def available(self) -> bool:
         oauth, status = self._native()
-        reader = status.get("ready") is True if oauth is not None else bool(self.executable)
+        reader = status.get("ready") is True if oauth is not None else bool(self._gws())
         return reader and (self.enabled is None or bool(self.enabled()))
 
     def state(self) -> str:
@@ -69,9 +78,7 @@ class CalendarMeetings:
             if not status.get("ready"):
                 return "not_connected"
             return "not_connected" if self.enabled is not None and not self.enabled() else "connected"
-        if not self.executable and self._look_up:
-            self.executable = shutil.which("gws")  # installed after start (Home's Check again)
-        if not self.executable:
+        if not self._gws():
             return "tool_missing"
         return "not_connected" if self.enabled is not None and not self.enabled() else "connected"
 
@@ -113,10 +120,11 @@ class CalendarMeetings:
             raise CalendarUnavailable()
         if oauth is not None and not status.get("ready"):
             return []  # the chosen sign-in needs reconnecting (state() says so); never another account's gws
-        if oauth is None and not self.executable:
+        gws = None if oauth is not None else self._gws()
+        if oauth is None and not gws:
             return []
         # Scoped to the reading account: a switch never shows the previous account's events.
-        key = ("google:" + str(status.get("account") or "") if oauth is not None else "gws") + "|" + day.isoformat()
+        key = ("google:" + str(status.get("account") or "") if oauth is not None else "gws:" + gws) + "|" + day.isoformat()
         with self._lock:
             cached = self._cache.get(key)
             # A failed read is kept briefly so a poll during a call does not start gws every few seconds.
@@ -138,7 +146,7 @@ class CalendarMeetings:
                 payload = self._read_signed_in(oauth, params, deadline)
             else:
                 result = subprocess.run(
-                    [self.executable, "calendar", "events", "list", "--params", json.dumps(params)],
+                    [gws, "calendar", "events", "list", "--params", json.dumps(params)],
                     capture_output=True, text=True, timeout=self.READ_SECONDS, check=False,
                 )
                 payload = json.loads(result.stdout) if result.returncode == 0 else None
