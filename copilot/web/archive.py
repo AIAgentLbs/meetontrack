@@ -17,6 +17,7 @@ import smtplib
 from email.message import EmailMessage
 from email.utils import make_msgid
 import threading
+import traceback
 import time
 from collections import Counter
 from functools import wraps
@@ -28,7 +29,7 @@ from speaker_edits import SpeakerEdits, carry_corrections, segment_id, _seconds
 from fact_check import with_speakers
 from memo_check import NOT_CHECKED, current as memo_current
 from delivery_health import DeliveryHealth, drive_links_ready
-from recording_health import RecordingLocations
+from recording_health import RecordingLocations, live_markers, stuck_markers
 from question_quality import register_question
 from journal_links import collapse_links
 from delivery_settings import DeliverySettings, enabled as delivery_enabled
@@ -1460,77 +1461,103 @@ class MeetingArchive:
                 continue
             if retried >= max_reports:
                 break
-            meta = _json(path, {})
-            if not isinstance(meta, dict) or meta.get("report_missing") or meta.get("delivery_on_request"):
-                continue  # Only the person's button sends it.
-            generated = _date(str(meta.get("delivery_started_at") or meta.get("generated_at") or ""))
-            if not generated or (now - generated).total_seconds() > self.delivery_retry_days * 86400:
-                continue  # The window runs from the first send, not from a later refresh.
-            retry_at = _date(str(meta.get("delivery_retry_at") or ""))
-            if retry_at and retry_at > now:
-                continue
-            wants_drive = delivery_enabled(settings, "drive")
-            wants_mail = delivery_enabled(settings, "email") and meta.get("mail_status") != "unknown"
-            wants_telegram = delivery_enabled(settings, "telegram") and meta.get("telegram_status") != "unknown"
-            # A record the person must choose is not retried on its own (MEETONTRACK-146).
-            wants_twenty = (delivery_enabled(settings, "twenty")
-                            and meta.get("twenty_status") not in {"sent", "unknown", "needs_choice"})
-            pending = (
-                (wants_drive and meta.get("drive_status") != "uploaded")
-                or (wants_drive and settings.get("drive_folder_id") and not drive_links_ready(meta))
-                or (wants_mail and meta.get("mail_status") != "sent")
-                or (wants_telegram and meta.get("telegram_status") != "sent")
-                or wants_twenty
-            )
-            if not pending:
-                continue
-            ready_at = _date(str(meta.get("ready_at") or ""))
-            ready_epoch = ready_at.timestamp() if ready_at else None
-            if not self.after.gate(path.parent.name, ready_epoch)["open"]:
-                self.after.blocked(path.parent.name, ready_epoch)  # The delivery loop wakes it when it opens.
-                continue
-            detail = self.report_detail(path.parent.name)
-            if detail and not self.report_matches(detail, meta):
-                # Made from older text (live text, or before a late fact check): the next
-                # history pass makes it again, keeping what was already delivered.
-                self._history_checked.pop(_safe(str(detail.get("meeting_id") or "")), None)
-                continue
-            if (not detail or not self._ready_for_delivery(detail)
-                    or not (Path(str(meta.get("pdf_path") or "")).is_file()
-                            or (path.parent / STANDALONE_REPORT).is_file())):
-                continue
-            gate = self.report_gate(path.parent.name)
-            if not gate.acquire(blocking=False):
-                continue  # Its report is being created and sent right now.
             try:
-                with self.lock:
-                    if _json(path, {}) != meta:
-                        # Report generation may have completed while we prepared
-                        # the retry. Re-check next scan instead of resending it.
-                        continue
-                    # The person may have changed the report since the check above (a removal and Send now):
-                    # the attachment must still be made from the text on disk now (MEETONTRACK-94, -163).
-                    detail = self.report_detail(path.parent.name)
-                    if not detail or not self.report_matches(detail, meta) or not self._ready_for_delivery(detail):
-                        continue
-                    taken = self.after.begin_send(path.parent.name, ready_epoch)
-                    if taken is None:
-                        self.after.blocked(path.parent.name, ready_epoch)
-                        continue  # A Hold pressed since the check above wins.
-                    try:
-                        meta.update(self.deliver(detail, meta, previous=meta))
-                        meta.setdefault("delivery_started_at", now.isoformat(timespec="seconds"))
-                        meta["delivery_checked_at"] = now.isoformat(timespec="seconds")
-                        meta["delivery_retry_at"] = (now + timedelta(minutes=15)).isoformat(timespec="seconds")
-                        _atomic_json(path, meta)
-                        if _went(meta):
-                            self.after.delivered(path.parent.name, taken)
-                    finally:
-                        self.after.end_send(path.parent.name)
-            finally:
-                gate.release()
-            retried += 1
+                if self._retry_report(path, settings, now):
+                    retried += 1
+            except Exception as exc:  # noqa: BLE001 - one report must not block the rest (MEETONTRACK-189 P1-12)
+                self._record_retry_error(path, now, exc)
         return retried
+
+    def _retry_report(self, path: Path, settings: dict, now: datetime) -> bool:
+        """Retry one report's delivery; True when a delivery was attempted."""
+        meta = _json(path, {})
+        if not isinstance(meta, dict) or meta.get("report_missing") or meta.get("delivery_on_request"):
+            return False  # Only the person's button sends it.
+        generated = _date(str(meta.get("delivery_started_at") or meta.get("generated_at") or ""))
+        if not generated or (now - generated).total_seconds() > self.delivery_retry_days * 86400:
+            return False  # The window runs from the first send, not from a later refresh.
+        retry_at = _date(str(meta.get("delivery_retry_at") or ""))
+        if retry_at and retry_at > now:
+            return False
+        wants_drive = delivery_enabled(settings, "drive")
+        wants_mail = delivery_enabled(settings, "email") and meta.get("mail_status") != "unknown"
+        wants_telegram = delivery_enabled(settings, "telegram") and meta.get("telegram_status") != "unknown"
+        # A record the person must choose is not retried on its own (MEETONTRACK-146).
+        wants_twenty = (delivery_enabled(settings, "twenty")
+                        and meta.get("twenty_status") not in {"sent", "unknown", "needs_choice"})
+        pending = (
+            (wants_drive and meta.get("drive_status") != "uploaded")
+            or (wants_drive and settings.get("drive_folder_id") and not drive_links_ready(meta))
+            or (wants_mail and meta.get("mail_status") != "sent")
+            or (wants_telegram and meta.get("telegram_status") != "sent")
+            or wants_twenty
+        )
+        if not pending:
+            return False
+        ready_at = _date(str(meta.get("ready_at") or ""))
+        ready_epoch = ready_at.timestamp() if ready_at else None
+        if not self.after.gate(path.parent.name, ready_epoch)["open"]:
+            self.after.blocked(path.parent.name, ready_epoch)  # The delivery loop wakes it when it opens.
+            return False
+        detail = self.report_detail(path.parent.name)
+        if detail and not self.report_matches(detail, meta):
+            # Made from older text (live text, or before a late fact check): the next
+            # history pass makes it again, keeping what was already delivered.
+            self._history_checked.pop(_safe(str(detail.get("meeting_id") or "")), None)
+            return False
+        if (not detail or not self._ready_for_delivery(detail)
+                or not (Path(str(meta.get("pdf_path") or "")).is_file()
+                        or (path.parent / STANDALONE_REPORT).is_file())):
+            return False
+        gate = self.report_gate(path.parent.name)
+        if not gate.acquire(blocking=False):
+            return False  # Its report is being created and sent right now.
+        try:
+            with self.lock:
+                if _json(path, {}) != meta:
+                    # Report generation may have completed while we prepared
+                    # the retry. Re-check next scan instead of resending it.
+                    return False
+                # The person may have changed the report since the check above (a removal and Send now):
+                # the attachment must still be made from the text on disk now (MEETONTRACK-94, -163).
+                detail = self.report_detail(path.parent.name)
+                if not detail or not self.report_matches(detail, meta) or not self._ready_for_delivery(detail):
+                    return False
+                taken = self.after.begin_send(path.parent.name, ready_epoch)
+                if taken is None:
+                    self.after.blocked(path.parent.name, ready_epoch)
+                    return False  # A Hold pressed since the check above wins.
+                try:
+                    meta.update(self.deliver(detail, meta, previous=meta))
+                    meta.setdefault("delivery_started_at", now.isoformat(timespec="seconds"))
+                    meta["delivery_checked_at"] = now.isoformat(timespec="seconds")
+                    meta["delivery_retry_at"] = (now + timedelta(minutes=15)).isoformat(timespec="seconds")
+                    _atomic_json(path, meta)
+                    if _went(meta):
+                        self.after.delivered(path.parent.name, taken)
+                finally:
+                    self.after.end_send(path.parent.name)
+        finally:
+            gate.release()
+        return True
+
+    def _record_retry_error(self, path: Path, now: datetime, exc: Exception) -> None:
+        """A report whose retry threw: try again in 15 minutes, and say why in report.json.
+
+        Before, the exception left the scan, so the same report threw first on every
+        60-second pass and no older report was ever retried (MEETONTRACK-189 P1-12).
+        """
+        traceback.print_exc()
+        try:
+            with self.lock:
+                meta = _json(path, {})
+                if not isinstance(meta, dict):
+                    return
+                meta["delivery_retry_at"] = (now + timedelta(minutes=15)).isoformat(timespec="seconds")
+                meta["delivery_error"] = f"{type(exc).__name__}: {exc}"[:300]
+                _atomic_json(path, meta)
+        except Exception:  # noqa: BLE001 - recording the error must not raise either
+            traceback.print_exc()
 
     def delivery_health(self) -> dict:
         """Expose all configured channels without sending or querying providers."""
@@ -1582,6 +1609,9 @@ class MeetingArchive:
             health["undelivered"].append({"meeting_id": path.parent.name, "channels": [], "uncertain": False,
                                           "final_wait": wait, **self._delivery_label(path.parent.name)})
             health["issue_count"] = int(health.get("issue_count") or 0) + 1
+        # Recording markers left behind by a kill: ignored by the report gate, named here.
+        health["stuck_recordings"] = stuck_markers(self._markers())
+        health["issue_count"] = int(health.get("issue_count") or 0) + len(health["stuck_recordings"])
         return health
 
     def repair_report_states(self) -> None:
@@ -1838,10 +1868,14 @@ class MeetingArchive:
             json.dumps(material, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
 
+    def _markers(self) -> list[Path]:
+        return (self.recording_locations.markers() if self.recording_locations
+                else list(self.recordings_root.glob("*/.recording.json")))
+
     def _capture_active(self) -> bool:
-        markers = (self.recording_locations.markers() if self.recording_locations
-                   else self.recordings_root.glob("*/.recording.json"))
-        return any(markers)
+        # A marker whose owner is dead, or that is older than any recording,
+        # no longer holds every report back; the health check names it (MEETONTRACK-189 P1-11).
+        return bool(live_markers(self._markers()))
 
     @_shared_indexes
     def needs_report(self, meeting_id: str) -> bool:

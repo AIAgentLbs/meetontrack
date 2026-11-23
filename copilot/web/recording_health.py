@@ -81,6 +81,42 @@ def windows_owner_alive(pid: int) -> bool:
         kernel.CloseHandle(handle)
 
 
+# A marker this old belongs to no recording: the recorder's duration ceiling
+# defaults to 5 hours (MEETONTRACK-189 P1-11).
+STALE_MARKER_SECONDS = 12 * 3600
+
+
+def marker_state(path: Path, now: float | None = None) -> str:
+    """What a .recording.json says: "live", or why it is left behind.
+
+    "dead": its owner process is gone; "stale": older than any recording.
+    An unreadable marker, or one beside a meta.json, counts as live while it
+    is fresh: the safe direction (the recorder's next launch cleans those up).
+    """
+    pid = read_json(path).get("pid")
+    if isinstance(pid, int) and not isinstance(pid, bool) and not owner_alive(pid):
+        return "dead"
+    try:
+        age = (now if now is not None else time.time()) - path.stat().st_mtime
+    except OSError:
+        return "dead"
+    return "stale" if age > STALE_MARKER_SECONDS else "live"
+
+
+def live_markers(markers) -> list[Path]:
+    return [path for path in markers if marker_state(path) == "live"]
+
+
+def stuck_markers(markers) -> list[dict]:
+    """Markers left behind that would otherwise hold every report back, for the health check."""
+    found = []
+    for path in markers:
+        state = marker_state(path)
+        if state != "live":
+            found.append({"directory": str(path.parent), "reason": state})
+    return found
+
+
 class RecordingLocations:
     def __init__(self, config: Path, legacy_root: Path, home: Path | None = None):
         self.config, self.legacy_root = config, legacy_root

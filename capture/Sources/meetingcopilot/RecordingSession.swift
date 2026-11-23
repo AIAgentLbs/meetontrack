@@ -541,6 +541,11 @@ final class RecordingSession {
                 FileHandle.standardError.write(Data(
                     "interrupted session \(dir.lastPathComponent) has no audio — skipping\n".utf8
                 ))
+                // Nothing to recover, and a marker left here reads as a
+                // recording forever and holds every later report back
+                // (MEETONTRACK-189 P1-11). The empty folder goes with it.
+                try? fm.removeItem(at: manifestURL)
+                removeIfNothingRecorded(dir)
                 continue
             }
 
