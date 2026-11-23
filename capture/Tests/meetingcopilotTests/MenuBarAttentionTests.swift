@@ -12,9 +12,10 @@ struct MenuBarAttentionTests {
         #expect(DeliveryAttention.line(delivery: ["undelivered": [], "stuck_recordings": []]) == nil)
         #expect(DeliveryAttention.line(delivery: [:]) == nil)
         let two = DeliveryAttention.line(delivery: [
-            "undelivered": [["meeting_id": "a"], ["meeting_id": "b"]],
+            "undelivered": [["meeting_id": "a", "title": "Pilot review"], ["meeting_id": "b"]],
         ])
-        #expect(two?.contains("2") == true)
+        #expect(two?.contains("Pilot review") == true)
+        #expect(two?.contains("1") == true)
         #expect(DeliveryAttention.line(delivery: ["stuck_recordings": [["reason": "dead"]]]) != nil)
         let signIn = DeliveryAttention.line(delivery: [
             "channels": ["gmail": ["issues": [["meeting_id": "a", "reason": "auth_required"]]]],

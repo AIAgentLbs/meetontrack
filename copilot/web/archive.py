@@ -172,6 +172,15 @@ STANDALONE_REPORT = "meeting-report.html"
 # A finished call whose final transcript is still missing this long after it
 # ended needs attention (MEETONTRACK-94); its report keeps waiting, unsent.
 FINAL_WAIT_ATTENTION_SECONDS = 3600
+# MEETONTRACK-189 step 7: the app first fixes what it can. A missing final
+# transcript is made again automatically, a failed delivery is sent again,
+# each up to this many times; only then does the person see the problem.
+AUTO_ATTEMPTS = 3
+# Minutes to wait after automatic attempt n (1-based) before the next one,
+# and after the last before saying it failed.
+FINAL_RETRY_BACKOFF_MINUTES = (15, 60, 60)
+DELIVERY_RETRY_BACKOFF_MINUTES = (15, 30, 60)
+FINAL_RETRIES = "final-retry.json"
 # What a send left in report.json; a refresh that sends nothing keeps all of it.
 # MEETONTRACK-146: what the Twenty CRM channel leaves in report.json.
 TWENTY_OUTCOME = ("twenty_status", "twenty_note_id", "twenty_target", "twenty_candidates", "twenty_choice",
@@ -827,7 +836,8 @@ class MeetingArchive:
                       "final_transcript", "speaker_review", "remote_attendees"):
             if field in snapshot:
                 result[field] = snapshot[field]
-        result["final_wait"] = self._final_wait(snapshot, ended, report_meta, (recording or {}).get("meta"))
+        result["final_wait"] = self._final_wait(snapshot, ended, report_meta, (recording or {}).get("meta"),
+                                                _json(self.archive_root / meeting_id / FINAL_RETRIES, {}))
         annotated = self.annotate_speakers({**result, "segments": segments})
         annotated["fact_checks"] = with_speakers(annotated["fact_checks"], annotated["segments"])  # corrections reach rows
         annotated["transcript"] = annotated.pop("segments")
@@ -839,7 +849,7 @@ class MeetingArchive:
         return self._final_wait_since - timedelta(days=self.delivery_retry_days)
 
     def _final_wait(self, snapshot: dict, ended: str, report: dict | None = None,
-                    recording_meta: dict | None = None) -> dict | None:
+                    recording_meta: dict | None = None, retries: dict | None = None) -> dict | None:
         """A finished meeting whose report waits for the recorder's final transcript (MEETONTRACK-94).
 
         Past the delivery window only while its report never went out (MEETONTRACK-118);
@@ -854,10 +864,75 @@ class MeetingArchive:
         if waited > self.delivery_retry_days * 86400 and (
                 finished < self._final_wait_from() or (report or {}).get("delivery_started_at")):
             return None
-        if str((recording_meta or {}).get("transcription_failed") or "").startswith("no_audio_captured"):
-            return {"state": "missing", "reason": "no_audio_captured", "minutes": max(0, int(waited // 60))}
-        return {"state": "missing" if waited >= FINAL_WAIT_ATTENTION_SECONDS else "waiting",
-                "reason": "final_transcript", "minutes": max(0, int(waited // 60))}
+        meta = recording_meta if isinstance(recording_meta, dict) else {}
+        failure = str(meta.get("transcription_failed") or "")
+        # No speech, or nothing captured for a reason nobody can fix: not an
+        # undelivered report, so nothing to show (MEETONTRACK-189 step 7).
+        if failure.startswith("No speech"):
+            return None
+        if failure.startswith("no_audio_captured"):
+            permission = self._capture_permission(meta)
+            return {"state": "missing", "reason": "capture_permission", "permission": permission} if permission else None
+        if waited < FINAL_WAIT_ATTENTION_SECONDS:
+            return {"state": "waiting", "reason": "final_transcript"}
+        if not self._final_retries_spent(retries, datetime.now().astimezone()):
+            return {"state": "retrying", "reason": "final_transcript"}
+        deferred = meta.get("transcription_deferred")
+        if isinstance(deferred, dict) and deferred.get("kind") == "needs_choice":
+            return {"state": "missing", "reason": "needs_choice"}
+        return {"state": "missing", "reason": "final_transcript"}
+
+    @staticmethod
+    def _capture_permission(meta: dict) -> str | None:
+        """Which grant a silent recording lacked, when the recorder knows it."""
+        if meta.get("far_end_cause") == "system_audio_permission":
+            return "call_audio"
+        if meta.get("mic_start") == "denied":
+            return "microphone"
+        return None
+
+    @staticmethod
+    def _final_retry_due(retries: dict | None, now: datetime) -> bool:
+        attempts = int((retries or {}).get("attempts") or 0)
+        if attempts >= AUTO_ATTEMPTS:
+            return False
+        last = _date(str((retries or {}).get("last_at") or ""))
+        return not attempts or not last or now >= last + timedelta(minutes=FINAL_RETRY_BACKOFF_MINUTES[attempts - 1])
+
+    @staticmethod
+    def _final_retries_spent(retries: dict | None, now: datetime) -> bool:
+        attempts = int((retries or {}).get("attempts") or 0)
+        last = _date(str((retries or {}).get("last_at") or ""))
+        return attempts >= AUTO_ATTEMPTS and (
+            not last or now >= last + timedelta(minutes=FINAL_RETRY_BACKOFF_MINUTES[AUTO_ATTEMPTS - 1]))
+
+    def final_retries_due(self) -> list[str]:
+        """Recording folders whose final transcript should be made again now.
+
+        Each returned folder is counted as one attempt; the caller runs the
+        recorder's `process --again` on it, the same as the command line.
+        Never during a recording: the transcription would compete with it.
+        """
+        if self._capture_active():
+            return []
+        now = datetime.now().astimezone()
+        due = []
+        for path in sorted(self.archive_root.glob("*/meeting.json")):
+            snapshot = _json(path, {})
+            if (not isinstance(snapshot, dict) or snapshot.get("final_transcript")
+                    or snapshot.get("status") != "finished" or not snapshot.get("recording_dir")):
+                continue  # Cheap checks first: the full detail reads every index.
+            retries_path = path.parent / FINAL_RETRIES
+            retries = _json(retries_path, {})
+            if not self._final_retry_due(retries, now):
+                continue
+            wait = (self.detail(path.parent.name) or {}).get("final_wait") or {}
+            if wait.get("state") != "retrying":
+                continue
+            _atomic_json(retries_path, {"attempts": int(retries.get("attempts") or 0) + 1,
+                                        "last_at": now.isoformat(timespec="seconds")})
+            due.append(Path(str(snapshot["recording_dir"])).name)
+        return due
 
     def _library_detail(self, detail: dict) -> dict:
         detail["source_title"] = detail["title"]
@@ -1481,6 +1556,9 @@ class MeetingArchive:
         retry_at = _date(str(meta.get("delivery_retry_at") or ""))
         if retry_at and retry_at > now:
             return False
+        attempts = int(meta.get("delivery_attempts") or 0)
+        if attempts >= AUTO_ATTEMPTS:
+            return False  # Shown to the person now; their button sends it again.
         wants_drive = delivery_enabled(settings, "drive")
         wants_mail = delivery_enabled(settings, "email") and meta.get("mail_status") != "unknown"
         wants_telegram = delivery_enabled(settings, "telegram") and meta.get("telegram_status") != "unknown"
@@ -1533,7 +1611,10 @@ class MeetingArchive:
                     meta.update(self.deliver(detail, meta, previous=meta))
                     meta.setdefault("delivery_started_at", now.isoformat(timespec="seconds"))
                     meta["delivery_checked_at"] = now.isoformat(timespec="seconds")
-                    meta["delivery_retry_at"] = (now + timedelta(minutes=15)).isoformat(timespec="seconds")
+                    # Three automatic attempts with backoff (MEETONTRACK-189 step 7).
+                    meta["delivery_attempts"] = attempts + 1
+                    meta["delivery_retry_at"] = (now + timedelta(
+                        minutes=DELIVERY_RETRY_BACKOFF_MINUTES[attempts])).isoformat(timespec="seconds")
                     _atomic_json(path, meta)
                     if _went(meta):
                         self.after.delivered(path.parent.name, taken)
@@ -1555,7 +1636,10 @@ class MeetingArchive:
                 meta = _json(path, {})
                 if not isinstance(meta, dict):
                     return
-                meta["delivery_retry_at"] = (now + timedelta(minutes=15)).isoformat(timespec="seconds")
+                attempts = int(meta.get("delivery_attempts") or 0)
+                meta["delivery_attempts"] = attempts + 1  # A throw is an attempt too.
+                meta["delivery_retry_at"] = (now + timedelta(
+                    minutes=DELIVERY_RETRY_BACKOFF_MINUTES[min(attempts, AUTO_ATTEMPTS - 1)])).isoformat(timespec="seconds")
                 meta["delivery_error"] = f"{type(exc).__name__}: {exc}"[:300]
                 _atomic_json(path, meta)
         except Exception:  # noqa: BLE001 - recording the error must not raise either

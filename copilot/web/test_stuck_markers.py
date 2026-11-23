@@ -78,6 +78,23 @@ class StuckMarkerTests(unittest.TestCase):
         self.assertIn("RuntimeError: synthetic failure", failed["delivery_error"])
         self.assertTrue(failed["delivery_retry_at"])
 
+    def test_delivery_stops_after_three_automatic_attempts_and_is_then_shown(self):
+        """MEETONTRACK-189 step 7: three attempts with backoff, then the person sees which report."""
+        from datetime import datetime, timedelta
+        self.config_file().write_text(json.dumps({"email_enabled": True}))
+        (self.reports / "m1").mkdir(parents=True)
+        now = datetime.now().astimezone()
+        meta = {"generated_at": (now - timedelta(hours=3)).isoformat(), "mail_status": "failed",
+                "delivery_attempts": 3, "delivery_retry_at": (now - timedelta(minutes=1)).isoformat()}
+        path = self.reports / "m1" / "report.json"
+        path.write_text(json.dumps(meta))
+        self.assertFalse(self.archive._retry_report(path, {"email_enabled": True}, now), "no fourth attempt")
+        health = self.archive.delivery_health()
+        self.assertIn("m1", [item["meeting_id"] for item in health["undelivered"]])
+        path.write_text(json.dumps({**meta, "delivery_attempts": 1}))
+        self.assertNotIn("m1", [item["meeting_id"] for item in self.archive.delivery_health()["undelivered"]],
+                         "still retrying: not the person's problem yet")
+
     def config_file(self) -> Path:
         return Path(self.temp.name) / "config" / "delivery.json"
 

@@ -87,7 +87,8 @@ final class DeliveryAttention {
 
     /// One line for the menu, or nil when everything went out.
     nonisolated static func line(delivery: [String: Any]) -> String? {
-        let unsent = (delivery["undelivered"] as? [Any])?.count ?? 0
+        let undelivered = delivery["undelivered"] as? [[String: Any]] ?? []
+        let unsent = undelivered.count
         let stuck = (delivery["stuck_recordings"] as? [Any])?.count ?? 0
         // A sign-in or a choice the person must make blocks sending without
         // being listed as undelivered yet.
@@ -101,7 +102,11 @@ final class DeliveryAttention {
             return localised("Reports wait for you: \(blocked)", "Отчеты ждут вашего действия: \(blocked)")
         }
         if unsent > 0 {
-            return localised("Reports not sent: \(unsent)", "Не отправлено отчетов: \(unsent)")
+            // Which report, never a bare count (MEETONTRACK-189 step 7).
+            let title = undelivered.lazy.compactMap { $0["title"] as? String }.first { !$0.isEmpty }
+            let first = title.map { localised("“\($0)”", "«\($0)»") } ?? localised("a meeting", "встреча")
+            let more = unsent > 1 ? localised(" and \(unsent - 1) more", " и еще \(unsent - 1)") : ""
+            return localised("Not sent: ", "Не отправлены: ") + first + more
         }
         if stuck > 0 {
             return localised("A recording was cut off; open the assistant",

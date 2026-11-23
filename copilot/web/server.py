@@ -3138,6 +3138,13 @@ def delivery_loop() -> None:
             if last_full is None or time.monotonic() - last_full >= 60:
                 last_full = time.monotonic()
                 ARCHIVE.retry_pending_deliveries()
+                # A finished call still without its final transcript: make it
+                # again, as `meetingcopilot process` does (MEETONTRACK-189 step 7).
+                for session in ARCHIVE.final_retries_due():
+                    try:
+                        STT.retranscribe(session)
+                    except ValueError as exc:
+                        print(f"final transcript retry for {session} not started: {exc}", flush=True)
         except Exception as exc:
             print(f"meeting delivery retry failed: {exc}", flush=True)
         DELIVERY_WAKE.wait(5)

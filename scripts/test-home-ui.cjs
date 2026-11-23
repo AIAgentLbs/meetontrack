@@ -759,13 +759,26 @@ const checks = {
         renderDeliveryHealth({ ...deliveryHealth, undelivered: [{ ...item(1), ...extra }] });
         shown.push(document.getElementById('delivery-alert').textContent);
       }
+      // MEETONTRACK-189 step 7: a problem the person can fix says what and offers the fix; no minutes.
+      renderDeliveryHealth({ ...deliveryHealth, undelivered: [{ ...item(1), final_wait: { state: 'missing', reason: 'capture_permission', permission: 'call_audio' } }] });
+      shown.push(document.getElementById('delivery-alert').textContent);
+      const row = document.querySelector('#delivery-undelivered .delivery-undelivered');
+      shown.push([row.querySelector('.delivery-reason').textContent, row.querySelector('button')?.textContent || '']);
+      renderDeliveryHealth({ ...deliveryHealth, undelivered: [{ ...item(1), final_wait: { state: 'missing', reason: 'final_transcript' } }] });
+      shown.push(document.querySelector('#delivery-undelivered .delivery-undelivered').textContent);
       renderDeliveryHealth(window.appState.delivery);
       return shown;
     });
-    assert.deepEqual(plural, lang === 'ru' ? ['2 отчета не отправлены', '5 отчетов не отправлены', '21 отчет не отправлен',
-      'Отчет мог не дойти', 'Отчет не найден', 'Отчет не создан', 'PDF отчета не создан', 'Отчет ждет расшифровку']
-      : ['2 reports not sent', '5 reports not sent', '21 reports not sent',
-        'Report may not have arrived', 'Report not found', 'Report not created', 'Report PDF not created', 'Report waits for the transcript']);
+    const many = (more) => lang === 'ru' ? `Не отправлены: «Pilot review», «Pilot review»${more ? ` и еще ${more}` : ''}`
+      : `Not sent: “Pilot review”, “Pilot review”${more ? ` and ${more} more` : ''}`;
+    assert.deepEqual(plural.slice(0, 8), [many(0), many(3), many(19), ...(lang === 'ru'
+      ? ['Отчет мог не дойти', 'Отчет не найден', 'Отчет не создан', 'PDF отчета не создан', 'Нет итоговой расшифровки']
+      : ['Report may not have arrived', 'Report not found', 'Report not created', 'Report PDF not created', 'No final transcript'])]);
+    assert.equal(plural[8], lang === 'ru' ? 'Встреча не записалась' : 'Meeting not recorded');
+    assert.match(plural[9][0], lang === 'ru' ? /нет разрешения на запись системного звука/ : /no permission to record system audio/);
+    assert.equal(plural[9][1], lang === 'ru' ? 'Открыть разрешение' : 'Open the permission');
+    assert.match(plural[10], lang === 'ru' ? /трижды пыталось сделать итоговую расшифровку/ : /tried three times to make the final transcript/);
+    assert.doesNotMatch(plural[10], /\d+ (мин|min)/, 'never elapsed minutes');
     await pill.click();
     await page.locator('#archive-dialog').waitFor({ state: 'visible' });
     assert.match(await page.locator('#archive-dialog').innerText(), lang === 'ru' ? /Отчет по встрече «Pilot review» от \d+ \S+ не отправлен/

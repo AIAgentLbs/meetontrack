@@ -22,6 +22,12 @@ from functools import partial
 from after_state import AfterState
 
 
+def retries_spent(root: Path, meeting_id: str = "FIRST-CALL") -> None:
+    """The three automatic re-transcriptions ran, long enough ago (MEETONTRACK-189 step 7)."""
+    (root / "archive" / meeting_id / "final-retry.json").write_text(json.dumps(
+        {"attempts": 3, "last_at": iso(datetime.now(timezone.utc) - timedelta(hours=2))}))
+
+
 def setUpModule():
     # Written before the 30 s pause in which After shows a ready report (MEETONTRACK-163);
     # test_after_archive covers the pause, these keep testing their own rule.
@@ -475,9 +481,36 @@ class FinalOnlyDeliveryTests(unittest.TestCase):
         self.assertEqual((len(texts), texts[-1]), (406, "Final goodbye"))
         self.assertNotIn("Live line 0", texts)
 
+    def test_a_missing_final_transcript_is_made_again_three_times_before_it_is_shown(self):
+        """MEETONTRACK-189 step 7: the app fixes what it can first, with backoff, then says so."""
+        self.finalize()
+        retries = self.root / "archive" / "FIRST-CALL" / "final-retry.json"
+
+        def shown() -> bool:
+            return "FIRST-CALL" in [i["meeting_id"] for i in self.archive.delivery_health()["undelivered"]]
+
+        self.assertEqual(self.archive.detail("FIRST-CALL")["final_wait"]["state"], "retrying")
+        self.assertFalse(shown(), "nothing to show while the app is still trying")
+        session = self.first.name
+        self.assertEqual(self.archive.final_retries_due(), [session])
+        self.assertEqual(self.archive.final_retries_due(), [], "the next attempt waits for its backoff")
+        for attempt in (2, 3):
+            stored = json.loads(retries.read_text())
+            retries.write_text(json.dumps({**stored, "last_at": iso(datetime.now(timezone.utc) - timedelta(hours=2))}))
+            self.assertEqual(self.archive.final_retries_due(), [session])
+            self.assertEqual(json.loads(retries.read_text())["attempts"], attempt)
+        self.assertFalse(shown(), "the last attempt still has time to finish")
+        retries_spent(self.root)
+        self.assertEqual(self.archive.final_retries_due(), [], "three attempts at most")
+        self.assertTrue(shown())
+        wait = self.archive.detail("FIRST-CALL")["final_wait"]
+        self.assertEqual((wait["state"], wait["reason"]), ("missing", "final_transcript"))
+        self.assertNotIn("minutes", wait, "elapsed minutes are never shown")
+
     def test_a_missing_final_transcript_needs_attention_and_nothing_is_sent(self):
         # The call ended about two hours ago and the recorder never wrote its final transcript.
         self.finalize()
+        retries_spent(self.root)
         detail = self.archive.detail("FIRST-CALL")
         self.assertEqual((detail["final_wait"]["state"], detail["final_wait"]["reason"]), ("missing", "final_transcript"))
         summary = next(item for item in self.archive.list_meetings() if item["meeting_id"] == "FIRST-CALL")
@@ -731,6 +764,7 @@ class LateFinalTranscriptTests(unittest.TestCase):
     def test_still_flagged_after_the_window_and_a_late_final_sends_it(self):
         self.watched_since(datetime.now(timezone.utc) - timedelta(days=5))
         self.finalize()
+        retries_spent(self.root)
         self.assertEqual(self.archive.detail("FIRST-CALL")["final_wait"]["state"], "missing")
         self.assertTrue(self.flagged())
         self.write_final(self.final)

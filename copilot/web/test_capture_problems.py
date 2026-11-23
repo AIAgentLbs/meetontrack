@@ -72,13 +72,19 @@ class CaptureProblemTests(unittest.TestCase):
         telegram = next(command for command in commands if command[0] == sys.executable)
         self.assertIn("Собеседник не записан", telegram[telegram.index("--note") + 1])
 
-    def test_zero_audio_session_reads_as_no_audio_captured(self):
-        """P1-8: a lost grant is "no audio captured", not a final transcript still on its way."""
+    def test_silent_or_speechless_sessions_are_not_undelivered_reports(self):
+        """P1-8 and step 7: a lost grant shows the permission to fix; silence or no speech shows nothing."""
         ended = (datetime.now().astimezone() - timedelta(minutes=2)).isoformat()
         snapshot = {"status": "finished"}
-        failed = {"transcription_failed": "no_audio_captured: neither track carried any sound"}
-        wait = self.archive._final_wait(snapshot, ended, None, failed)
-        self.assertEqual((wait["state"], wait["reason"]), ("missing", "no_audio_captured"))
+        silent = {"transcription_failed": "no_audio_captured: neither track carried any sound"}
+        self.assertIsNone(self.archive._final_wait(snapshot, ended, None, silent))
+        self.assertIsNone(self.archive._final_wait(
+            snapshot, ended, None, {"transcription_failed": "No speech was recognized; audio kept for a manual retry."}))
+        denied = self.archive._final_wait(snapshot, ended, None, {**silent, "far_end_cause": "system_audio_permission"})
+        self.assertEqual((denied["state"], denied["reason"], denied["permission"]),
+                         ("missing", "capture_permission", "call_audio"))
+        mic = self.archive._final_wait(snapshot, ended, None, {**silent, "mic_start": "denied"})
+        self.assertEqual(mic["permission"], "microphone")
         self.assertEqual(self.archive._final_wait(snapshot, ended, None, {})["reason"], "final_transcript")
 
     def test_missing_microphone_is_said(self):

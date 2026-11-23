@@ -1162,7 +1162,7 @@ Object.assign(translations.ru, {
   "delivery.auth_pill": "{channel}: войдите снова", "delivery.open_settings": "Открыть настройки",
   "delivery.pill.undelivered": "Проверить отправку отчета", "delivery.pill.unsure": "Отчет мог не дойти",
   "delivery.pill.missing": "Отчет не найден", "delivery.pill.failed": "Отчет не создан",
-  "delivery.pill.nopdf": "PDF отчета не создан", "delivery.pill.final": "Отчет ждет расшифровку",
+  "delivery.pill.nopdf": "PDF отчета не создан", "delivery.pill.final": "Нет итоговой расшифровки",
   "delivery.undelivered.title_date": "Отчет по встрече «{title}» от {date} не отправлен",
   "delivery.undelivered.title": "Отчет по встрече «{title}» не отправлен",
   "delivery.undelivered.date": "Отчет по встрече от {date} не отправлен",
@@ -1173,19 +1173,11 @@ Object.assign(translations.ru, {
   "delivery.unsure.plain": "Отчет по встрече мог не дойти",
   "delivery.unsure_hint": "Возможно, он уже пришел. Проверьте почту и Telegram, если его нет, нажмите «Отправить снова».",
   "delivery.reason.outcome_unknown": "Неизвестно, дошел ли отчет. Проверьте почту и Telegram, если его нет, нажмите «Подробнее», затем «Отправить снова».",
-  "delivery.undelivered_many.one": "{count} отчет не отправлен",
-  "delivery.undelivered_many.few": "{count} отчета не отправлены",
-  "delivery.undelivered_many.many": "{count} отчетов не отправлены",
-  "delivery.undelivered_many.other": "{count} отчета не отправлены",
   "delivery.resend": "Отправить снова", "delivery.resending": "Отправляю...",
   "delivery.resend_failed": "Не получилось отправить. Проверьте интернет и нажмите «Отправить снова» еще раз.",
   "delivery.resend_meeting_not_finished": "Встреча еще записывается. Отправьте отчет после ее завершения.",
   "delivery.resend_final_transcript_missing": "Итоговая расшифровка еще не готова. Отчет уйдет сам, когда она будет готова.",
   "delivery.resend_report_not_ready": "Файл отчета не найден. Откройте отчет в истории встреч и создайте его заново.",
-  "delivery.unsure_many.one": "{count} отчет мог не дойти",
-  "delivery.unsure_many.few": "{count} отчета могли не дойти",
-  "delivery.unsure_many.many": "{count} отчетов могли не дойти",
-  "delivery.unsure_many.other": "{count} отчета могли не дойти",
   "delivery.state.not_configured": "Не подключен", "delivery.state.idle": "Нет отчетов за последние 3 дня",
   "delivery.state.sent": "Готово · {count}", "delivery.state.pending": "Ожидает отправки · {count}",
   "delivery.state.waiting": "После завершения звонка · {count}",
@@ -1212,13 +1204,25 @@ Object.assign(translations.ru, {
   "delivery.failed.title": "Отчет по встрече «{title}» не создан",
   "delivery.failed.date": "Отчет по встрече от {date} не создан",
   "delivery.failed.plain": "Отчет по встрече не создан",
-  "delivery.final.title_date": "Отчет по встрече «{title}» от {date} ждет итоговую расшифровку",
-  "delivery.final.title": "Отчет по встрече «{title}» ждет итоговую расшифровку",
-  "delivery.final.date": "Отчет по встрече от {date} ждет итоговую расшифровку",
-  "delivery.final.plain": "Отчет по встрече ждет итоговую расшифровку",
+  "delivery.final.title_date": "Итоговая расшифровка встречи «{title}» от {date} не получилась",
+  "delivery.final.title": "Итоговая расшифровка встречи «{title}» не получилась",
+  "delivery.final.date": "Итоговая расшифровка встречи от {date} не получилась",
+  "delivery.final.plain": "Итоговая расшифровка встречи не получилась",
+  "delivery.capture.title_date": "Встреча «{title}» от {date} не записалась",
+  "delivery.capture.title": "Встреча «{title}» не записалась",
+  "delivery.capture.date": "Встреча от {date} не записалась",
+  "delivery.capture.plain": "Встреча не записалась",
+  "delivery.pill.capture": "Встреча не записалась",
+  "delivery.pill.list": "Не отправлены: {names}", "delivery.pill.unsure_list": "Могли не дойти: {names}",
+  "delivery.pill.more": "{names} и еще {count}", "delivery.pill.meeting": "встреча",
+  "delivery.row.retried": "Приложение трижды пыталось отправить отчет ({channels}), но не смогло.",
   "final_wait.waiting": "Отчет ждет итоговую расшифровку и уйдет, как только она будет готова.",
-  "final_wait.no_audio_captured": "Звук не записался: обе дорожки пустые. Проверьте разрешения на микрофон и запись системного звука в Настройках приложения. Отчета не будет.",
-  "final_wait.final_transcript": "Итоговой расшифровки нет уже {minutes} мин после звонка. Отчет не отправлен: предварительная расшифровка не отправляется. Проверьте, что приложение записи запущено. Отчет уйдет сам, когда итоговая расшифровка будет готова.",
+  "final_wait.final_transcript": "Приложение трижды пыталось сделать итоговую расшифровку, но не смогло. Отчет не отправлен: предварительная расшифровка не отправляется.",
+  "final_wait.needs_choice": "Для итоговой расшифровки не выбрана модель распознавания речи. Выберите ее, и отчет уйдет сам.",
+  "final_wait.choose_model": "Выбрать модель",
+  "final_wait.capture_permission.call_audio": "Звук встречи не записался: у приложения нет разрешения на запись системного звука. Разрешите его, и следующие встречи запишутся.",
+  "final_wait.capture_permission.microphone": "Звук встречи не записался: у приложения нет доступа к микрофону. Разрешите его, и следующие встречи запишутся.",
+  "final_wait.open_permission": "Открыть разрешение",
   "speaker_review": "Итоговая расшифровка применена. Часть исправлений спикеров из предварительной расшифровки не удалось перенести уверенно: проверьте спикеров ({count} реплик{names}).",
   "report_failure.pdf_html": "PDF не создан: на компьютере не найден браузер Chrome или Edge, либо он не смог сохранить файл. Отчет сохранен как HTML, и письмо и Telegram, если они включены, получают его HTML-файлом вместо PDF. Попыток: {attempts}, последняя в {time}. Приложение само повторит попытку через 30 минут, или нажмите «Создать отчет заново».",
   "report_failure.pdf": "Отчет не создан: Chrome не смог сохранить PDF. Попыток: {attempts}, последняя в {time}. Приложение само повторит попытку через 30 минут, или нажмите «Создать отчет заново».",
@@ -1237,7 +1241,7 @@ Object.assign(translations.en, {
   "delivery.auth_pill": "{channel}: sign in again", "delivery.open_settings": "Open settings",
   "delivery.pill.undelivered": "Review failed delivery", "delivery.pill.unsure": "Report may not have arrived",
   "delivery.pill.missing": "Report not found", "delivery.pill.failed": "Report not created",
-  "delivery.pill.nopdf": "Report PDF not created", "delivery.pill.final": "Report waits for the transcript",
+  "delivery.pill.nopdf": "Report PDF not created", "delivery.pill.final": "No final transcript",
   "delivery.undelivered.title_date": "Report for “{title}” on {date} was not sent",
   "delivery.undelivered.title": "Report for “{title}” was not sent",
   "delivery.undelivered.date": "Report for the meeting on {date} was not sent",
@@ -1248,15 +1252,11 @@ Object.assign(translations.en, {
   "delivery.unsure.plain": "A meeting report may not have arrived",
   "delivery.unsure_hint": "It may already be there. Check email and Telegram; if it is missing, press Send again.",
   "delivery.reason.outcome_unknown": "It is unknown whether the report arrived. Check email and Telegram; if it is missing, press Details, then Send again.",
-  "delivery.undelivered_many.one": "{count} report not sent",
-  "delivery.undelivered_many.other": "{count} reports not sent",
   "delivery.resend": "Send again", "delivery.resending": "Sending...",
   "delivery.resend_failed": "Could not send. Check the internet connection and press Send again.",
   "delivery.resend_meeting_not_finished": "The meeting is still recording. Send the report after it ends.",
   "delivery.resend_final_transcript_missing": "The final transcript is not ready yet. The report is sent by itself when it is.",
   "delivery.resend_report_not_ready": "The report file is missing. Open the report in meeting history and create it again.",
-  "delivery.unsure_many.one": "{count} report may not have arrived",
-  "delivery.unsure_many.other": "{count} reports may not have arrived",
   "delivery.state.not_configured": "Not connected", "delivery.state.idle": "No reports in the last 3 days",
   "delivery.state.sent": "Ready · {count}", "delivery.state.pending": "Awaiting delivery · {count}",
   "delivery.state.waiting": "After the call ends · {count}",
@@ -1283,13 +1283,25 @@ Object.assign(translations.en, {
   "delivery.failed.title": "Report for “{title}” was not created",
   "delivery.failed.date": "Report for the meeting on {date} was not created",
   "delivery.failed.plain": "A meeting report was not created",
-  "delivery.final.title_date": "Report for “{title}” on {date} waits for the final transcript",
-  "delivery.final.title": "Report for “{title}” waits for the final transcript",
-  "delivery.final.date": "Report for the meeting on {date} waits for the final transcript",
-  "delivery.final.plain": "A meeting report waits for the final transcript",
+  "delivery.final.title_date": "The final transcript of “{title}” on {date} could not be made",
+  "delivery.final.title": "The final transcript of “{title}” could not be made",
+  "delivery.final.date": "The final transcript of the meeting on {date} could not be made",
+  "delivery.final.plain": "The final transcript of a meeting could not be made",
+  "delivery.capture.title_date": "“{title}” on {date} was not recorded",
+  "delivery.capture.title": "“{title}” was not recorded",
+  "delivery.capture.date": "The meeting on {date} was not recorded",
+  "delivery.capture.plain": "A meeting was not recorded",
+  "delivery.pill.capture": "Meeting not recorded",
+  "delivery.pill.list": "Not sent: {names}", "delivery.pill.unsure_list": "May not have arrived: {names}",
+  "delivery.pill.more": "{names} and {count} more", "delivery.pill.meeting": "meeting",
+  "delivery.row.retried": "The app tried three times to send the report ({channels}) and could not.",
   "final_wait.waiting": "The report waits for the final transcript and is sent as soon as it is ready.",
-  "final_wait.no_audio_captured": "No audio was captured: both tracks are empty. Check the Microphone and System Audio Recording permissions in the app's setup. There will be no report.",
-  "final_wait.final_transcript": "There is still no final transcript {minutes} min after the call. The report is not sent: the preliminary transcript is never sent. Check that the recorder is running. The report is sent by itself once the final transcript is ready.",
+  "final_wait.final_transcript": "The app tried three times to make the final transcript and could not. The report is not sent: the preliminary transcript is never sent.",
+  "final_wait.needs_choice": "No speech recognition model is chosen for the final transcript. Choose one and the report is sent by itself.",
+  "final_wait.choose_model": "Choose a model",
+  "final_wait.capture_permission.call_audio": "The meeting audio was not recorded: the app has no permission to record system audio. Allow it and the next meetings are recorded.",
+  "final_wait.capture_permission.microphone": "The meeting audio was not recorded: the app has no access to the microphone. Allow it and the next meetings are recorded.",
+  "final_wait.open_permission": "Open the permission",
   "speaker_review": "The final transcript is applied. Some speaker corrections from the preliminary transcript could not be carried over with confidence: check the speakers ({count} lines{names}).",
   "report_failure.pdf_html": "The PDF was not created: no Chrome or Edge browser was found on this computer, or it could not save the file. The report is saved as HTML, and email and Telegram, if turned on, get it as an HTML file instead of a PDF. Attempts: {attempts}, last at {time}. The app tries again by itself in 30 minutes, or press Create the report again.",
   "report_failure.pdf": "The report was not created: Chrome could not save the PDF. Attempts: {attempts}, last at {time}. The app tries again by itself in 30 minutes, or press Create the report again.",
@@ -1388,9 +1400,26 @@ const deliveryChannelNames = { drive: "Google Drive", get gmail() { return uiLan
 const deliveryResend = {};
 
 // MEETONTRACK-94: a report is sent only from the final transcript; say why it waits.
+// MEETONTRACK-189 step 7: shown only after the app's own attempts; never elapsed minutes.
 function finalWaitText(wait) {
-  if (wait.reason === "no_audio_captured") return t("final_wait.no_audio_captured");
-  return t(wait.state === "missing" ? "final_wait.final_transcript" : "final_wait.waiting", {minutes: wait.minutes || 0});
+  if (wait.reason === "capture_permission") return t(`final_wait.capture_permission.${wait.permission}`);
+  if (wait.reason === "needs_choice") return t("final_wait.needs_choice");
+  return t(wait.state === "missing" ? "final_wait.final_transcript" : "final_wait.waiting");
+}
+
+// The one thing the person can do about a final-transcript problem, if any.
+function finalWaitAction(wait) {
+  if (wait.reason === "capture_permission") {
+    return [t("final_wait.open_permission"), () => void post("/api/permissions/open", { which: wait.permission })];
+  }
+  if (wait.reason === "needs_choice") {
+    return [t("final_wait.choose_model"), () => {
+      if (!elements.archiveDialog.hidden) closeArchive();
+      document.querySelector("#settings-open").click();
+      document.querySelector("#speech-step")?.scrollIntoView({ block: "start" });
+    }];
+  }
+  return null;
 }
 
 // MEETONTRACK-117: corrections made on live text that the final transcript could not take with confidence.
@@ -1400,7 +1429,16 @@ function speakerReviewText(review) {
 }
 
 const deliveryFamily = item => (item.failed?.fallback === "html" ? "nopdf" : item.failed ? "failed" : item.missing ? "missing"
-  : item.final_wait ? "final" : item.uncertain ? "unsure" : "undelivered");
+  : item.final_wait?.reason === "capture_permission" ? "capture" : item.final_wait ? "final"
+  : item.uncertain ? "unsure" : "undelivered");
+
+// Which meeting, in two or three words: its title, else its date.
+function deliveryShortName(item) {
+  const started = new Date(item.started_at || "");
+  if (item.title) return uiLanguage === "ru" ? `«${item.title}»` : `“${item.title}”`;
+  return Number.isNaN(started.getTime()) ? t("delivery.pill.meeting")
+    : started.toLocaleDateString(uiLanguage, { day: "numeric", month: "long" });
+}
 
 function undeliveredLabel(item) {
   const started = new Date(item.started_at || "");
@@ -1500,9 +1538,11 @@ function renderDeliveryHealth(health = {}) {
   // A few words that never get cut; the meeting's title and date are in the dialog the pill opens.
   if (undelivered.length === 1) problems.push(t(`delivery.pill.${deliveryFamily(undelivered[0])}`));
   else if (undelivered.length) {
-    // Never state an unknown outcome as a confirmed failure.
-    const family = undelivered.some(item => item.uncertain) ? "unsure_many" : "undelivered_many";
-    problems.push(t(`delivery.${family}.${new Intl.PluralRules(uiLanguage).select(undelivered.length)}`, { count: undelivered.length }));
+    // Which reports, never a bare count (MEETONTRACK-189 step 7). An unknown
+    // outcome is never stated as a confirmed failure.
+    const shown = undelivered.slice(0, 2).map(deliveryShortName).join(", ");
+    const names = undelivered.length > 2 ? t("delivery.pill.more", { names: shown, count: undelivered.length - 2 }) : shown;
+    problems.push(t(undelivered.some(item => item.uncertain) ? "delivery.pill.unsure_list" : "delivery.pill.list", { names }));
   }
   elements.deliveryAlert.hidden = !problems.length;
   elements.deliveryAlert.dataset.state = problems.length ? "action_required" : "idle";
@@ -1514,10 +1554,22 @@ function renderDeliveryHealth(health = {}) {
     const row = textNode("div", "delivery-undelivered", "");
     row.append(textNode("p", "", undeliveredLabel(item)));
     if (item.final_wait) {
-      // Nothing to press: the report goes by itself once the final transcript is ready.
+      // A button only when the person can fix it: a permission, a model choice.
       row.append(textNode("p", "delivery-reason", finalWaitText(item.final_wait)));
+      const action = finalWaitAction(item.final_wait);
+      if (action) {
+        const fix = textNode("button", "primary-button", action[0]);
+        fix.type = "button";
+        fix.addEventListener("click", action[1]);
+        row.append(fix);
+      }
       resendRows.append(row);
       continue;
+    }
+    if (!item.missing && !item.failed && !item.uncertain && (item.channels || []).length) {
+      // The automatic attempts are spent: say what failed, then offer the retry.
+      const names = item.channels.map(key => ({ email: deliveryChannelNames.gmail }[key] || deliveryChannelNames[key] || key));
+      row.append(textNode("p", "delivery-reason", t("delivery.row.retried", { channels: names.join(", ") })));
     }
     const [busyText, idleText] = item.missing ? ["delivery.recreating", "delivery.recreate"] : ["delivery.resending", "delivery.resend"];
     const button = textNode("button", "primary-button", t(state === "sending" ? busyText : idleText));
