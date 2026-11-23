@@ -576,6 +576,8 @@ hashes, Pages removed, and the Windows installer relocated to
   release notes and a copyable platform-specific update command. No automatic
   execution or interruption of a call. See `docs/UPDATES.md`.
 - MEETONTRACK-18: Future work, not a current release blocker: automatic installation of
+- [ ] [MEETONTRACK-188](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-188/): The memo e-mail sent to your own address arrived silently as already read. Fixed on main 2026-11-23 (56ba05e), Ready to deploy.
+- [ ] [MEETONTRACK-189](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-189/): After-call chain reliability (recording, analysis, e-mail, repo and CRM updates). Audit: docs/superpowers/specs/2026-11-23-after-call-reliability-audit.md; fix branch in progress.
   the complete Capture + web + Python product, not just release notifications.
   Migrate Mac's split payload into the Sparkle update unit and Windows ZIP installs
   into the owned Velopack channel; retain recordings/settings and provide rollback.
