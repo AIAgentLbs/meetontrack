@@ -44,15 +44,15 @@ struct MicrophoneStartTests {
     @Test("A hanging start times out, and its late result is still handed back")
     func hangingStartTimesOut() async {
         let late = Counter()
-        let started = Date()
+        // .timedOut itself proves the watchdog answered before the 3 s start
+        // did; wall-clock bounds are left out because the parallel suite can
+        // delay resuming this test by seconds.
         let result = await RecordingSession.startMicrophone(
             status: .authorized, requestAccess: { true }, timeout: 0.2,
             start: { Thread.sleep(forTimeInterval: 3) },
             late: { error in if error == nil { late.bump() } })
         #expect(result == .timedOut)
-        // Generous: the parallel suite can delay resuming this test.
-        #expect(Date().timeIntervalSince(started) < 2.5)
-        try? await Task.sleep(for: .seconds(3.5))
+        for _ in 0..<100 where late.count == 0 { try? await Task.sleep(for: .milliseconds(100)) }
         #expect(late.count == 1)
     }
 

@@ -824,7 +824,7 @@ class MeetingArchive:
                       "final_transcript", "speaker_review", "remote_attendees"):
             if field in snapshot:
                 result[field] = snapshot[field]
-        result["final_wait"] = self._final_wait(snapshot, ended, report_meta)
+        result["final_wait"] = self._final_wait(snapshot, ended, report_meta, (recording or {}).get("meta"))
         annotated = self.annotate_speakers({**result, "segments": segments})
         annotated["fact_checks"] = with_speakers(annotated["fact_checks"], annotated["segments"])  # corrections reach rows
         annotated["transcript"] = annotated.pop("segments")
@@ -835,11 +835,14 @@ class MeetingArchive:
         about past the delivery window: those still inside it when MEETONTRACK-118 first ran."""
         return self._final_wait_since - timedelta(days=self.delivery_retry_days)
 
-    def _final_wait(self, snapshot: dict, ended: str, report: dict | None = None) -> dict | None:
+    def _final_wait(self, snapshot: dict, ended: str, report: dict | None = None,
+                    recording_meta: dict | None = None) -> dict | None:
         """A finished meeting whose report waits for the recorder's final transcript (MEETONTRACK-94).
 
         Past the delivery window only while its report never went out (MEETONTRACK-118);
-        history from before that change stays quiet.
+        history from before that change stays quiet. A recording the recorder found
+        silent on every track never gets one: that is "no audio captured", a lost
+        grant, not a wait (MEETONTRACK-189 P1-8).
         """
         finished = _date(ended)
         if not snapshot or snapshot.get("final_transcript") or snapshot.get("status") != "finished" or not finished:
@@ -848,6 +851,8 @@ class MeetingArchive:
         if waited > self.delivery_retry_days * 86400 and (
                 finished < self._final_wait_from() or (report or {}).get("delivery_started_at")):
             return None
+        if str((recording_meta or {}).get("transcription_failed") or "").startswith("no_audio_captured"):
+            return {"state": "missing", "reason": "no_audio_captured", "minutes": max(0, int(waited // 60))}
         return {"state": "missing" if waited >= FINAL_WAIT_ATTENTION_SECONDS else "waiting",
                 "reason": "final_transcript", "minutes": max(0, int(waited // 60))}
 

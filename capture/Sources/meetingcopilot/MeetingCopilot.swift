@@ -690,6 +690,33 @@ final class AppController {
         Self.beginWatching(startAutoRecord: start, requestCalendarAccess: askCalendar)
         menuBar.updateAutoRecord(enabled: autoRecord.enabled, decision: nil)
         window.updateAutoRecord(enabled: autoRecord.enabled, decision: nil)
+        recheckAfterInstall()
+    }
+
+    /// The first launch of a new install re-checks the grants a reinstall can
+    /// reset: the microphone, and the system-audio tone test. A failure opens
+    /// setup on the failing row. Runs beside auto-record, never before it
+    /// (MEETONTRACK-189 P1-5).
+    private func recheckAfterInstall() {
+        guard let build = SetupState.currentBuild, SetupState.checkedBuild() != build else { return }
+        Task { @MainActor [weak self] in
+            // A tone during a call would be heard by everyone on it, and be
+            // recorded; the next launch checks instead.
+            guard let self, self.session == nil else { return }
+            let microphone = SetupPermissions.microphone()
+            let systemAudio = await SetupPermissions.testSystemAudio()
+            if systemAudio == .heard {
+                SetupState.rememberSystemAudioHeard()
+            } else {
+                SetupState.forgetSystemAudioHeard()
+            }
+            SetupState.rememberCheckedBuild(build)
+            let failing = SetupState.afterInstallFailures(microphone: microphone, systemAudio: systemAudio)
+            guard !failing.isEmpty else { return }
+            FileHandle.standardError.write(Data(
+                "after install: \(failing.joined(separator: ", ")) not working, opening setup\n".utf8))
+            self.showSetup()
+        }
     }
 
     /// Auto-record first, the calendar prompt second. After a reinstall the

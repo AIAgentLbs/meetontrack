@@ -1217,6 +1217,7 @@ Object.assign(translations.ru, {
   "delivery.final.date": "Отчет по встрече от {date} ждет итоговую расшифровку",
   "delivery.final.plain": "Отчет по встрече ждет итоговую расшифровку",
   "final_wait.waiting": "Отчет ждет итоговую расшифровку и уйдет, как только она будет готова.",
+  "final_wait.no_audio_captured": "Звук не записался: обе дорожки пустые. Проверьте разрешения на микрофон и запись системного звука в Настройках приложения. Отчета не будет.",
   "final_wait.final_transcript": "Итоговой расшифровки нет уже {minutes} мин после звонка. Отчет не отправлен: предварительная расшифровка не отправляется. Проверьте, что приложение записи запущено. Отчет уйдет сам, когда итоговая расшифровка будет готова.",
   "speaker_review": "Итоговая расшифровка применена. Часть исправлений спикеров из предварительной расшифровки не удалось перенести уверенно: проверьте спикеров ({count} реплик{names}).",
   "report_failure.pdf_html": "PDF не создан: на компьютере не найден браузер Chrome или Edge, либо он не смог сохранить файл. Отчет сохранен как HTML, и письмо и Telegram, если они включены, получают его HTML-файлом вместо PDF. Попыток: {attempts}, последняя в {time}. Приложение само повторит попытку через 30 минут, или нажмите «Создать отчет заново».",
@@ -1287,6 +1288,7 @@ Object.assign(translations.en, {
   "delivery.final.date": "Report for the meeting on {date} waits for the final transcript",
   "delivery.final.plain": "A meeting report waits for the final transcript",
   "final_wait.waiting": "The report waits for the final transcript and is sent as soon as it is ready.",
+  "final_wait.no_audio_captured": "No audio was captured: both tracks are empty. Check the Microphone and System Audio Recording permissions in the app's setup. There will be no report.",
   "final_wait.final_transcript": "There is still no final transcript {minutes} min after the call. The report is not sent: the preliminary transcript is never sent. Check that the recorder is running. The report is sent by itself once the final transcript is ready.",
   "speaker_review": "The final transcript is applied. Some speaker corrections from the preliminary transcript could not be carried over with confidence: check the speakers ({count} lines{names}).",
   "report_failure.pdf_html": "The PDF was not created: no Chrome or Edge browser was found on this computer, or it could not save the file. The report is saved as HTML, and email and Telegram, if turned on, get it as an HTML file instead of a PDF. Attempts: {attempts}, last at {time}. The app tries again by itself in 30 minutes, or press Create the report again.",
@@ -1387,6 +1389,7 @@ const deliveryResend = {};
 
 // MEETONTRACK-94: a report is sent only from the final transcript; say why it waits.
 function finalWaitText(wait) {
+  if (wait.reason === "no_audio_captured") return t("final_wait.no_audio_captured");
   return t(wait.state === "missing" ? "final_wait.final_transcript" : "final_wait.waiting", {minutes: wait.minutes || 0});
 }
 
