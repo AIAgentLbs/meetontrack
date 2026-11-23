@@ -251,7 +251,8 @@ class OAuthTests(unittest.TestCase):
         credential.refresh.side_effect = exceptions.TransportError("offline")
         with patch.dict("sys.modules", modules), \
                 patch("google_oauth.dependencies", return_value=(MagicMock(), None, cls, Mock())):
-            with self.assertRaisesRegex(ValueError, "^timeout_outcome_unknown$"):
+            # Nothing was sent yet: a retryable failure, never "outcome unknown" (that stops Gmail delivery retries).
+            with self.assertRaisesRegex(ValueError, "^google_api_failed$"):
                 self.oauth.token("context")
             self.assertEqual(self.oauth.status()["state"], "connected")
             credential.refresh.side_effect = RuntimeError("invalid_grant")

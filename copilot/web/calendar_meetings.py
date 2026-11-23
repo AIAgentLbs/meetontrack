@@ -37,15 +37,23 @@ class CalendarMeetings:
         self._cache: dict[str, tuple[float, list[dict] | None]] = {}  # None: the read failed
         self._lock = threading.Lock()
 
-    def _native(self):
-        """The chosen app sign-in and its status, or (None, {}) when gws is the reader."""
+    def _native(self, deadline: float | None = None):
+        """The chosen app sign-in and its status, or (None, {}) when gws is the reader. A token refresh holds the
+        sign-in's lock for up to 20 s; status() waits on it only until the deadline, then reports "busy"."""
         oauth = self.oauth() if self.oauth else None
         if oauth is None:
             return None, {}
+        lock = getattr(oauth, "lock", None)
+        wait = self.READ_SECONDS if deadline is None else max(0.0, deadline - time.monotonic())
+        if lock is not None and not lock.acquire(timeout=wait):
+            return oauth, {"busy": True, "ready": True}  # signed in and refreshing: this read fails, not the sign-in
         try:
             status = oauth.status()
         except (OSError, ValueError):  # credential store unreadable: not connected
             return oauth, {}
+        finally:
+            if lock is not None:
+                lock.release()
         # Connected for the calendar only with the read-only context grant (as GoogleContext.status checks).
         ready = status.get("state") == "connected" and "context" in (status.get("permissions") or [])
         return oauth, {**status, "ready": ready}
@@ -67,8 +75,8 @@ class CalendarMeetings:
             return "tool_missing"
         return "not_connected" if self.enabled is not None and not self.enabled() else "connected"
 
-    def _read_signed_in(self, oauth, params: dict):
-        """google_api.read bounded to READ_SECONDS: a token refresh alone may take 20 s. A late answer is dropped
+    def _read_signed_in(self, oauth, params: dict, deadline: float):
+        """google_api.read bounded by the deadline: a token refresh alone may take 20 s. A late answer is dropped
         (a refreshed token is still saved by the sign-in)."""
         from google_api import read
         answer: dict = {}
@@ -81,7 +89,7 @@ class CalendarMeetings:
 
         worker = threading.Thread(target=work, name="calendar-read", daemon=True)
         worker.start()
-        worker.join(self.READ_SECONDS)
+        worker.join(max(0.0, deadline - time.monotonic()))
         if worker.is_alive():
             raise ValueError("calendar_read_timeout")
         if "error" in answer:
@@ -91,7 +99,10 @@ class CalendarMeetings:
     def for_day(self, day: date) -> list[dict]:
         if self.enabled is not None and not self.enabled():
             return []
-        oauth, status = self._native()
+        deadline = time.monotonic() + self.READ_SECONDS  # the sign-in's lock and the read share one bound
+        oauth, status = self._native(deadline)
+        if status.get("busy"):
+            raise CalendarUnavailable()
         if oauth is not None and not status.get("ready"):
             return []  # the chosen sign-in needs reconnecting (state() says so); never another account's gws
         if oauth is None and not self.executable:
@@ -116,7 +127,7 @@ class CalendarMeetings:
         events: list[dict] = []
         try:
             if oauth is not None:
-                payload = self._read_signed_in(oauth, params)
+                payload = self._read_signed_in(oauth, params, deadline)
             else:
                 result = subprocess.run(
                     [self.executable, "calendar", "events", "list", "--params", json.dumps(params)],

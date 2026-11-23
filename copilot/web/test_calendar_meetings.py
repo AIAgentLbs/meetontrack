@@ -71,6 +71,30 @@ class OAuthCalendarTests(unittest.TestCase):
             calendar.for_day(date(2026, 11, 26))
         self.assertLess(time.monotonic() - started, 2)
 
+    def test_refresh_holding_the_sign_in_does_not_stall_the_read(self):
+        # Another request refreshing the token holds GoogleOAuth.lock; status() would wait for it (review P1).
+        oauth = FakeOAuth(answer={"items": [EVENT]})
+        oauth.lock = threading.RLock()
+        held, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+
+        def refresh():
+            with oauth.lock:
+                held.set()
+                release.wait(10)
+        threading.Thread(target=refresh, daemon=True).start()
+        held.wait(2)
+        calendar = CalendarMeetings(executable="/bin/gws", oauth=lambda: oauth)
+        started = time.monotonic()
+        with mock.patch.object(CalendarMeetings, "READ_SECONDS", 0.2), \
+                mock.patch("calendar_meetings.subprocess.run") as run:
+            with self.assertRaises(CalendarUnavailable):
+                calendar.for_day(date(2026, 11, 26))
+            self.assertEqual(calendar.state(), "connected")
+        self.assertLess(time.monotonic() - started, 2)
+        run.assert_not_called()
+        self.assertEqual(oauth.calls, [])
+
     def test_nonsense_answer_from_sign_in_is_calendar_unavailable(self):
         calendar = CalendarMeetings(executable="", oauth=lambda: FakeOAuth(answer=["not", "a", "dict"]))
         with self.assertRaises(CalendarUnavailable):

@@ -257,8 +257,9 @@ class GoogleOAuth:
                     self._save({**data, "credentials": json.loads(credentials.to_json())})
                 except Exception as error:
                     if transient_refresh_failure(error):
-                        # Google unreachable: the sign-in stays valid and the next request retries.
-                        raise ValueError("timeout_outcome_unknown") from None
+                        # Google unreachable before any request was sent: a retryable failure (delivery
+                        # retries it), and the sign-in stays valid.
+                        raise ValueError("google_api_failed") from None
                     self._error = "authorization_expired"
                     raise ValueError("authorization_expired") from None
             return credentials.token
