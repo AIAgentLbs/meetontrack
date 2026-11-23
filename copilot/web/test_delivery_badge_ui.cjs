@@ -68,10 +68,10 @@ const auth = { ...healthy, state: 'action_required',
     assert.equal(await page.locator('#delivery-notice').isHidden(), true);
 
     await reload(undelivered(weekly, { ...weekly, meeting_id: 'm3' }));
-    await pillIs('2 отчета не отправлены');
+    await pillIs('Не отправлены: «Weekly sync», «Weekly sync»');  // names, never a bare count (MEETONTRACK-189)
     assert.equal(await pill.getAttribute('data-state'), 'action_required');
     await reload(undelivered(weekly, { ...weekly, meeting_id: 'm3', uncertain: true }));
-    await pillIs('2 отчета могли не дойти');
+    await pillIs('Могли не дойти: «Weekly sync», «Weekly sync»');
 
     await reload(auth);
     await pillIs('Почта: войдите снова');
