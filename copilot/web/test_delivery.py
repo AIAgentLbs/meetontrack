@@ -99,6 +99,8 @@ class DeliveryTests(unittest.TestCase):
         report = {"pdf_path": str(self.pdf)}
 
         def run(command, **_):
+            if "modify" in command:  # MEETONTRACK-188 self-send relabel
+                return subprocess.CompletedProcess([], 0, '{"id":"mail-1"}', "")
             if "gmail" in command:
                 self.assertEqual(json.loads(receipts.read_text())["mail_status"], "unknown",
                                  "uncertainty is on disk before the email leaves")
@@ -231,12 +233,17 @@ class DeliveryTests(unittest.TestCase):
             result = self.archive.deliver(self.detail, {"pdf_path": str(self.pdf)})
         self.assertEqual(result["mail_status"], "sent")
         self.assertEqual(gws.call_count, 1)
-        self.assertNotIn("mail_unread", result)
+        self.assertIsNone(result["mail_unread"])
 
     def test_failed_unread_label_keeps_the_mail_sent_and_never_resends(self):
+        receipts = self.archive.reports_root / "meeting-1" / "delivery-receipts.json"
+        receipts.parent.mkdir(parents=True)
+
         def gws(*args, diagnostics=None, **kwargs):
             if args[:2] == ("gmail", "+send"):
                 return {"id": "sent-id"}
+            # The send is on disk before the relabel: a crash here never looks like an unknown send.
+            self.assertEqual(json.loads(receipts.read_text())["mail_status"], "sent")
             diagnostics.update(provider="gws", reason="permission_missing", exit_code=1)
             return None
         with patch.object(self.archive, "_upload_drive_report_gws", return_value=("auth_required", {})), \

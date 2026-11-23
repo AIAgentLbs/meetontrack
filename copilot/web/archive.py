@@ -2258,7 +2258,6 @@ class MeetingArchive:
                 if mail_status == "sent":
                     gmail_message_id = sent["id"]
                     mail_error.clear()
-                    mail_unread = self._mark_self_send_unread(settings, recipient, gmail_message_id, detail["meeting_id"])
                 elif not mail_error:
                     mail_error.update(provider="gws", reason="missing_send_acknowledgement")
                 if mail_error.get("reason") in {"timeout_outcome_unknown", "invalid_response", "missing_send_acknowledgement"}:
@@ -2267,6 +2266,8 @@ class MeetingArchive:
                      "gmail_message_id": gmail_message_id if mail_status == "sent" else None})
             if mail_status == "sent":
                 mail_to = recipient
+                if not smtp:  # after the receipt: a crash while relabelling must not look like an unknown send
+                    mail_unread = self._mark_self_send_unread(settings, recipient, gmail_message_id, detail["meeting_id"])
 
         telegram_status = str(previous.get("telegram_status") or "not_configured")
         telegram_message_id = previous.get("telegram_message_id")
@@ -2337,7 +2338,7 @@ class MeetingArchive:
             "mail_status": mail_status,
             "gmail_message_id": gmail_message_id,
             "mail_error": mail_error,
-            **({"mail_unread": mail_unread} if mail_unread else {}),
+            "mail_unread": mail_unread,  # None also clears an earlier self-send's result on a resend
             "telegram_status": telegram_status,
             "telegram_message_id": telegram_message_id,
             # Where each confirmed delivery went: After names it even after the settings change.

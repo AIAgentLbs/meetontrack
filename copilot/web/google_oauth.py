@@ -28,6 +28,8 @@ PERMISSIONS = {
                 PREFIX + "calendar.readonly", PREFIX + "documents.readonly",
                 PREFIX + "spreadsheets.readonly"],
 }
+# Asked for, not required: declining it still sends mail, only the self-send stays read.
+OPTIONAL = {PREFIX + "gmail.modify"}
 
 
 def dependencies():
@@ -207,7 +209,7 @@ class GoogleOAuth:
             flow.fetch_token(code=received["code"], timeout=20)
             credentials = flow.credentials
             granted = set(credentials.granted_scopes or credentials.scopes or [])
-            if any(s not in granted for p in permissions for s in PERMISSIONS[p]):
+            if any(s not in granted and s not in OPTIONAL for p in permissions for s in PERMISSIONS[p]):
                 raise ValueError("permission_missing")
             if not credentials.refresh_token:
                 raise ValueError("google_refresh_token_missing")

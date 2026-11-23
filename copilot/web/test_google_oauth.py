@@ -119,6 +119,13 @@ class OAuthTests(unittest.TestCase):
         self.oauth._worker.join(3)
         self.assertEqual(self.oauth.status()["state"], "permission_missing")
 
+    def test_send_only_consent_still_connects_mail(self):
+        """Declining gmail.modify only keeps a self-sent memo read (MEETONTRACK-188)."""
+        state = self.flow(granted=[s for s in PERMISSIONS["mail"] if s.endswith("gmail.send")])
+        self.callback(state, code="code")
+        self.oauth._worker.join(3)
+        self.assertEqual(self.oauth.status()["state"], "connected")
+
     def test_consent_denied_does_not_exchange(self):
         state = self.flow()
         self.callback(state, error="access_denied")
