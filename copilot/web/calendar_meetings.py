@@ -25,8 +25,9 @@ class CalendarMeetings:
     """Cached, read-only calendar lookup; never stores event descriptions."""
 
     def __init__(self, executable: str | None = None, enabled=None, oauth=None) -> None:
-        # oauth: returns the app's own Google sign-in (GoogleOAuth) or None. When it is connected the calendar is
-        # read through it; the gws default profile is only the fallback without one (MEETONTRACK-183).
+        # oauth: returns the app's own Google sign-in (GoogleOAuth) when it is the chosen Google profile, else None.
+        # Then the calendar is read only through it, never through gws, which may hold another account; the gws
+        # default profile is the reader only when no app sign-in is chosen (MEETONTRACK-183).
         self.oauth = oauth
         self.executable = executable if executable is not None else shutil.which("gws")
         self._look_up = executable is None  # found on PATH: looked up again until it is there
@@ -34,18 +35,26 @@ class CalendarMeetings:
         self._cache: dict[str, tuple[float, list[dict] | None]] = {}  # None: the read failed
         self._lock = threading.Lock()
 
-    def _signed_in(self):
+    def _native(self):
+        """The chosen app sign-in and its status, or (None, {}) when gws is the reader."""
         oauth = self.oauth() if self.oauth else None
+        if oauth is None:
+            return None, {}
         try:
-            return oauth if oauth is not None and oauth.status().get("state") == "connected" else None
-        except (OSError, ValueError):  # credential store unreadable: treated as no sign-in
-            return None
+            return oauth, oauth.status()
+        except (OSError, ValueError):  # credential store unreadable: not connected
+            return oauth, {}
 
     def available(self) -> bool:
-        return bool(self.executable or self._signed_in()) and (self.enabled is None or bool(self.enabled()))
+        oauth, status = self._native()
+        reader = status.get("state") == "connected" if oauth is not None else bool(self.executable)
+        return reader and (self.enabled is None or bool(self.enabled()))
 
     def state(self) -> str:
-        if self._signed_in() is not None:
+        oauth, status = self._native()
+        if oauth is not None:  # expired or not finished: Home offers to (re)connect
+            if status.get("state") != "connected":
+                return "not_connected"
             return "not_connected" if self.enabled is not None and not self.enabled() else "connected"
         if not self.executable and self._look_up:
             self.executable = shutil.which("gws")  # installed after start (Home's Check again)
@@ -56,7 +65,13 @@ class CalendarMeetings:
     def for_day(self, day: date) -> list[dict]:
         if self.enabled is not None and not self.enabled():
             return []
-        key = day.isoformat()
+        oauth, status = self._native()
+        if oauth is not None and status.get("state") != "connected":
+            return []  # the chosen sign-in needs reconnecting (state() says so); never another account's gws
+        if oauth is None and not self.executable:
+            return []
+        # Scoped to the reading account: a switch never shows the previous account's events.
+        key = ("google:" + str(status.get("account") or "") if oauth is not None else "gws") + "|" + day.isoformat()
         with self._lock:
             cached = self._cache.get(key)
             # A failed read is kept briefly so a poll during a call does not start gws every few seconds.
@@ -64,9 +79,6 @@ class CalendarMeetings:
                 raise CalendarUnavailable()
             if cached and cached[1] is not None and time.monotonic() - cached[0] < 120:
                 return list(cached[1])
-        oauth = self._signed_in()
-        if oauth is None and not self.executable:
-            return []
         start = datetime.combine(day, clock_time.min).astimezone()
         end = datetime.combine(day + timedelta(days=1), clock_time.min).astimezone()
         params = {
