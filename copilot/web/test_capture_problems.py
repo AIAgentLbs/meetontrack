@@ -1,6 +1,5 @@
 """MEETONTRACK-189 P1-10: a report built without the other side says so at the top."""
 
-import hashlib
 import json
 import subprocess
 import sys
@@ -31,7 +30,9 @@ class CaptureProblemTests(unittest.TestCase):
             "trigger": "mic-activity", "stop_reason": "call-ended",
             "capture_problems": ["far_end_not_recorded"],
         }))
-        meeting_id = "recording-" + hashlib.sha1(folder.name.encode("utf-8")).hexdigest()[:16]
+        # The archive owns the recording id; take it from its listing.
+        meeting_id = next(item["meeting_id"] for item in self.archive.list_meetings()
+                          if item["meeting_id"].startswith("recording-"))
         detail = self.archive.detail(meeting_id)
         self.assertEqual(detail["capture_problems"], ["far_end_not_recorded"])
 
