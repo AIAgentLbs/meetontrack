@@ -62,6 +62,18 @@ def owner_alive(pid) -> bool:
         return False
 
 
+def process_started(pid: int) -> float | None:
+    """When process `pid` started (epoch seconds), or None when it cannot be read."""
+    if os.name == "nt":
+        return None
+    try:
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True,
+                             timeout=5, env={**os.environ, "LC_ALL": "C"}).stdout.strip()
+        return time.mktime(time.strptime(out, "%a %b %d %H:%M:%S %Y"))
+    except (OSError, ValueError, OverflowError, subprocess.SubprocessError):
+        return None
+
+
 def windows_owner_alive(pid: int) -> bool:
     # os.kill(pid, 0) terminates a process on Windows. Query only.
     import ctypes
@@ -89,14 +101,23 @@ STALE_MARKER_SECONDS = 12 * 3600
 def marker_state(path: Path, now: float | None = None) -> str:
     """What a .recording.json says: "live", or why it is left behind.
 
-    "dead": its owner process is gone; "stale": no owner can be checked and
-    it is older than any recording. A live owner keeps it live at any age (a
-    manual recording has no duration ceiling). An unreadable marker counts as
-    live while it is fresh: the safe direction.
+    "dead": its owner process is gone, or its pid now belongs to a process
+    that started at another time (a recycled pid); "stale": the owner cannot
+    be confirmed and it is older than any recording. A confirmed owner keeps
+    it live at any age (a manual recording has no duration ceiling). An
+    unreadable marker counts as live while it is fresh: the safe direction.
     """
-    pid = read_json(path).get("pid")
+    marker = read_json(path)
+    pid = marker.get("pid")
     if isinstance(pid, int) and not isinstance(pid, bool) and 1 < pid < 2**31:
-        return "live" if owner_alive(pid) else "dead"
+        if not owner_alive(pid):
+            return "dead"
+        recorded = marker.get("pid_started")
+        if isinstance(recorded, (int, float)) and not isinstance(recorded, bool):
+            actual = process_started(pid)
+            if actual is not None:
+                # ps reports whole seconds; the recorder writes the exact time.
+                return "live" if abs(actual - recorded) < 2 else "dead"
     try:
         age = (now if now is not None else time.time()) - path.stat().st_mtime
     except OSError:

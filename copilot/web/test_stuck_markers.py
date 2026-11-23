@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from archive import MeetingArchive
-from recording_health import marker_state, stuck_markers
+from recording_health import marker_state, process_started, stuck_markers
 
 
 class StuckMarkerTests(unittest.TestCase):
@@ -46,9 +46,23 @@ class StuckMarkerTests(unittest.TestCase):
         self.assertEqual(marker_state(dead), "dead")
         self.assertEqual(marker_state(unreadable), "live", "a fresh unreadable marker still holds reports back")
         self.assertEqual(marker_state(stale), "stale")
-        self.assertEqual(marker_state(old_live), "live", "a long manual recording still holds reports back")
+        self.assertEqual(marker_state(old_live), "stale", "an owner that cannot be confirmed gets 12 hours")
         self.assertEqual({item["reason"] for item in stuck_markers([live, dead, stale, unreadable])},
                          {"dead", "stale"})
+
+    def test_recycled_pid_is_dead(self):
+        started = process_started(os.getpid())
+        self.assertIsNotNone(started)
+        mine = self.marker("mine", {"pid": os.getpid(), "pid_started": started})
+        recycled = self.marker("recycled", {"pid": os.getpid(), "pid_started": started - 3600})
+        old_mine = self.marker("old-mine", {"pid": os.getpid(), "pid_started": started + 0.4})
+        old = time.time() - 13 * 3600
+        os.utime(old_mine, (old, old))
+        self.assertEqual(marker_state(mine), "live")
+        self.assertEqual(marker_state(recycled), "dead", "a live pid that started later is someone else")
+        self.assertEqual(marker_state(old_mine), "live", "a confirmed owner holds reports back at any age")
+        with patch("recording_health.process_started", return_value=None):
+            self.assertEqual(marker_state(old_mine), "stale", "unreadable start time: the 12-hour rule")
 
     def test_dead_marker_does_not_hold_reports_back(self):
         self.marker("dead", {"pid": 2_147_483_000, "started": "2026-01-05T09:00:00Z"})

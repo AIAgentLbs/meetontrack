@@ -510,15 +510,12 @@ final class RecordingSession {
                 let pid = manifest["pid"] as? Int32
             else { continue }
 
-            // The same liveness test recovery uses, and the same caveat: a
-            // recycled PID could fool it. Here the cost is warning about a
-            // recording that has already ended, which is again the safe
-            // direction to be wrong in.
+            // The same liveness test recovery uses.
             found.append(RecordingInProgress(
                 dir: dir,
                 pid: pid,
                 started: (manifest["started"] as? String).flatMap { iso.date(from: $0) },
-                ownerIsAlive: kill(pid, 0) == 0
+                ownerIsAlive: ProcessStart.ownerAlive(manifest)
             ))
         }
         return found
@@ -560,10 +557,9 @@ final class RecordingSession {
             }
 
             // A live owner means a second meetingcopilot is recording into this folder
-            // right now. Leave it strictly alone. (A recycled PID could fool
-            // this; the cost is deferring recovery to the next launch, which
-            // is the safe direction to be wrong in.)
-            if let pid = manifest["pid"] as? Int32, kill(pid, 0) == 0 { continue }
+            // right now. Leave it strictly alone. The owner's start time
+            // tells a recycled pid apart (MEETONTRACK-189).
+            if ProcessStart.ownerAlive(manifest) { continue }
 
             // Something has to be in the tracks, or there's nothing to recover.
             // A track never written (a microphone that did not start) is left
@@ -647,6 +643,9 @@ final class RecordingSession {
             "trigger": trigger.rawValue,
         ]
         if let title { manifest["title"] = title }
+        if let ownStart = ProcessStart.of(ProcessInfo.processInfo.processIdentifier) {
+            manifest["pid_started"] = ownStart
+        }
         manifest.merge(context.metaFields) { current, _ in current }
         if let micStart = mic.firstBufferAt, let systemStart = system.firstBufferAt {
             let earliest = min(micStart, systemStart)
@@ -824,4 +823,31 @@ final class HaltFlag: @unchecked Sendable {
     private var value = false
     var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
     func set() { lock.lock(); value = true; lock.unlock() }
+}
+
+/// When a process started, so a marker's pid can be told apart from a later
+/// process that was handed the same number.
+enum ProcessStart {
+    /// Epoch seconds, or nil when the process is gone or cannot be read.
+    nonisolated static func of(_ pid: Int32) -> Double? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let start = info.kp_proc.p_un.__p_starttime
+        guard start.tv_sec > 0 else { return nil }
+        return Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
+    }
+
+    /// The marker's writer is still running: its pid is alive and, when the
+    /// marker recorded one, started at the recorded time. A marker without a
+    /// start time (older builds) falls back to the pid alone.
+    nonisolated static func ownerAlive(_ manifest: [String: Any]) -> Bool {
+        guard let raw = (manifest["pid"] as? NSNumber)?.int64Value, raw > 1, raw < Int64(Int32.max),
+              case let pid = Int32(raw),
+              kill(pid, 0) == 0 else { return false }
+        guard let recorded = (manifest["pid_started"] as? NSNumber)?.doubleValue,
+              let actual = of(pid) else { return true }
+        return abs(actual - recorded) < 1
+    }
 }
