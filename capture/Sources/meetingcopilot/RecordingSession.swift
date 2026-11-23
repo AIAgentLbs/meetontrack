@@ -212,6 +212,12 @@ final class RecordingSession {
         return result
     }
 
+    /// Whether the microphone track is being written now (a late start counts).
+    var microphoneRunning: Bool {
+        if case .running = micState { return true }
+        return false
+    }
+
     /// A start that outlived the watchdog finally returned.
     private func microphoneStartedLate(error: Error?) {
         guard error == nil else { return }
@@ -293,7 +299,7 @@ final class RecordingSession {
         onFarEndProblem = nil
         onMicrophoneAdopted = nil
         if pausedSince != nil { resume() }
-        if case .running = micState { mic.stop() }
+        if case .running = micState { mic.stop() } else { mic.seal() }
         system.stop()
 
         let ended = Date()
@@ -439,15 +445,20 @@ final class RecordingSession {
     /// What meta.json's `capture_problems` says, and whether the live warning
     /// is up: the far end was never heard in a call while you were heard.
     nonisolated static func captureProblems(
-        expectsFarEnd: Bool, micHeard: Bool, farEnd: SystemAudioRecorder.FarEndProblem?
+        expectsFarEnd: Bool, micHeard: Bool, farEnd: SystemAudioRecorder.FarEndProblem?,
+        micRecorded: Bool = true
     ) -> [String] {
-        expectsFarEnd && micHeard && farEnd != nil ? ["far_end_not_recorded"] : []
+        // A missing microphone is said in the report too, not only in meta.
+        (micRecorded ? [] : ["mic_not_recorded"])
+            + (expectsFarEnd && micHeard && farEnd != nil ? ["far_end_not_recorded"] : [])
     }
 
     private func currentCaptureProblems(now: Date) -> [String] {
-        Self.captureProblems(
+        var running = false
+        if case .running = micState { running = true }
+        return Self.captureProblems(
             expectsFarEnd: expectsFarEnd, micHeard: mic.lastSoundAt != nil,
-            farEnd: farEndProblem(now: now))
+            farEnd: farEndProblem(now: now), micRecorded: running)
     }
 
     // MARK: - discarding
@@ -550,7 +561,11 @@ final class RecordingSession {
             if let pid = manifest["pid"] as? Int32, kill(pid, 0) == 0 { continue }
 
             // Something has to be in the tracks, or there's nothing to recover.
-            let files = (manifest["files"] as? [String: String]) ?? [:]
+            // A track never written (a microphone that did not start) is left
+            // out, so transcription reads the one that was (MEETONTRACK-189).
+            let files = ((manifest["files"] as? [String: String]) ?? [:]).filter {
+                fm.fileExists(atPath: dir.appendingPathComponent($0.value).path)
+            }
             let sizes = files.values.compactMap { name -> Int64? in
                 (try? fm.attributesOfItem(
                     atPath: dir.appendingPathComponent(name).path

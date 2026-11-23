@@ -91,19 +91,27 @@ struct MicrophoneStartTests {
         #expect(FileManager.default.fileExists(atPath: kept.path))
     }
 
-    /// Review round 1: a denied microphone left mic.caf listed but unwritten,
-    /// and transcription stopped on it instead of reading the far end.
-    @Test("A track listed but never written is left out of transcription")
-    func listedButUnwrittenTrack() throws {
-        let dir = FileManager.default.temporaryDirectory
+    /// Review rounds 1-2: a denied microphone left mic.caf listed but never
+    /// written, and transcription stopped on it instead of reading the far end.
+    @Test("Recovery lists only the tracks that were written, and the report names the missing mic")
+    @MainActor
+    func unwrittenMicTrack() throws {
+        let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("unwritten-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("2026.01.02-0306", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        try Data(count: 8192).write(to: dir.appendingPathComponent("system.caf"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data(repeating: 0x41, count: 8192).write(to: dir.appendingPathComponent("system.caf"))
         try JSONSerialization.data(withJSONObject: [
+            "pid": 999_999, "started": "2026-01-02T03:06:00Z",
             "files": ["mic": "mic.caf", "system": "system.caf"],
-        ]).write(to: dir.appendingPathComponent("meta.json"))
+        ]).write(to: dir.appendingPathComponent(".recording.json"))
 
-        #expect(try SessionMeta.read(from: dir).tracks.map(\.file) == ["system.caf"])
+        #expect(RecordingSession.recoverInterrupted(root: root).count == 1)
+        let meta = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: dir.appendingPathComponent("meta.json"))) as? [String: Any]
+        #expect(meta?["files"] as? [String: String] == ["system": "system.caf"])
+        #expect(RecordingSession.captureProblems(
+            expectsFarEnd: true, micHeard: false, farEnd: nil, micRecorded: false) == ["mic_not_recorded"])
     }
 }

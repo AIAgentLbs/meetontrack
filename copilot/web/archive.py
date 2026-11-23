@@ -68,6 +68,8 @@ def auto_send_allowed(settings: dict, channel: str, started_at: str | None) -> b
 CAPTURE_PROBLEM_TEXT = {
     "far_end_not_recorded": "Собеседник не записан: звук звонка не поступал всю встречу. "
                             "Отчет составлен только по вашему микрофону.",
+    "mic_not_recorded": "Ваш микрофон не записан: он не включился. "
+                        "Отчет составлен только по звуку собеседника.",
 }
 
 

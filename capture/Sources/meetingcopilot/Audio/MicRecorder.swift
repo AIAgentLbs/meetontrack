@@ -143,12 +143,24 @@ final class MicRecorder: @unchecked Sendable {
         /// closes it with silence.
         var gapSince: Date?
         var restarts: [Restart] = []
+        /// Set by `seal()`: no file is opened or written from then on.
+        var sealed = false
     }
     private let state = OSAllocatedUnfairLock(initialState: LockedState())
 
     private var file: AVAudioFile? {
         get { state.withLock { $0.file } }
-        set { state.withLock { $0.file = newValue } }
+        set { state.withLock { if !$0.sealed || newValue == nil { $0.file = newValue } } }
+    }
+
+    /// Close the write path for good, from any thread, even while `start` is
+    /// still running elsewhere: a session stopped during a slow start must
+    /// not get audio written after Stop (MEETONTRACK-189 review).
+    func seal() {
+        state.withLock {
+            $0.sealed = true
+            $0.file = nil
+        }
     }
 
     /// Wall-clock time of the first captured buffer — the track's true start,

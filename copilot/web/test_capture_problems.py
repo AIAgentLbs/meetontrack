@@ -81,6 +81,11 @@ class CaptureProblemTests(unittest.TestCase):
         self.assertEqual((wait["state"], wait["reason"]), ("missing", "no_audio_captured"))
         self.assertEqual(self.archive._final_wait(snapshot, ended, None, {})["reason"], "final_transcript")
 
+    def test_missing_microphone_is_said(self):
+        lines = capture_problem_lines({"capture_problems": ["mic_not_recorded"]})
+        self.assertEqual(len(lines), 1)
+        self.assertIn("микрофон", lines[0])
+
     def test_unknown_codes_are_not_shown(self):
         self.assertEqual(capture_problem_lines({"capture_problems": ["something_new"]}), [])
         self.assertEqual(len(capture_problem_lines({"capture_problems": ["far_end_not_recorded"]})), 1)

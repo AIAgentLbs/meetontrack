@@ -735,20 +735,17 @@ struct SessionMeta {
 
         // Sessions recorded before offsets were captured default to 0 —
         // tracks start within tens of milliseconds of each other anyway.
-        // A track listed but never written (a microphone that did not start)
-        // is left out rather than failing the whole transcription.
-        let written = files.filter { FileManager.default.fileExists(atPath: dir.appendingPathComponent($0.value).path) }
         let offsets = json["start_offset_ms"] as? [String: Int] ?? [:]
         let channels = json["audio_channels"] as? [String: Int] ?? [:]
         var tracks: [Track] = []
-        if let mic = written["mic"] {
+        if let mic = files["mic"] {
             tracks.append(Track(
                 file: mic,
                 speaker: "me",
                 offsetMs: offsets["mic"] ?? 0,
                 channel: channels["mic"]))
         }
-        if let system = written["system"] {
+        if let system = files["system"] {
             tracks.append(Track(
                 file: system,
                 speaker: "them",

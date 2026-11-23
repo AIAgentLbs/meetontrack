@@ -115,7 +115,8 @@ def health_issues() -> list[str]:
     return sorted(read(HEALTH).get("issues", {}))
 
 
-def peak(track: Path) -> float | None:
+def peak(track: Path, channel: int | None = None) -> float | None:
+    """Loudest sample of one file, or of one channel of a shared multichannel file."""
     with tempfile.TemporaryDirectory() as scratch:
         out = Path(scratch) / "track.wav"
         if subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16", str(track), str(out)],
@@ -123,8 +124,12 @@ def peak(track: Path) -> float | None:
             return None
         top = 0
         with wave.open(str(out)) as audio:
+            count = audio.getnchannels()
             while not top and (chunk := audio.readframes(1 << 16)):
-                top = max(map(abs, array.array("h", chunk)), default=0)
+                samples = array.array("h", chunk)
+                if channel is not None:
+                    samples = samples[channel::count]
+                top = max(map(abs, samples), default=0)
         return top / 32768
 
 
@@ -197,7 +202,8 @@ def step5() -> None:
     # Measured as soon as meta.json lands: a transcribed session's tracks are
     # deleted or folded into one stereo file afterwards.
     meta = wait_for(lambda: read(session / "meta.json"), 60) or {}
-    peaks = {kind: peak(session / name) for kind, name in (meta.get("files") or {}).items()}
+    channels = meta.get("audio_channels") or {}
+    peaks = {kind: peak(session / name, channels.get(kind)) for kind, name in (meta.get("files") or {}).items()}
     result(set(peaks) == {"mic", "system"} and all(peaks.values()), "5 both tracks heard",
            ", ".join(f"{kind} peak {value}" for kind, value in peaks.items()) or "no tracks")
     transcript = wait_for(lambda: read(session / "transcript.json"), 300) or {}
@@ -216,6 +222,10 @@ def step5() -> None:
     report = wait_for(delivered, max(0, 300 - (time.time() - stopped)))
     result(bool(report), "5 report delivered", "mail sent, Telegram sent, Drive uploaded" if report
            else "this recording's report not delivered on all three channels within 5 minutes of the stop")
+    # The server rewrites delivery-health.json about once a minute: wait for a
+    # snapshot taken after this delivery before trusting it.
+    checked = time.time()
+    wait_for(lambda: HEALTH.exists() and HEALTH.stat().st_mtime > checked, 90)
     new = sorted(set(health_issues()) - set(saved.get("issues", [])))
     result(not new, "5 no new delivery issue", ", ".join(new) or "none")
 

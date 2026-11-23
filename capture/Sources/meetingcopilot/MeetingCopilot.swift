@@ -449,6 +449,9 @@ final class AppController {
         setup.isRecording = { [weak self] in self?.isRecording == true }
         setup.onShowSettings = { [weak self] in self?.showSettings() }
         setup.onFinished = { [weak self] in
+            // The wizard has just covered this install, even when dismissed
+            // with Later: no second check behind the person's back.
+            if let build = SetupState.currentBuild { SetupState.rememberCheckedBuild(build) }
             self?.startAutomaticFeatures(requestCalendarAccess: false)
             self?.offerSetup()
             self?.showWindow()
@@ -634,6 +637,7 @@ final class AppController {
             showSetup()
         } else {
             startAutomaticFeatures(requestCalendarAccess: true)
+            recheckAfterInstall()
         }
     }
 
@@ -709,7 +713,6 @@ final class AppController {
         Self.beginWatching(startAutoRecord: start, requestCalendarAccess: askCalendar)
         menuBar.updateAutoRecord(enabled: autoRecord.enabled, decision: nil)
         window.updateAutoRecord(enabled: autoRecord.enabled, decision: nil)
-        recheckAfterInstall()
     }
 
     /// The first launch of a new install re-checks the grants a reinstall can
@@ -969,8 +972,9 @@ final class AppController {
             // After the live state is reset for this session, or the reset
             // would wipe the warning.
             await liveBegan.value
-            // Checked before the warning: a later recording must not inherit it.
-            guard let self, self.session === newSession else { return }
+            // Checked before the warning: a later recording must not inherit
+            // it, and a start adopted late has already recovered.
+            guard let self, self.session === newSession, !newSession.microphoneRunning else { return }
             await liveTranscription.noteCaptureWarning(reason: "microphone-not-started")
             self.setCaptureAttention("microphone", localised(
                 "Your microphone is not being recorded", "Ваш микрофон не записывается"))
