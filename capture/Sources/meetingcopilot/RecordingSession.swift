@@ -343,7 +343,7 @@ final class RecordingSession {
         case .starting: meta["mic_start"] = "still-starting"
         case .notRunning(let outcome): meta["mic_start"] = Self.describe(outcome)
         }
-        if case .running = micState {} else {
+        if !micRecorded {
             // No microphone track to transcribe: list only the far end, or the
             // transcriber stops on a file that was never written.
             meta["files"] = ["system": "system.caf"]
@@ -454,11 +454,16 @@ final class RecordingSession {
     }
 
     private func currentCaptureProblems(now: Date) -> [String] {
-        var running = false
-        if case .running = micState { running = true }
-        return Self.captureProblems(
+        Self.captureProblems(
             expectsFarEnd: expectsFarEnd, micHeard: mic.lastSoundAt != nil,
-            farEnd: farEndProblem(now: now), micRecorded: running)
+            farEnd: farEndProblem(now: now), micRecorded: micRecorded)
+    }
+
+    /// The microphone track holds audio: it is running, or a start that never
+    /// finished its bookkeeping already wrote buffers (review round 3).
+    private var micRecorded: Bool {
+        if case .running = micState { return true }
+        return mic.firstBufferAt != nil
     }
 
     // MARK: - discarding
@@ -735,7 +740,9 @@ final class RecordingSession {
     private var manifestOffsetsWritten = false
 
     private func noticeFarEndProblem(now: Date) {
-        let problem = currentCaptureProblems(now: now).isEmpty ? nil : farEndProblem(now: now)
+        // Only the far-end problem raises this warning; a missing microphone has its own.
+        let problem = currentCaptureProblems(now: now).contains("far_end_not_recorded")
+            ? farEndProblem(now: now) : nil
         guard problem != reportedFarEndProblem else { return }
         reportedFarEndProblem = problem
         // This warning replaces the later, vaguer one below.

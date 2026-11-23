@@ -219,15 +219,23 @@ def step5() -> None:
                 and report.get("drive_status") == "uploaded")
         return report if done else None
 
-    report = wait_for(delivered, max(0, 300 - (time.time() - stopped)))
+    # Five minutes from the real stop (meta.json's "ended"), not from this resume.
+    stopped = epoch(meta.get("ended")) or stopped
+    report = None
+    if time.time() < stopped + 300:
+        report = wait_for(delivered, stopped + 300 - time.time())
+        report = report if report and time.time() <= stopped + 300 else None
     result(bool(report), "5 report delivered", "mail sent, Telegram sent, Drive uploaded" if report
            else "this recording's report not delivered on all three channels within 5 minutes of the stop")
     # The server rewrites delivery-health.json about once a minute: wait for a
     # snapshot taken after this delivery before trusting it.
     checked = time.time()
-    wait_for(lambda: HEALTH.exists() and HEALTH.stat().st_mtime > checked, 90)
-    new = sorted(set(health_issues()) - set(saved.get("issues", [])))
-    result(not new, "5 no new delivery issue", ", ".join(new) or "none")
+    fresh = wait_for(lambda: HEALTH.exists() and HEALTH.stat().st_mtime > checked and bool(read(HEALTH)), 90)
+    if not fresh:
+        result(False, "5 no new delivery issue", "delivery-health.json was not refreshed within 90 s")
+    else:
+        new = sorted(set(health_issues()) - set(saved.get("issues", [])))
+        result(not new, "5 no new delivery issue", ", ".join(new) or "none")
 
 
 STEPS = {1: step1, 2: step2, 3: step3, 4: step4, 5: step5}
