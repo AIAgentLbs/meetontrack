@@ -91,9 +91,10 @@ function callStatus(state, agenda, permissions, now = Date.now()) {
       : { kind: "recording", text: t("status.recording"), action: null };
   }
   // A call the user stopped recording while its event ran is handled, like a skipped one: no alarm for the rest
-  // of the event. A stop before the event began is another call's; a recording started since is live above (MEETONTRACK-191).
+  // of the event. A stop before the event began is another call's; a recording started since is live above, and
+  // once it is gone the stop no longer speaks for the event (MEETONTRACK-191).
   const stoppedAt = Date.parse(control.last_stop?.stopped_at || "");
-  const stoppedIn = meeting => stoppedAt >= Date.parse(meeting.start) && stoppedAt < Date.parse(meeting.end);
+  const stoppedIn = meeting => !(started > stoppedAt) && stoppedAt >= Date.parse(meeting.start) && stoppedAt < Date.parse(meeting.end);
   const next = (agenda?.meetings || []).find(meeting => Date.parse(meeting.end) > now && !meeting.skip_recording
     && !stoppedIn(meeting) && homeIsCall(meeting));
   const time = next && homeClock(next.start);

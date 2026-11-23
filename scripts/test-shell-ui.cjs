@@ -167,6 +167,8 @@ const errors = [];
         stoppedBeforeCall: [stopped(-5), agenda(call(-3)), perms()],
         stoppedEarlierCall: [stopped(-20), agenda(call(-30, 15), call(-3)), perms()],
         stoppedInactive: [{ ...stopped(-1), transcript: { meeting_id: 'm1', status: 'stopped', live: false } }, agenda(call(-7)), perms()],
+        // Recording started again after the stop, then its recorder went quiet: the old stop hides nothing.
+        restartedAfterStop: [{ ...stopped(-6.5), transcript: { meeting_id: 'm1', status: 'recording', live: false, started_at: at(-6.4), updated_at: at(-5.5) } }, agenda(call(-7)), perms()],
         ended: [{}, agenda(call(-40)), perms('denied', 'denied', 'stopped')],
         micMissing: [{}, agenda(call(40)), perms('denied', 'denied')],
         // On macOS a denied microphone still records the call audio (only the owner's voice is lost); Windows does not start.
@@ -232,6 +234,7 @@ const errors = [];
       stoppedBeforeCall: ['not_recording', 'Запись не идет: звонок не замечен', 'start!'],
       stoppedEarlierCall: ['not_recording', 'Запись не идет: звонок не замечен', 'start!'],
       stoppedInactive: ['waiting', 'Запись включится сама, когда начнется звонок', 'start'],
+      restartedAfterStop: ['not_recording', 'Запись не идет: звонок не замечен', 'start!'],
       ended: ['waiting', 'Ждет звонка', null],
       micMissing: ['mic_missing', `Нет доступа к микрофону: запись в ${time} не включится`, 'open_mic!'],
       micMissingMac: ['mic_missing', `Нет доступа к микрофону: ваш голос в звонке в ${time} не запишется`, 'open_mic!'],
