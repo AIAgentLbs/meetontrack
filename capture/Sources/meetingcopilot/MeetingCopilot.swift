@@ -464,6 +464,24 @@ final class AppController {
     )
     /// The assistant server's release offer, in the menu and one banner per version.
     private lazy var releaseNotice = ReleaseNotice { [weak self] in self?.menuBar.updateRelease($0) }
+    /// What the menu bar flags: delivery from the server, capture from this
+    /// recording (MEETONTRACK-189 P2-21).
+    private lazy var deliveryAttention = DeliveryAttention { [weak self] line in
+        self?.deliveryLine = line
+        self?.refreshAttention()
+    }
+    private var deliveryLine: String?
+    private var captureLines: [String: String] = [:]
+
+    private func refreshAttention() {
+        let capture = ["far-end", "microphone"].compactMap { captureLines[$0] }
+        menuBar.updateAttention(capture + (deliveryLine.map { [$0] } ?? []))
+    }
+
+    private func setCaptureAttention(_ key: String, _ line: String?) {
+        captureLines[key] = line
+        refreshAttention()
+    }
     private let transcription = TranscriptionCoordinator()
     private let liveTranscription = LiveTranscriptionCoordinator()
     private let liveTranscriptExporter = LiveTranscriptExporter()
@@ -556,6 +574,7 @@ final class AppController {
         // before any window can ask for it and stopped when the app quits.
         LocalServer.shared.start()
         releaseNotice.start()
+        deliveryAttention.start()
         if Config.showWindowAtLaunch(), !SetupState.isPending {
             window.show()
             AssistantLink.open()
@@ -923,6 +942,11 @@ final class AppController {
                 }
             }
             if problem != nil { Notifications.farEndNotRecorded() }
+            Task { @MainActor [weak self] in
+                guard let self, self.session === newSession else { return }
+                self.setCaptureAttention("far-end", problem == nil ? nil : localised(
+                    "The other side is not being recorded", "Собеседник не записывается"))
+            }
         }
 
         // The microphone starts off the main thread behind a watchdog: a
@@ -938,6 +962,8 @@ final class AppController {
             await liveBegan.value
             await liveTranscription.noteCaptureWarning(reason: "microphone-not-started")
             guard let self, self.session === newSession else { return }
+            self.setCaptureAttention("microphone", localised(
+                "Your microphone is not being recorded", "Ваш микрофон не записывается"))
             if result == .denied {
                 // Automatic starts already said so (AutoRecordController.begin).
                 if trigger == .manual { Notifications.microphoneMissing() }
@@ -961,6 +987,8 @@ final class AppController {
         ))
         self.session = nil
         liveSessionID = nil
+        captureLines = [:]
+        refreshAttention()
         present(.idle, elapsed: nil)
         // If Sparkle was told to wait for this recording, it has waited.
         updates.recordingDidFinish()
