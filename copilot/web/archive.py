@@ -15,7 +15,7 @@ import sys
 import tempfile
 import smtplib
 from email.message import EmailMessage
-from email.utils import make_msgid
+from email.utils import getaddresses, make_msgid
 import threading
 import time
 from collections import Counter
@@ -161,7 +161,7 @@ FINAL_WAIT_ATTENTION_SECONDS = 3600
 TWENTY_OUTCOME = ("twenty_status", "twenty_note_id", "twenty_target", "twenty_candidates", "twenty_choice",
                   "twenty_withheld", "twenty_error", "twenty_next_step")
 DELIVERY_OUTCOME = ("drive_status", "drive_folder", "drive_folder_url", "drive_html_url", "drive_pdf_url",
-                    "drive_links_status", "mail_status", "gmail_message_id", "mail_error",
+                    "drive_links_status", "mail_status", "gmail_message_id", "mail_error", "mail_unread",
                     "telegram_status", "telegram_message_id", "delivery_started_at", *TWENTY_OUTCOME)
 
 
@@ -1944,6 +1944,31 @@ class MeetingArchive:
                 ))
             return None
 
+    def _mark_self_send_unread(self, settings: dict, recipient: str, message_id: str, meeting_id: str) -> dict | None:
+        """Gmail files mail to its own account as read in SENT; put it back unread in INBOX (MEETONTRACK-188).
+
+        Best effort: the mail is already sent, so a failure is recorded and logged, never resent."""
+        custom = self.delivery_settings.profile() == "custom"
+        sender = (self.delivery_settings.own_google_status().get("account", "") if custom
+                  else settings.get("google_account", ""))
+        sender = str(sender or "").strip().lower()
+        if not sender or sender not in {address.lower() for _, address in getaddresses([recipient])}:
+            return None
+        error: dict = {}
+        done = self._gws_call(
+            "gmail", "users", "messages", "modify",
+            "--params", json.dumps({"userId": "me", "id": message_id}),
+            "--json", json.dumps({"addLabelIds": ["UNREAD", "INBOX"]}),
+            timeout=60, diagnostics=error,
+        )
+        if done:
+            return {"status": "added"}
+        error = {"provider": error.get("provider", "google_oauth" if custom else "gws"),
+                 "reason": error.get("reason", "missing_acknowledgement")}
+        print(f"memo {meeting_id} sent, but not marked unread in the inbox: {error['provider']} {error['reason']}",
+              flush=True)
+        return {"status": "failed", **error}
+
     @staticmethod
     def _delivery_failure(provider: str, result: subprocess.CompletedProcess) -> dict:
         """Persist only allowlisted diagnostics, never raw CLI output or mail content."""
@@ -2170,6 +2195,7 @@ class MeetingArchive:
         } if isinstance(previous.get("mail_error"), dict) else {}
         if mail_status == "sent":
             mail_error.clear()
+        mail_unread = previous.get("mail_unread") if isinstance(previous.get("mail_unread"), dict) else None
         links_text = ""
         if drive_links:
             links_text = (
@@ -2181,6 +2207,7 @@ class MeetingArchive:
         smtp = settings.get("email_provider") == "smtp"
         if mail_status not in {"sent", "unknown"} and recipient:
             mail_error.clear()
+            mail_unread = None
             receipt({"mail_status": None, "gmail_message_id": None}, before=True)
             subject = f"{self.product_name}: {detail['title']} — {stamp}"
             body = (
@@ -2239,6 +2266,8 @@ class MeetingArchive:
                      "gmail_message_id": gmail_message_id if mail_status == "sent" else None})
             if mail_status == "sent":
                 mail_to = recipient
+                if not smtp:  # after the receipt: a crash while relabelling must not look like an unknown send
+                    mail_unread = self._mark_self_send_unread(settings, recipient, gmail_message_id, detail["meeting_id"])
 
         telegram_status = str(previous.get("telegram_status") or "not_configured")
         telegram_message_id = previous.get("telegram_message_id")
@@ -2309,6 +2338,7 @@ class MeetingArchive:
             "mail_status": mail_status,
             "gmail_message_id": gmail_message_id,
             "mail_error": mail_error,
+            "mail_unread": mail_unread,  # None also clears an earlier self-send's result on a resend
             "telegram_status": telegram_status,
             "telegram_message_id": telegram_message_id,
             # Where each confirmed delivery went: After names it even after the settings change.

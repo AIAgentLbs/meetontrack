@@ -52,6 +52,10 @@ def delivery(oauth, args, timeout):
         message.add_attachment(attachment.read_bytes(), maintype="application", subtype="pdf", filename="meeting-report.pdf")
         return oauth.request("mail", "POST", "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
                              body={"raw": base64.urlsafe_b64encode(message.as_bytes()).decode()}, timeout=timeout)
+    if command == ["gmail", "users", "messages", "modify"]:
+        # MEETONTRACK-188: a self-sent memo is relabelled unread in the inbox.
+        return oauth.request("mail", "POST", "https://gmail.googleapis.com/gmail/v1/users/"
+                             f"{part(params['userId'])}/messages/{part(params['id'])}/modify", body=body, timeout=timeout)
     if command not in [["drive", "files", method] for method in ("list", "create", "update")]:
         raise ValueError("google_operation_not_allowed")
     method = command[-1]

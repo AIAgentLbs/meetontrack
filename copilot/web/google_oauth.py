@@ -19,13 +19,17 @@ TOKEN_URI = "https://oauth2.googleapis.com/token"
 USERINFO = "https://openidconnect.googleapis.com/v1/userinfo"
 PREFIX = "https://www.googleapis.com/auth/"
 PERMISSIONS = {
-    "mail": [PREFIX + "gmail.send"],
+    # gmail.modify only marks a memo sent to the signed-in account itself unread in its inbox
+    # (MEETONTRACK-188); gmail.send cannot change labels.
+    "mail": [PREFIX + "gmail.send", PREFIX + "gmail.modify"],
     # User chooses an existing destination folder, not just files created by us.
     "drive": [PREFIX + "drive"],
     "context": [PREFIX + "gmail.readonly", PREFIX + "drive.readonly",
                 PREFIX + "calendar.readonly", PREFIX + "documents.readonly",
                 PREFIX + "spreadsheets.readonly"],
 }
+# Asked for, not required: declining it still sends mail, only the self-send stays read.
+OPTIONAL = {PREFIX + "gmail.modify"}
 
 
 def dependencies():
@@ -205,7 +209,7 @@ class GoogleOAuth:
             flow.fetch_token(code=received["code"], timeout=20)
             credentials = flow.credentials
             granted = set(credentials.granted_scopes or credentials.scopes or [])
-            if any(s not in granted for p in permissions for s in PERMISSIONS[p]):
+            if any(s not in granted and s not in OPTIONAL for p in permissions for s in PERMISSIONS[p]):
                 raise ValueError("permission_missing")
             if not credentials.refresh_token:
                 raise ValueError("google_refresh_token_missing")

@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import urlopen
 from urllib.error import HTTPError
 
-from google_oauth import GoogleOAuth, validate_client, AUTH_URI, TOKEN_URI, PREFIX
+from google_oauth import GoogleOAuth, validate_client, AUTH_URI, TOKEN_URI, PERMISSIONS
 from google_api import delivery, read
 from delivery_settings import DeliverySettings, PasswordStore
 
@@ -73,7 +73,7 @@ class OAuthTests(unittest.TestCase):
     def flow(self, identity="a@example.com", granted=None):
         self.oauth.import_client(CLIENT)
         self.flow_obj = Mock()
-        self.flow_obj.credentials.granted_scopes = granted if granted is not None else [PREFIX + "gmail.send"]
+        self.flow_obj.credentials.granted_scopes = granted if granted is not None else PERMISSIONS["mail"]
         self.flow_obj.credentials.refresh_token = "synthetic-refresh"
         self.flow_obj.credentials.token = "synthetic-access"
         self.flow_obj.credentials.to_json.return_value = json.dumps({"refresh_token": "synthetic-refresh"})
@@ -118,6 +118,13 @@ class OAuthTests(unittest.TestCase):
         self.callback(state, code="code")
         self.oauth._worker.join(3)
         self.assertEqual(self.oauth.status()["state"], "permission_missing")
+
+    def test_send_only_consent_still_connects_mail(self):
+        """Declining gmail.modify only keeps a self-sent memo read (MEETONTRACK-188)."""
+        state = self.flow(granted=[s for s in PERMISSIONS["mail"] if s.endswith("gmail.send")])
+        self.callback(state, code="code")
+        self.oauth._worker.join(3)
+        self.assertEqual(self.oauth.status()["state"], "connected")
 
     def test_consent_denied_does_not_exchange(self):
         state = self.flow()
@@ -283,6 +290,12 @@ class OAuthTests(unittest.TestCase):
             delivery(oauth, ["drive", "files", "create", "--json", '{"name":"report.pdf"}', "--upload", str(path)], 20)
             self.assertEqual(oauth.request.call_args.args[0], "drive")
             self.assertIn(b"synthetic pdf", oauth.request.call_args.kwargs["data"])
+            # MEETONTRACK-188: the self-sent memo is relabelled with the same sign-in as the send.
+            delivery(oauth, ["gmail", "users", "messages", "modify", "--params", '{"userId":"me","id":"a/b"}',
+                             "--json", '{"addLabelIds":["UNREAD","INBOX"]}'], 20)
+            self.assertEqual(oauth.request.call_args.args, (
+                "mail", "POST", "https://gmail.googleapis.com/gmail/v1/users/me/messages/a%2Fb/modify"))
+            self.assertEqual(oauth.request.call_args.kwargs["body"], {"addLabelIds": ["UNREAD", "INBOX"]})
 
 
 if __name__ == "__main__":
