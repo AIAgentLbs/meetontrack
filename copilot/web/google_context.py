@@ -49,6 +49,8 @@ class GoogleContext:
         settings = self.delivery_settings
         return settings.oauth if settings is not None and settings.profile() == "custom" else None
 
+    native_oauth = _native  # the app's own sign-in, shared with the calendar reader
+
     @property
     def executable(self):
         if self._executable is not None:

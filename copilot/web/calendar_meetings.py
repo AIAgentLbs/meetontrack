@@ -18,23 +18,35 @@ MEETING_URL_RE = re.compile(
 
 
 class CalendarUnavailable(Exception):
-    """The calendar could not be read (gws failed, timed out or answered nonsense): not the same as an empty day."""
+    """The calendar could not be read (sign-in or gws failed, timed out or answered nonsense): not an empty day."""
 
 
 class CalendarMeetings:
     """Cached, read-only calendar lookup; never stores event descriptions."""
 
-    def __init__(self, executable: str | None = None, enabled=None) -> None:
+    def __init__(self, executable: str | None = None, enabled=None, oauth=None) -> None:
+        # oauth: returns the app's own Google sign-in (GoogleOAuth) or None. When it is connected the calendar is
+        # read through it; the gws default profile is only the fallback without one (MEETONTRACK-183).
+        self.oauth = oauth
         self.executable = executable if executable is not None else shutil.which("gws")
         self._look_up = executable is None  # found on PATH: looked up again until it is there
         self.enabled = enabled
         self._cache: dict[str, tuple[float, list[dict] | None]] = {}  # None: the read failed
         self._lock = threading.Lock()
 
+    def _signed_in(self):
+        oauth = self.oauth() if self.oauth else None
+        try:
+            return oauth if oauth is not None and oauth.status().get("state") == "connected" else None
+        except (OSError, ValueError):  # credential store unreadable: treated as no sign-in
+            return None
+
     def available(self) -> bool:
-        return bool(self.executable) and (self.enabled is None or bool(self.enabled()))
+        return bool(self.executable or self._signed_in()) and (self.enabled is None or bool(self.enabled()))
 
     def state(self) -> str:
+        if self._signed_in() is not None:
+            return "not_connected" if self.enabled is not None and not self.enabled() else "connected"
         if not self.executable and self._look_up:
             self.executable = shutil.which("gws")  # installed after start (Home's Check again)
         if not self.executable:
@@ -52,7 +64,8 @@ class CalendarMeetings:
                 raise CalendarUnavailable()
             if cached and cached[1] is not None and time.monotonic() - cached[0] < 120:
                 return list(cached[1])
-        if not self.executable:
+        oauth = self._signed_in()
+        if oauth is None and not self.executable:
             return []
         start = datetime.combine(day, clock_time.min).astimezone()
         end = datetime.combine(day + timedelta(days=1), clock_time.min).astimezone()
@@ -64,11 +77,15 @@ class CalendarMeetings:
         }
         events: list[dict] = []
         try:
-            result = subprocess.run(
-                [self.executable, "calendar", "events", "list", "--params", json.dumps(params)],
-                capture_output=True, text=True, timeout=5, check=False,
-            )
-            payload = json.loads(result.stdout) if result.returncode == 0 else None
+            if oauth is not None:
+                from google_api import read
+                payload = read(oauth, ("calendar", "events", "list"), params)
+            else:
+                result = subprocess.run(
+                    [self.executable, "calendar", "events", "list", "--params", json.dumps(params)],
+                    capture_output=True, text=True, timeout=5, check=False,
+                )
+                payload = json.loads(result.stdout) if result.returncode == 0 else None
             if not isinstance(payload, dict):
                 raise ValueError("no calendar answer")
             raw_items = payload.get("items", [])
