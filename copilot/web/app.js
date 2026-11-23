@@ -1413,10 +1413,9 @@ function finalWaitAction(wait) {
     return [t("final_wait.open_permission"), () => void post("/api/permissions/open", { which: wait.permission })];
   }
   if (wait.reason === "needs_choice") {
-    return [t("final_wait.choose_model"), () => {
+    return [t("final_wait.choose_model"), event => {
       if (!elements.archiveDialog.hidden) closeArchive();
-      document.querySelector("#settings-open").click();
-      document.querySelector("#speech-step")?.scrollIntoView({ block: "start" });
+      openGuideStep("speech-heading", "speech-choice", event.currentTarget);
     }];
   }
   return null;

@@ -147,7 +147,9 @@ class DeliveryHealth:
                     state, reason = "failed", "retry_overdue"
                 # "unknown" is never retried automatically (it may duplicate a
                 # send), so it ends the same way as an expired retry window.
-                if (expired or spent or raw == "unknown") and state not in {"sent", "waiting"} and reason != "report_missing":
+                # Spent retries end only plain failures: a sign-in or a CRM choice keeps its own action.
+                if ((expired or raw == "unknown" or (spent and state == "failed"))
+                        and state not in {"sent", "waiting"} and reason != "report_missing"):
                     if delivered:
                         # Retries ended but the report reached the person another
                         # way: close it. The failed channel stays visible only in

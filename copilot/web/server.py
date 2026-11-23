@@ -3140,11 +3140,16 @@ def delivery_loop() -> None:
                 ARCHIVE.retry_pending_deliveries()
                 # A finished call still without its final transcript: make it
                 # again, as `meetingcopilot process` does (MEETONTRACK-189 step 7).
-                for session in ARCHIVE.final_retries_due():
+                running = {job["session"] for job in STT.jobs() if job["state"] == "running"}
+                for meeting_id, folder in ARCHIVE.final_retries_due():
                     try:
-                        STT.retranscribe(session)
+                        # The exact folder meeting.json names, not a namesake in another root.
+                        if folder.name in running or STT.session_dir(folder.name).resolve() != folder.resolve():
+                            continue
+                        STT.retranscribe(folder.name)
+                        ARCHIVE.note_final_retry(meeting_id)  # Counted only once it really started.
                     except ValueError as exc:
-                        print(f"final transcript retry for {session} not started: {exc}", flush=True)
+                        print(f"final transcript retry for {folder.name} not started: {exc}", flush=True)
         except Exception as exc:
             print(f"meeting delivery retry failed: {exc}", flush=True)
         DELIVERY_WAKE.wait(5)

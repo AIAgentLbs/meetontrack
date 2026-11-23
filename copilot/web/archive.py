@@ -179,7 +179,8 @@ AUTO_ATTEMPTS = 3
 # Minutes to wait after automatic attempt n (1-based) before the next one,
 # and after the last before saying it failed.
 FINAL_RETRY_BACKOFF_MINUTES = (15, 60, 60)
-DELIVERY_RETRY_BACKOFF_MINUTES = (15, 30, 60)
+# The first send schedules a retry in 15 minutes; after retries 1 and 2 these.
+DELIVERY_RETRY_BACKOFF_MINUTES = (30, 60)
 FINAL_RETRIES = "final-retry.json"
 # What a send left in report.json; a refresh that sends nothing keeps all of it.
 # MEETONTRACK-146: what the Twenty CRM channel leaves in report.json.
@@ -187,7 +188,8 @@ TWENTY_OUTCOME = ("twenty_status", "twenty_note_id", "twenty_target", "twenty_ca
                   "twenty_withheld", "twenty_error", "twenty_next_step")
 DELIVERY_OUTCOME = ("drive_status", "drive_folder", "drive_folder_url", "drive_html_url", "drive_pdf_url",
                     "drive_links_status", "mail_status", "gmail_message_id", "mail_error",
-                    "telegram_status", "telegram_message_id", "delivery_started_at", *TWENTY_OUTCOME)
+                    "telegram_status", "telegram_message_id", "delivery_started_at", "delivery_attempts",
+                    *TWENTY_OUTCOME)
 
 
 class ReportPdfError(RuntimeError):
@@ -875,7 +877,8 @@ class MeetingArchive:
             return {"state": "missing", "reason": "capture_permission", "permission": permission} if permission else None
         if waited < FINAL_WAIT_ATTENTION_SECONDS:
             return {"state": "waiting", "reason": "final_transcript"}
-        if not self._final_retries_spent(retries, datetime.now().astimezone()):
+        # The Windows recorder has no `process` command yet: nothing retries there.
+        if os.name != "nt" and not self._final_retries_spent(retries, datetime.now().astimezone()):
             return {"state": "retrying", "reason": "final_transcript"}
         deferred = meta.get("transcription_deferred")
         if isinstance(deferred, dict) and deferred.get("kind") == "needs_choice":
@@ -906,14 +909,14 @@ class MeetingArchive:
         return attempts >= AUTO_ATTEMPTS and (
             not last or now >= last + timedelta(minutes=FINAL_RETRY_BACKOFF_MINUTES[AUTO_ATTEMPTS - 1]))
 
-    def final_retries_due(self) -> list[str]:
-        """Recording folders whose final transcript should be made again now.
+    def final_retries_due(self) -> list[tuple[str, Path]]:
+        """(meeting id, recording folder) whose final transcript should be made again now.
 
-        Each returned folder is counted as one attempt; the caller runs the
-        recorder's `process --again` on it, the same as the command line.
+        The caller runs the recorder's `process --again` on the folder, the same
+        as the command line, and calls `note_final_retry` once it has started.
         Never during a recording: the transcription would compete with it.
         """
-        if self._capture_active():
+        if os.name == "nt" or self._capture_active():
             return []
         now = datetime.now().astimezone()
         due = []
@@ -926,13 +929,23 @@ class MeetingArchive:
             retries = _json(retries_path, {})
             if not self._final_retry_due(retries, now):
                 continue
+            folder = Path(str(snapshot["recording_dir"]))
+            # A transcript the recorder wrote but the archive has not imported
+            # yet must never be cleared by `--again`.
+            if (folder / "transcript.json").exists() or not (folder / "meta.json").is_file():
+                continue
             wait = (self.detail(path.parent.name) or {}).get("final_wait") or {}
             if wait.get("state") != "retrying":
                 continue
-            _atomic_json(retries_path, {"attempts": int(retries.get("attempts") or 0) + 1,
-                                        "last_at": now.isoformat(timespec="seconds")})
-            due.append(Path(str(snapshot["recording_dir"])).name)
+            due.append((path.parent.name, folder))
         return due
+
+    def note_final_retry(self, meeting_id: str) -> None:
+        """One automatic re-transcription started for this meeting."""
+        path = self.archive_root / _safe(meeting_id) / FINAL_RETRIES
+        retries = _json(path, {})
+        _atomic_json(path, {"attempts": int((retries if isinstance(retries, dict) else {}).get("attempts") or 0) + 1,
+                            "last_at": datetime.now().astimezone().isoformat(timespec="seconds")})
 
     def _library_detail(self, detail: dict) -> dict:
         detail["source_title"] = detail["title"]
@@ -1611,10 +1624,14 @@ class MeetingArchive:
                     meta.update(self.deliver(detail, meta, previous=meta))
                     meta.setdefault("delivery_started_at", now.isoformat(timespec="seconds"))
                     meta["delivery_checked_at"] = now.isoformat(timespec="seconds")
-                    # Three automatic attempts with backoff (MEETONTRACK-189 step 7).
+                    # Three automatic attempts with backoff (MEETONTRACK-189 step 7);
+                    # after the last, no next attempt is promised.
                     meta["delivery_attempts"] = attempts + 1
-                    meta["delivery_retry_at"] = (now + timedelta(
-                        minutes=DELIVERY_RETRY_BACKOFF_MINUTES[attempts])).isoformat(timespec="seconds")
+                    if attempts + 1 < AUTO_ATTEMPTS:
+                        meta["delivery_retry_at"] = (now + timedelta(
+                            minutes=DELIVERY_RETRY_BACKOFF_MINUTES[attempts])).isoformat(timespec="seconds")
+                    else:
+                        meta.pop("delivery_retry_at", None)
                     _atomic_json(path, meta)
                     if _went(meta):
                         self.after.delivered(path.parent.name, taken)
@@ -1639,7 +1656,8 @@ class MeetingArchive:
                 attempts = int(meta.get("delivery_attempts") or 0)
                 meta["delivery_attempts"] = attempts + 1  # A throw is an attempt too.
                 meta["delivery_retry_at"] = (now + timedelta(
-                    minutes=DELIVERY_RETRY_BACKOFF_MINUTES[min(attempts, AUTO_ATTEMPTS - 1)])).isoformat(timespec="seconds")
+                    minutes=DELIVERY_RETRY_BACKOFF_MINUTES[min(attempts, len(DELIVERY_RETRY_BACKOFF_MINUTES) - 1)]
+                )).isoformat(timespec="seconds")
                 meta["delivery_error"] = f"{type(exc).__name__}: {exc}"[:300]
                 _atomic_json(path, meta)
         except Exception:  # noqa: BLE001 - recording the error must not raise either

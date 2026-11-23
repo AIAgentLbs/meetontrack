@@ -94,6 +94,10 @@ class StuckMarkerTests(unittest.TestCase):
         path.write_text(json.dumps({**meta, "delivery_attempts": 1}))
         self.assertNotIn("m1", [item["meeting_id"] for item in self.archive.delivery_health()["undelivered"]],
                          "still retrying: not the person's problem yet")
+        # A sign-in keeps its own action after the retries are spent: Send again cannot fix it.
+        path.write_text(json.dumps({**meta, "mail_status": "auth_required"}))
+        health = self.archive.delivery_health()
+        self.assertEqual([issue["reason"] for issue in health["channels"]["gmail"]["issues"]], ["auth_required"])
 
     def config_file(self) -> Path:
         return Path(self.temp.name) / "config" / "delivery.json"

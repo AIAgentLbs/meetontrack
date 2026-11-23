@@ -491,13 +491,16 @@ class FinalOnlyDeliveryTests(unittest.TestCase):
 
         self.assertEqual(self.archive.detail("FIRST-CALL")["final_wait"]["state"], "retrying")
         self.assertFalse(shown(), "nothing to show while the app is still trying")
-        session = self.first.name
-        self.assertEqual(self.archive.final_retries_due(), [session])
+        due = [("FIRST-CALL", self.first)]
+        self.assertEqual(self.archive.final_retries_due(), due)
+        self.assertEqual(self.archive.final_retries_due(), due, "not counted until the caller starts it")
+        self.archive.note_final_retry("FIRST-CALL")
         self.assertEqual(self.archive.final_retries_due(), [], "the next attempt waits for its backoff")
         for attempt in (2, 3):
             stored = json.loads(retries.read_text())
             retries.write_text(json.dumps({**stored, "last_at": iso(datetime.now(timezone.utc) - timedelta(hours=2))}))
-            self.assertEqual(self.archive.final_retries_due(), [session])
+            self.assertEqual(self.archive.final_retries_due(), due)
+            self.archive.note_final_retry("FIRST-CALL")
             self.assertEqual(json.loads(retries.read_text())["attempts"], attempt)
         self.assertFalse(shown(), "the last attempt still has time to finish")
         retries_spent(self.root)
@@ -506,6 +509,12 @@ class FinalOnlyDeliveryTests(unittest.TestCase):
         wait = self.archive.detail("FIRST-CALL")["final_wait"]
         self.assertEqual((wait["state"], wait["reason"]), ("missing", "final_transcript"))
         self.assertNotIn("minutes", wait, "elapsed minutes are never shown")
+
+    def test_a_transcript_not_yet_imported_is_never_made_again(self):
+        """Review: `process --again` would clear a transcript the archive has not imported yet."""
+        self.finalize()
+        self.write_final(self.final)  # On disk in the recording, not yet in meeting.json.
+        self.assertEqual(self.archive.final_retries_due(), [])
 
     def test_a_missing_final_transcript_needs_attention_and_nothing_is_sent(self):
         # The call ended about two hours ago and the recorder never wrote its final transcript.
