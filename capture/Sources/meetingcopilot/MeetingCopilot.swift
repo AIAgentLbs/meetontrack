@@ -930,22 +930,31 @@ final class AppController {
         // The far end never heard while you talk: a live capture warning (Call
         // and Home show it), and one banner that opens the System Audio pane
         // (MEETONTRACK-189 P0-2). It closes if the far end is heard after all.
-        newSession.onFarEndProblem = { [liveTranscription] problem in
+        let sessionStarted = newSession.startedAt
+        newSession.onFarEndProblem = { [weak self, weak newSession, liveTranscription] problem in
             Task {
                 await liveBegan.value
                 if let problem {
                     await liveTranscription.noteCaptureWarning(
                         reason: "system-audio-lost", cause: problem.rawValue,
-                        since: newSession.startedAt)
+                        since: sessionStarted)
                 } else {
                     await liveTranscription.endCaptureWarning(reason: "system-audio-lost")
                 }
             }
             if problem != nil { Notifications.farEndNotRecorded() }
-            Task { @MainActor [weak self] in
-                guard let self, self.session === newSession else { return }
+            Task { @MainActor in
+                guard let self, let newSession, self.session === newSession else { return }
                 self.setCaptureAttention("far-end", problem == nil ? nil : localised(
                     "The other side is not being recorded", "Собеседник не записывается"))
+            }
+        }
+
+        newSession.onMicrophoneAdopted = { [weak self, weak newSession, liveTranscription] in
+            Task { @MainActor in
+                guard let self, let newSession, self.session === newSession else { return }
+                await liveTranscription.endCaptureWarning(reason: "microphone-not-started")
+                self.setCaptureAttention("microphone", nil)
             }
         }
 
@@ -960,8 +969,9 @@ final class AppController {
             // After the live state is reset for this session, or the reset
             // would wipe the warning.
             await liveBegan.value
-            await liveTranscription.noteCaptureWarning(reason: "microphone-not-started")
+            // Checked before the warning: a later recording must not inherit it.
             guard let self, self.session === newSession else { return }
+            await liveTranscription.noteCaptureWarning(reason: "microphone-not-started")
             self.setCaptureAttention("microphone", localised(
                 "Your microphone is not being recorded", "Ваш микрофон не записывается"))
             if result == .denied {

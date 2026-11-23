@@ -36,14 +36,17 @@ class StuckMarkerTests(unittest.TestCase):
         live = self.marker("live", {"pid": os.getpid(), "started": "2026-01-05T09:00:00Z"})
         dead = self.marker("dead", {"pid": 2_147_483_000, "started": "2026-01-05T09:00:00Z"})
         unreadable = self.marker("unreadable", "{not json")
-        stale = self.marker("stale", {"pid": os.getpid()})
+        stale = self.marker("stale", {"pid": 2**80})  # out of range: cannot be checked
+        old_live = self.marker("old-live", {"pid": os.getpid()})
         old = time.time() - 13 * 3600
         os.utime(stale, (old, old))
+        os.utime(old_live, (old, old))
 
         self.assertEqual(marker_state(live), "live")
         self.assertEqual(marker_state(dead), "dead")
         self.assertEqual(marker_state(unreadable), "live", "a fresh unreadable marker still holds reports back")
         self.assertEqual(marker_state(stale), "stale")
+        self.assertEqual(marker_state(old_live), "live", "a long manual recording still holds reports back")
         self.assertEqual({item["reason"] for item in stuck_markers([live, dead, stale, unreadable])},
                          {"dead", "stale"})
 

@@ -694,7 +694,7 @@ actor TranscriptionCoordinator {
 
 /// The slice of meta.json the coordinator needs: which files exist, who they
 /// represent, and how far each track started after the earliest one.
-private struct SessionMeta {
+struct SessionMeta {
     struct Track {
         let file: String
         let speaker: String
@@ -735,17 +735,20 @@ private struct SessionMeta {
 
         // Sessions recorded before offsets were captured default to 0 —
         // tracks start within tens of milliseconds of each other anyway.
+        // A track listed but never written (a microphone that did not start)
+        // is left out rather than failing the whole transcription.
+        let written = files.filter { FileManager.default.fileExists(atPath: dir.appendingPathComponent($0.value).path) }
         let offsets = json["start_offset_ms"] as? [String: Int] ?? [:]
         let channels = json["audio_channels"] as? [String: Int] ?? [:]
         var tracks: [Track] = []
-        if let mic = files["mic"] {
+        if let mic = written["mic"] {
             tracks.append(Track(
                 file: mic,
                 speaker: "me",
                 offsetMs: offsets["mic"] ?? 0,
                 channel: channels["mic"]))
         }
-        if let system = files["system"] {
+        if let system = written["system"] {
             tracks.append(Track(
                 file: system,
                 speaker: "them",

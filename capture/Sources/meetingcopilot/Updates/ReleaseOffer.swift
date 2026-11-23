@@ -89,6 +89,17 @@ final class DeliveryAttention {
     nonisolated static func line(delivery: [String: Any]) -> String? {
         let unsent = (delivery["undelivered"] as? [Any])?.count ?? 0
         let stuck = (delivery["stuck_recordings"] as? [Any])?.count ?? 0
+        // A sign-in or a choice the person must make blocks sending without
+        // being listed as undelivered yet.
+        let blocked = Set(((delivery["channels"] as? [String: Any]) ?? [:]).values.flatMap {
+            (($0 as? [String: Any])?["issues"] as? [[String: Any]] ?? []).compactMap {
+                ["auth_required", "needs_choice"].contains($0["reason"] as? String ?? "")
+                    ? $0["meeting_id"] as? String : nil
+            }
+        }).count
+        if blocked > 0 {
+            return localised("Reports wait for you: \(blocked)", "Отчеты ждут вашего действия: \(blocked)")
+        }
         if unsent > 0 {
             return localised("Reports not sent: \(unsent)", "Не отправлено отчетов: \(unsent)")
         }

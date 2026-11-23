@@ -434,7 +434,9 @@ actor LiveTranscriptionCoordinator {
         let lost = captureWarnings.lastIndex { $0.reason == "system-audio-lost" }
         if peak > 0.00001 {
             lastSystemSignal = now
-            if let index = lost, captureWarnings[index].ended_at == nil {
+            // A warning the recorder raised (it has a cause) is closed only by
+            // the recorder: a faint signal here is not the far end heard.
+            if let index = lost, captureWarnings[index].ended_at == nil, captureWarnings[index].cause == nil {
                 captureWarnings[index].ended_at = ISO8601DateFormatter().string(from: now)
                 publish()
             }

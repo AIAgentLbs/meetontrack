@@ -89,13 +89,14 @@ STALE_MARKER_SECONDS = 12 * 3600
 def marker_state(path: Path, now: float | None = None) -> str:
     """What a .recording.json says: "live", or why it is left behind.
 
-    "dead": its owner process is gone; "stale": older than any recording.
-    An unreadable marker, or one beside a meta.json, counts as live while it
-    is fresh: the safe direction (the recorder's next launch cleans those up).
+    "dead": its owner process is gone; "stale": no owner can be checked and
+    it is older than any recording. A live owner keeps it live at any age (a
+    manual recording has no duration ceiling). An unreadable marker counts as
+    live while it is fresh: the safe direction.
     """
     pid = read_json(path).get("pid")
-    if isinstance(pid, int) and not isinstance(pid, bool) and not owner_alive(pid):
-        return "dead"
+    if isinstance(pid, int) and not isinstance(pid, bool) and 1 < pid < 2**31:
+        return "live" if owner_alive(pid) else "dead"
     try:
         age = (now if now is not None else time.time()) - path.stat().st_mtime
     except OSError:

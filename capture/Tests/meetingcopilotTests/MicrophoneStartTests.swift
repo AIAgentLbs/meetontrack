@@ -90,4 +90,20 @@ struct MicrophoneStartTests {
         #expect(!FileManager.default.fileExists(atPath: empty.path))
         #expect(FileManager.default.fileExists(atPath: kept.path))
     }
+
+    /// Review round 1: a denied microphone left mic.caf listed but unwritten,
+    /// and transcription stopped on it instead of reading the far end.
+    @Test("A track listed but never written is left out of transcription")
+    func listedButUnwrittenTrack() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("unwritten-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data(count: 8192).write(to: dir.appendingPathComponent("system.caf"))
+        try JSONSerialization.data(withJSONObject: [
+            "files": ["mic": "mic.caf", "system": "system.caf"],
+        ]).write(to: dir.appendingPathComponent("meta.json"))
+
+        #expect(try SessionMeta.read(from: dir).tracks.map(\.file) == ["system.caf"])
+    }
 }

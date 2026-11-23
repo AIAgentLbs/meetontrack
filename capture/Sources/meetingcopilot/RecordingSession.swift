@@ -140,6 +140,11 @@ final class RecordingSession {
     private enum MicState { case starting, running, notRunning(MicStart) }
     private var micState = MicState.starting
     private var stopped = false
+    /// `stopped`, readable from the thread that starts the microphone: a grant
+    /// given after Stop must not open a track nobody will finalize.
+    private nonisolated let halted = HaltFlag()
+    /// A microphone start that outlived the watchdog was adopted after all.
+    var onMicrophoneAdopted: (() -> Void)?
     static let micStartTimeout: TimeInterval = 10
 
     /// Start the far-end track. The microphone starts separately, in
@@ -188,7 +193,10 @@ final class RecordingSession {
             status: AVCaptureDevice.authorizationStatus(for: .audio),
             requestAccess: { await AVCaptureDevice.requestAccess(for: .audio) },
             timeout: Self.micStartTimeout,
-            start: { try mic.start(writingTo: url, callApps: families) },
+            start: { [halted] in
+                guard !halted.isSet else { throw CancellationError() }
+                try mic.start(writingTo: url, callApps: families)
+            },
             late: { [weak self] error in
                 Task { @MainActor in self?.microphoneStartedLate(error: error) }
             })
@@ -210,6 +218,7 @@ final class RecordingSession {
         if stopped { mic.stop(); return }
         micState = .running
         FileHandle.standardError.write(Data("mic: started late, adopted\n".utf8))
+        onMicrophoneAdopted?()
     }
 
     /// The microphone start, as pure control flow: preflight the grant, run
@@ -279,6 +288,10 @@ final class RecordingSession {
         watchdog?.invalidate()
         watchdog = nil
         stopped = true
+        halted.set()
+        // Callbacks capture this session; dropping them ends the cycle.
+        onFarEndProblem = nil
+        onMicrophoneAdopted = nil
         if pausedSince != nil { resume() }
         if case .running = micState { mic.stop() }
         system.stop()
@@ -323,6 +336,12 @@ final class RecordingSession {
         case .running: meta["mic_capture"] = mic.capture.meta
         case .starting: meta["mic_start"] = "still-starting"
         case .notRunning(let outcome): meta["mic_start"] = Self.describe(outcome)
+        }
+        if case .running = micState {} else {
+            // No microphone track to transcribe: list only the far end, or the
+            // transcriber stops on a file that was never written.
+            meta["files"] = ["system": "system.caf"]
+            meta["start_offset_ms"] = ["system": 0]
         }
         if !system.recoveryEvents.isEmpty { meta["system_recoveries"] = system.recoveryEvents }
         // Every route change the mic track survived: headphones connecting,
@@ -775,4 +794,12 @@ final class RecordingSession {
         let farEndSilentFor = now.timeIntervalSince(systemLastSoundAt ?? recordingStartedAt)
         return youSpokeRecently && farEndSilentFor > 300
     }
+}
+
+/// A one-way flag shared with a background thread.
+final class HaltFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    func set() { lock.lock(); value = true; lock.unlock() }
 }

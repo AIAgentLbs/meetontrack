@@ -16,6 +16,10 @@ struct MenuBarAttentionTests {
         ])
         #expect(two?.contains("2") == true)
         #expect(DeliveryAttention.line(delivery: ["stuck_recordings": [["reason": "dead"]]]) != nil)
+        let signIn = DeliveryAttention.line(delivery: [
+            "channels": ["gmail": ["issues": [["meeting_id": "a", "reason": "auth_required"]]]],
+        ])
+        #expect(signIn?.contains("1") == true)
     }
 
     @Test("A problem turns the idle icon into an alert and puts its line on top of the menu")
