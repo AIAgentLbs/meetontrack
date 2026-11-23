@@ -910,7 +910,10 @@ final class MicRecorder: @unchecked Sendable {
     /// down and restart raw, discarding the silent prefix so the track's
     /// timestamps start at real audio.
     private func fallBackToRaw() {
-        guard isRecording else { return }
+        // A session stopped while this was queued has finalized mic.caf:
+        // never delete or reopen it (a sealed recorder may still read as
+        // recording while its late start winds down).
+        guard isRecording, !state.withLock({ $0.sealed }) else { return }
         FileHandle.standardError.write(Data(
             "warning: voice processing delivered silence — restarting mic raw\n".utf8
         ))

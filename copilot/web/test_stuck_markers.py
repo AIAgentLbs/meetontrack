@@ -50,6 +50,7 @@ class StuckMarkerTests(unittest.TestCase):
         self.assertEqual({item["reason"] for item in stuck_markers([live, dead, stale, unreadable])},
                          {"dead", "stale"})
 
+    @unittest.skipIf(os.name == "nt", "the Windows recorder writes no start time")
     def test_recycled_pid_is_dead(self):
         started = process_started(os.getpid())
         self.assertIsNotNone(started)

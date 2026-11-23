@@ -6,6 +6,7 @@ live owner and meeting clock, and nothing while a Stop's pause is pending (`hold
 from __future__ import annotations
 
 import argparse
+import calendar
 try:
     import fcntl
 except ImportError:
@@ -67,9 +68,10 @@ def process_started(pid: int) -> float | None:
     if os.name == "nt":
         return None
     try:
+        # In UTC: local time repeats an hour when daylight saving ends.
         out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True,
-                             timeout=5, env={**os.environ, "LC_ALL": "C"}).stdout.strip()
-        return time.mktime(time.strptime(out, "%a %b %d %H:%M:%S %Y"))
+                             timeout=5, env={**os.environ, "LC_ALL": "C", "TZ": "UTC0"}).stdout.strip()
+        return float(calendar.timegm(time.strptime(out, "%a %b %d %H:%M:%S %Y")))
     except (OSError, ValueError, OverflowError, subprocess.SubprocessError):
         return None
 
