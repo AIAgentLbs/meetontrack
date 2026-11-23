@@ -24,6 +24,11 @@ final class MenuBarController {
     /// mid-meeting shows the meeting rather than an idle feather.
     private var state: State = .idle
     private var elapsed: String?
+    /// Problems that need the person: an unsent report, a call side not
+    /// recorded. Shown here because a banner needs a permission this does not
+    /// (MEETONTRACK-189 P2-21).
+    private var attention: [String] = []
+    private let attentionItem: NSMenuItem
     private let stateLabel: NSMenuItem
     private let transcriptionLabel: NSMenuItem
     private let toggleItem: NSMenuItem
@@ -66,6 +71,11 @@ final class MenuBarController {
         releaseSeparator = .separator()
         releaseSeparator.isHidden = true
         menu.addItem(releaseSeparator)
+
+        // Clicking it opens the assistant, where each problem has its button.
+        attentionItem = NSMenuItem(title: "", action: #selector(openAssistantClicked), keyEquivalent: "")
+        attentionItem.isHidden = true
+        menu.addItem(attentionItem)
 
         let assistant = NSMenuItem(title: localised("Open MeetOnTrack assistant", "Открыть помощник MeetOnTrack"), action: #selector(openAssistantClicked), keyEquivalent: "o")
         menu.addItem(assistant)
@@ -190,7 +200,7 @@ final class MenuBarController {
 
         for item in [
             toggleItem, pauseItem, autoRecordItem, showWindow, openFolder,
-            recordings, settings, setupItem, updatesItem, about, quit, assistant, releaseItem,
+            recordings, settings, setupItem, updatesItem, about, quit, assistant, releaseItem, attentionItem,
         ] {
             item.target = self
         }
@@ -290,8 +300,8 @@ final class MenuBarController {
             toggleItem.title = localised("Start recording", "Начать запись")
             pauseItem.title = localised("Pause", "Пауза")
             pauseItem.isEnabled = false
-            statusItem?.button?.image = Self.icon(color: nil)
-            statusItem?.button?.title = ""
+            statusItem?.button?.image = Self.icon(color: attention.isEmpty ? nil : .systemRed)
+            statusItem?.button?.title = attention.isEmpty ? "" : " !"
         case .recording:
             stateLabel.title = localised("● recording · ", "● запись · ") + (elapsed ?? "0:00")
             toggleItem.title = localised("Stop recording", "Остановить запись")
@@ -300,7 +310,7 @@ final class MenuBarController {
             statusItem?.button?.image = Self.icon(color: .systemRed)
             // The elapsed time next to the icon is the difference between
             // "something is recording" and "I know it's recording" at a glance.
-            statusItem?.button?.title = " \(elapsed ?? "0:00")"
+            statusItem?.button?.title = " \(elapsed ?? "0:00")" + (attention.isEmpty ? "" : " !")
         case .paused:
             stateLabel.title = localised("❙❙ paused · ", "❙❙ пауза · ") + (elapsed ?? "0:00")
             toggleItem.title = localised("Stop recording", "Остановить запись")
@@ -310,6 +320,15 @@ final class MenuBarController {
             statusItem?.button?.title =
                 " " + (elapsed ?? "0:00") + localised(" paused", " пауза")
         }
+    }
+
+    /// Problems that need the person, one line each; empty clears them. The
+    /// idle icon turns red with a "!" so the menu bar says so without a click.
+    func updateAttention(_ lines: [String]) {
+        attention = lines
+        attentionItem.title = "⚠︎ " + lines.joined(separator: " · ")
+        attentionItem.isHidden = lines.isEmpty
+        update(state: state, elapsed: elapsed)
     }
 
     /// Show transcription progress/failure as a second status line in the

@@ -65,14 +65,56 @@ enum SetupState {
         return ISO8601DateFormatter().date(from: stamp)
     }
 
+    /// A tone that no longer makes the round trip: the window asks again.
+    static func forgetSystemAudioHeard(at stateURL: URL = path) {
+        write(["system_audio_heard_at": NSNull()], at: stateURL)
+    }
+
+    // MARK: - after an install (MEETONTRACK-189 P1-5)
+
+    /// What identifies an install: the version, the build, and when the
+    /// executable was written, so reinstalling the same version counts too.
+    /// nil for a bare build, which nobody installed.
+    static var currentBuild: String? {
+        guard Runtime.isBundled, let info = Bundle.main.infoDictionary else { return nil }
+        let version = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        let written = Bundle.main.executableURL
+            .flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path)[.modificationDate] as? Date }
+            .map { ISO8601DateFormatter().string(from: $0) } ?? "?"
+        return "\(version) (\(build)) \(written)"
+    }
+
+    /// The install whose grants were last checked at launch.
+    static func checkedBuild(at stateURL: URL = path) -> String? {
+        guard
+            let data = try? Data(contentsOf: stateURL),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return json["checked_build"] as? String
+    }
+
+    static func rememberCheckedBuild(_ build: String, at stateURL: URL = path) {
+        write(["checked_build": build], at: stateURL)
+    }
+
+    /// The setup rows an install broke: a reinstall can reset the grants while
+    /// setup still counts as done, and the first call then records zeros.
+    @MainActor
+    static func afterInstallFailures(
+        microphone: SetupPermissions.State, systemAudio: SetupPermissions.SystemAudioResult
+    ) -> [String] {
+        (microphone == .granted ? [] : ["microphone"]) + (systemAudio == .heard ? [] : ["system_audio"])
+    }
+
     /// Merge into whatever is already on disk: the completion version and the
     /// last heard tone are written at different moments and neither should
-    /// erase the other.
+    /// erase the other. NSNull removes a key.
     private static func write(_ values: [String: Any], at stateURL: URL) {
         var json = (try? Data(contentsOf: stateURL))
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             .flatMap { $0 } ?? [:]
-        for (key, value) in values { json[key] = value }
+        for (key, value) in values { json[key] = value is NSNull ? nil : value }
 
         guard let data = try? JSONSerialization.data(
             withJSONObject: json, options: [.prettyPrinted, .sortedKeys]

@@ -287,14 +287,24 @@ actor TranscriptionCoordinator {
             log(dir, permanent
                 ? "giving up: \(error) — retrying cannot change this"
                 : "giving up after \(attempts) attempts")
-            notifyUser(
-                title: localised(
-                    "meetingcopilot — transcription gave up", "meetingcopilot — расшифровка не вышла"),
-                body: dir.lastPathComponent + localised(
-                    " — audio kept, see transcribe.log",
-                    " — звук сохранён, подробности в transcribe.log"),
-                opening: dir
-            )
+            if error is NoAudioCaptured {
+                notifyUser(
+                    title: localised(
+                        "MeetOnTrack: no audio was captured", "MeetOnTrack: звук не записался"),
+                    body: dir.lastPathComponent + localised(
+                        ": check the Microphone and System Audio Recording permissions.",
+                        ": проверьте разрешения на микрофон и запись системного звука."),
+                    opening: dir)
+            } else {
+                notifyUser(
+                    title: localised(
+                        "meetingcopilot — transcription gave up", "meetingcopilot — расшифровка не вышла"),
+                    body: dir.lastPathComponent + localised(
+                        " — audio kept, see transcribe.log",
+                        " — звук сохранён, подробности в transcribe.log"),
+                    opening: dir
+                )
+            }
             TrackCompressor.compress(sessionDir: dir)
         } else {
             SessionState.update(dir, with: fields)
@@ -317,6 +327,26 @@ actor TranscriptionCoordinator {
         var description: String { "No speech was recognized; audio kept for a manual retry." }
     }
 
+    /// Every track below the audible floor: a capture failure (usually a grant
+    /// a reinstall reset), not a meeting without speech. Recorded as
+    /// `transcription_failed: no_audio_captured…`, which Home shows as such
+    /// rather than "no speech" (MEETONTRACK-189 P1-8).
+    struct NoAudioCaptured: TranscriptionFailure, CustomStringConvertible {
+        var isPermanent: Bool { true }
+        var description: String {
+            "no_audio_captured: neither track carried any sound; check the Microphone and "
+                + "System Audio Recording permissions"
+        }
+    }
+
+    /// True only when every track could be read and none reached the audible
+    /// floor. A track that cannot be measured is not evidence of silence.
+    nonisolated static func capturedNothing(_ tracks: [URL]) -> Bool {
+        !tracks.isEmpty && tracks.allSatisfy {
+            AudioLevel.fileStaysBelow(AudioLevel.audibleFloor, url: $0) == true
+        }
+    }
+
     private func transcribe(_ dir: URL, override: STTChoice? = nil) async throws {
         // The one place both routes into transcription meet: the app draining
         // its queue and `meetingcopilot process` given a folder by hand. Claiming here,
@@ -329,6 +359,10 @@ actor TranscriptionCoordinator {
 
         var meta = try SessionMeta.read(from: dir)
         let (engine, choice) = try await preparedEngine(override: override)
+        // Before any audio goes to the engine: zeros are a capture failure.
+        if Self.capturedNothing(meta.tracks.map { dir.appendingPathComponent($0.file) }) {
+            throw NoAudioCaptured()
+        }
 
         var audioDirectory = dir
         var cleaned: OfflineEchoAudio.Result?
@@ -660,7 +694,7 @@ actor TranscriptionCoordinator {
 
 /// The slice of meta.json the coordinator needs: which files exist, who they
 /// represent, and how far each track started after the earliest one.
-private struct SessionMeta {
+struct SessionMeta {
     struct Track {
         let file: String
         let speaker: String

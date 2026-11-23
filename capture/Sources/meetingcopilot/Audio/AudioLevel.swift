@@ -80,6 +80,22 @@ enum AudioLevel {
         return nil
     }
 
+    /// Whether every sample of an audio file stays below `floor`. Streams the
+    /// file and stops at the first louder sample, so a real recording costs
+    /// its first second. nil when the file cannot be read or measured.
+    static func fileStaysBelow(_ floor: Float, url: URL) -> Bool? {
+        guard let file = try? AVAudioFile(forReading: url),
+              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 1 << 16)
+        else { return nil }
+        while file.framePosition < file.length {
+            do { try file.read(into: buffer) } catch { return nil }
+            guard buffer.frameLength > 0 else { break }
+            guard let peak = peak(of: buffer) else { return nil }
+            if peak >= floor { return false }
+        }
+        return true
+    }
+
     /// A zeroed buffer with the same format and length — what gets written
     /// while a session is paused, so the file keeps growing on the wall clock
     /// and every timestamp after the pause stays true.

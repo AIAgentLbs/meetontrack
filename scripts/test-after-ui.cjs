@@ -693,6 +693,19 @@ async function needsChoice(browser) {
 }
 
 // The top bar in After says the recording stopped, as the mockup does, and keeps Start recording; Home keeps its waiting line.
+// MEETONTRACK-189 P1-10: a report built without the other side says so on After, and only then.
+async function captureProblem(browser) {
+  for (const [lang, words] of [['en', /other side was not recorded/u], ['ru', /Собеседник не записан/u]]) {
+    const page = await afterPage(browser, 'far_end_not_recorded', { lang });
+    assert.equal(await page.locator('#after-capture').isVisible(), true, `${lang}: the capture problem shows`);
+    assert.match(await text(page, '#after-capture'), words);
+    await page.context().close();
+  }
+  const clean = await afterPage(browser, 'sent', { lang: 'en' });
+  assert.equal(await clean.locator('#after-capture').isVisible(), false, 'no capture problem, no line');
+  await clean.context().close();
+}
+
 async function topBar(browser) {
   for (const [lang, stopped, waiting] of [['en', 'Recording stopped.', 'Waiting for a call'], ['ru', 'Запись остановлена.', 'Ждет звонка']]) {
     const page = await afterPage(browser, 'draft', { lang });
@@ -742,6 +755,7 @@ async function words(browser) {
     await needsChoice(browser);
     await fixWave(browser);
     await topBar(browser);
+    await captureProblem(browser);
     await narrow(browser);
     console.log('After UI: the view: OK');
     await everyScreen(browser);

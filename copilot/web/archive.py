@@ -17,6 +17,7 @@ import smtplib
 from email.message import EmailMessage
 from email.utils import getaddresses, make_msgid
 import threading
+import traceback
 import time
 from collections import Counter
 from functools import wraps
@@ -28,7 +29,7 @@ from speaker_edits import SpeakerEdits, carry_corrections, segment_id, _seconds
 from fact_check import with_speakers
 from memo_check import NOT_CHECKED, current as memo_current
 from delivery_health import DeliveryHealth, drive_links_ready
-from recording_health import RecordingLocations
+from recording_health import RecordingLocations, live_markers, stuck_markers
 from question_quality import register_question
 from journal_links import collapse_links
 from delivery_settings import DeliverySettings, enabled as delivery_enabled
@@ -60,6 +61,21 @@ def auto_send_allowed(settings: dict, channel: str, started_at: str | None) -> b
     boundary = _date(settings.get(channel + "_enabled_at"))
     started = _date(started_at)
     return not boundary or bool(started and started >= boundary)
+
+
+# What the recorder found wrong with its own capture (meta.json "capture_problems",
+# MEETONTRACK-189 P1-10), said plainly at the top of the report and the memo.
+CAPTURE_PROBLEM_TEXT = {
+    "far_end_not_recorded": "Собеседник не записан: звук звонка не поступал всю встречу. "
+                            "Отчет составлен только по вашему микрофону.",
+    "mic_not_recorded": "Ваш микрофон не записан: он не включился. "
+                        "Отчет составлен только по звуку собеседника.",
+}
+
+
+def capture_problem_lines(detail: dict) -> list[str]:
+    return [CAPTURE_PROBLEM_TEXT[code] for code in detail.get("capture_problems") or []
+            if code in CAPTURE_PROBLEM_TEXT]
 
 
 def _went(report: dict) -> bool:
@@ -156,13 +172,24 @@ STANDALONE_REPORT = "meeting-report.html"
 # A finished call whose final transcript is still missing this long after it
 # ended needs attention (MEETONTRACK-94); its report keeps waiting, unsent.
 FINAL_WAIT_ATTENTION_SECONDS = 3600
+# MEETONTRACK-189 step 7: the app first fixes what it can. A missing final
+# transcript is made again automatically, a failed delivery is sent again,
+# each up to this many times; only then does the person see the problem.
+AUTO_ATTEMPTS = 3
+# Minutes to wait after automatic attempt n (1-based) before the next one,
+# and after the last before saying it failed.
+FINAL_RETRY_BACKOFF_MINUTES = (15, 60, 60)
+# The first send schedules a retry in 15 minutes; after retries 1 and 2 these.
+DELIVERY_RETRY_BACKOFF_MINUTES = (30, 60)
+FINAL_RETRIES = "final-retry.json"
 # What a send left in report.json; a refresh that sends nothing keeps all of it.
 # MEETONTRACK-146: what the Twenty CRM channel leaves in report.json.
 TWENTY_OUTCOME = ("twenty_status", "twenty_note_id", "twenty_target", "twenty_candidates", "twenty_choice",
                   "twenty_withheld", "twenty_error", "twenty_next_step")
 DELIVERY_OUTCOME = ("drive_status", "drive_folder", "drive_folder_url", "drive_html_url", "drive_pdf_url",
                     "drive_links_status", "mail_status", "gmail_message_id", "mail_error", "mail_unread",
-                    "telegram_status", "telegram_message_id", "delivery_started_at", *TWENTY_OUTCOME)
+                    "telegram_status", "telegram_message_id", "delivery_started_at", "delivery_attempts",
+                    *TWENTY_OUTCOME)
 
 
 class ReportPdfError(RuntimeError):
@@ -743,6 +770,7 @@ class MeetingArchive:
                     "duration_seconds": candidate["duration_seconds"],
                     "recording_trigger": candidate["meta"].get("trigger", ""),
                     "stop_reason": candidate["meta"].get("stop_reason", ""),
+                    "capture_problems": list(candidate["meta"].get("capture_problems") or []),
                     "recording_dir": candidate["dir"],
                     "audio_file": self._audio_file(candidate),
                     "transcript": [], "journal": [], "frames": [], "meeting_chat": [],
@@ -792,6 +820,7 @@ class MeetingArchive:
             "duration_seconds": duration,
             "recording_trigger": (recording or {}).get("meta", {}).get("trigger") or snapshot.get("recording_trigger", ""),
             "stop_reason": (recording or {}).get("meta", {}).get("stop_reason", ""),
+            "capture_problems": list((recording or {}).get("meta", {}).get("capture_problems") or []),
             "recording_discarded": bool(snapshot.get("recording_dir") and not Path(snapshot["recording_dir"]).exists()),
             "recording_dir": (recording or {}).get("dir") or capture_directory,
             "audio_file": self._audio_file(recording),
@@ -809,7 +838,8 @@ class MeetingArchive:
                       "final_transcript", "speaker_review", "remote_attendees"):
             if field in snapshot:
                 result[field] = snapshot[field]
-        result["final_wait"] = self._final_wait(snapshot, ended, report_meta)
+        result["final_wait"] = self._final_wait(snapshot, ended, report_meta, (recording or {}).get("meta"),
+                                                _json(self.archive_root / meeting_id / FINAL_RETRIES, {}))
         annotated = self.annotate_speakers({**result, "segments": segments})
         annotated["fact_checks"] = with_speakers(annotated["fact_checks"], annotated["segments"])  # corrections reach rows
         annotated["transcript"] = annotated.pop("segments")
@@ -820,11 +850,14 @@ class MeetingArchive:
         about past the delivery window: those still inside it when MEETONTRACK-118 first ran."""
         return self._final_wait_since - timedelta(days=self.delivery_retry_days)
 
-    def _final_wait(self, snapshot: dict, ended: str, report: dict | None = None) -> dict | None:
+    def _final_wait(self, snapshot: dict, ended: str, report: dict | None = None,
+                    recording_meta: dict | None = None, retries: dict | None = None) -> dict | None:
         """A finished meeting whose report waits for the recorder's final transcript (MEETONTRACK-94).
 
         Past the delivery window only while its report never went out (MEETONTRACK-118);
-        history from before that change stays quiet.
+        history from before that change stays quiet. A recording the recorder found
+        silent on every track never gets one: that is "no audio captured", a lost
+        grant, not a wait (MEETONTRACK-189 P1-8).
         """
         finished = _date(ended)
         if not snapshot or snapshot.get("final_transcript") or snapshot.get("status") != "finished" or not finished:
@@ -833,8 +866,86 @@ class MeetingArchive:
         if waited > self.delivery_retry_days * 86400 and (
                 finished < self._final_wait_from() or (report or {}).get("delivery_started_at")):
             return None
-        return {"state": "missing" if waited >= FINAL_WAIT_ATTENTION_SECONDS else "waiting",
-                "reason": "final_transcript", "minutes": max(0, int(waited // 60))}
+        meta = recording_meta if isinstance(recording_meta, dict) else {}
+        failure = str(meta.get("transcription_failed") or "")
+        # No speech, or nothing captured for a reason nobody can fix: not an
+        # undelivered report, so nothing to show (MEETONTRACK-189 step 7).
+        if failure.startswith("No speech"):
+            return None
+        if failure.startswith("no_audio_captured"):
+            permission = self._capture_permission(meta)
+            return {"state": "missing", "reason": "capture_permission", "permission": permission} if permission else None
+        if waited < FINAL_WAIT_ATTENTION_SECONDS:
+            return {"state": "waiting", "reason": "final_transcript"}
+        # The Windows recorder has no `process` command yet: nothing retries there.
+        if os.name != "nt" and not self._final_retries_spent(retries, datetime.now().astimezone()):
+            return {"state": "retrying", "reason": "final_transcript"}
+        deferred = meta.get("transcription_deferred")
+        if isinstance(deferred, dict) and deferred.get("kind") == "needs_choice":
+            return {"state": "missing", "reason": "needs_choice"}
+        return {"state": "missing", "reason": "final_transcript"}
+
+    @staticmethod
+    def _capture_permission(meta: dict) -> str | None:
+        """Which grant a silent recording lacked, when the recorder knows it."""
+        if meta.get("far_end_cause") == "system_audio_permission":
+            return "call_audio"
+        if meta.get("mic_start") == "denied":
+            return "microphone"
+        return None
+
+    @staticmethod
+    def _final_retry_due(retries: dict | None, now: datetime) -> bool:
+        attempts = int((retries or {}).get("attempts") or 0)
+        if attempts >= AUTO_ATTEMPTS:
+            return False
+        last = _date(str((retries or {}).get("last_at") or ""))
+        return not attempts or not last or now >= last + timedelta(minutes=FINAL_RETRY_BACKOFF_MINUTES[attempts - 1])
+
+    @staticmethod
+    def _final_retries_spent(retries: dict | None, now: datetime) -> bool:
+        attempts = int((retries or {}).get("attempts") or 0)
+        last = _date(str((retries or {}).get("last_at") or ""))
+        return attempts >= AUTO_ATTEMPTS and (
+            not last or now >= last + timedelta(minutes=FINAL_RETRY_BACKOFF_MINUTES[AUTO_ATTEMPTS - 1]))
+
+    def final_retries_due(self) -> list[tuple[str, Path]]:
+        """(meeting id, recording folder) whose final transcript should be made again now.
+
+        The caller runs the recorder's `process --again` on the folder, the same
+        as the command line, and calls `note_final_retry` once it has started.
+        Never during a recording: the transcription would compete with it.
+        """
+        if os.name == "nt" or self._capture_active():
+            return []
+        now = datetime.now().astimezone()
+        due = []
+        for path in sorted(self.archive_root.glob("*/meeting.json")):
+            snapshot = _json(path, {})
+            if (not isinstance(snapshot, dict) or snapshot.get("final_transcript")
+                    or snapshot.get("status") != "finished" or not snapshot.get("recording_dir")):
+                continue  # Cheap checks first: the full detail reads every index.
+            retries_path = path.parent / FINAL_RETRIES
+            retries = _json(retries_path, {})
+            if not self._final_retry_due(retries, now):
+                continue
+            folder = Path(str(snapshot["recording_dir"]))
+            # A transcript the recorder wrote but the archive has not imported
+            # yet must never be cleared by `--again`.
+            if (folder / "transcript.json").exists() or not (folder / "meta.json").is_file():
+                continue
+            wait = (self.detail(path.parent.name) or {}).get("final_wait") or {}
+            if wait.get("state") != "retrying":
+                continue
+            due.append((path.parent.name, folder))
+        return due
+
+    def note_final_retry(self, meeting_id: str) -> None:
+        """One automatic re-transcription started for this meeting."""
+        path = self.archive_root / _safe(meeting_id) / FINAL_RETRIES
+        retries = _json(path, {})
+        _atomic_json(path, {"attempts": int((retries if isinstance(retries, dict) else {}).get("attempts") or 0) + 1,
+                            "last_at": datetime.now().astimezone().isoformat(timespec="seconds")})
 
     def _library_detail(self, detail: dict) -> dict:
         detail["source_title"] = detail["title"]
@@ -1440,77 +1551,117 @@ class MeetingArchive:
                 continue
             if retried >= max_reports:
                 break
-            meta = _json(path, {})
-            if not isinstance(meta, dict) or meta.get("report_missing") or meta.get("delivery_on_request"):
-                continue  # Only the person's button sends it.
-            generated = _date(str(meta.get("delivery_started_at") or meta.get("generated_at") or ""))
-            if not generated or (now - generated).total_seconds() > self.delivery_retry_days * 86400:
-                continue  # The window runs from the first send, not from a later refresh.
-            retry_at = _date(str(meta.get("delivery_retry_at") or ""))
-            if retry_at and retry_at > now:
-                continue
-            wants_drive = delivery_enabled(settings, "drive")
-            wants_mail = delivery_enabled(settings, "email") and meta.get("mail_status") != "unknown"
-            wants_telegram = delivery_enabled(settings, "telegram") and meta.get("telegram_status") != "unknown"
-            # A record the person must choose is not retried on its own (MEETONTRACK-146).
-            wants_twenty = (delivery_enabled(settings, "twenty")
-                            and meta.get("twenty_status") not in {"sent", "unknown", "needs_choice"})
-            pending = (
-                (wants_drive and meta.get("drive_status") != "uploaded")
-                or (wants_drive and settings.get("drive_folder_id") and not drive_links_ready(meta))
-                or (wants_mail and meta.get("mail_status") != "sent")
-                or (wants_telegram and meta.get("telegram_status") != "sent")
-                or wants_twenty
-            )
-            if not pending:
-                continue
-            ready_at = _date(str(meta.get("ready_at") or ""))
-            ready_epoch = ready_at.timestamp() if ready_at else None
-            if not self.after.gate(path.parent.name, ready_epoch)["open"]:
-                self.after.blocked(path.parent.name, ready_epoch)  # The delivery loop wakes it when it opens.
-                continue
-            detail = self.report_detail(path.parent.name)
-            if detail and not self.report_matches(detail, meta):
-                # Made from older text (live text, or before a late fact check): the next
-                # history pass makes it again, keeping what was already delivered.
-                self._history_checked.pop(_safe(str(detail.get("meeting_id") or "")), None)
-                continue
-            if (not detail or not self._ready_for_delivery(detail)
-                    or not (Path(str(meta.get("pdf_path") or "")).is_file()
-                            or (path.parent / STANDALONE_REPORT).is_file())):
-                continue
-            gate = self.report_gate(path.parent.name)
-            if not gate.acquire(blocking=False):
-                continue  # Its report is being created and sent right now.
             try:
-                with self.lock:
-                    if _json(path, {}) != meta:
-                        # Report generation may have completed while we prepared
-                        # the retry. Re-check next scan instead of resending it.
-                        continue
-                    # The person may have changed the report since the check above (a removal and Send now):
-                    # the attachment must still be made from the text on disk now (MEETONTRACK-94, -163).
-                    detail = self.report_detail(path.parent.name)
-                    if not detail or not self.report_matches(detail, meta) or not self._ready_for_delivery(detail):
-                        continue
-                    taken = self.after.begin_send(path.parent.name, ready_epoch)
-                    if taken is None:
-                        self.after.blocked(path.parent.name, ready_epoch)
-                        continue  # A Hold pressed since the check above wins.
-                    try:
-                        meta.update(self.deliver(detail, meta, previous=meta))
-                        meta.setdefault("delivery_started_at", now.isoformat(timespec="seconds"))
-                        meta["delivery_checked_at"] = now.isoformat(timespec="seconds")
-                        meta["delivery_retry_at"] = (now + timedelta(minutes=15)).isoformat(timespec="seconds")
-                        _atomic_json(path, meta)
-                        if _went(meta):
-                            self.after.delivered(path.parent.name, taken)
-                    finally:
-                        self.after.end_send(path.parent.name)
-            finally:
-                gate.release()
-            retried += 1
+                if self._retry_report(path, settings, now):
+                    retried += 1
+            except Exception as exc:  # noqa: BLE001 - one report must not block the rest (MEETONTRACK-189 P1-12)
+                self._record_retry_error(path, now, exc)
         return retried
+
+    def _retry_report(self, path: Path, settings: dict, now: datetime) -> bool:
+        """Retry one report's delivery; True when a delivery was attempted."""
+        meta = _json(path, {})
+        if not isinstance(meta, dict) or meta.get("report_missing") or meta.get("delivery_on_request"):
+            return False  # Only the person's button sends it.
+        generated = _date(str(meta.get("delivery_started_at") or meta.get("generated_at") or ""))
+        if not generated or (now - generated).total_seconds() > self.delivery_retry_days * 86400:
+            return False  # The window runs from the first send, not from a later refresh.
+        retry_at = _date(str(meta.get("delivery_retry_at") or ""))
+        if retry_at and retry_at > now:
+            return False
+        attempts = int(meta.get("delivery_attempts") or 0)
+        if attempts >= AUTO_ATTEMPTS:
+            return False  # Shown to the person now; their button sends it again.
+        wants_drive = delivery_enabled(settings, "drive")
+        wants_mail = delivery_enabled(settings, "email") and meta.get("mail_status") != "unknown"
+        wants_telegram = delivery_enabled(settings, "telegram") and meta.get("telegram_status") != "unknown"
+        # A record the person must choose is not retried on its own (MEETONTRACK-146).
+        wants_twenty = (delivery_enabled(settings, "twenty")
+                        and meta.get("twenty_status") not in {"sent", "unknown", "needs_choice"})
+        pending = (
+            (wants_drive and meta.get("drive_status") != "uploaded")
+            or (wants_drive and settings.get("drive_folder_id") and not drive_links_ready(meta))
+            or (wants_mail and meta.get("mail_status") != "sent")
+            or (wants_telegram and meta.get("telegram_status") != "sent")
+            or wants_twenty
+        )
+        if not pending:
+            return False
+        ready_at = _date(str(meta.get("ready_at") or ""))
+        ready_epoch = ready_at.timestamp() if ready_at else None
+        if not self.after.gate(path.parent.name, ready_epoch)["open"]:
+            self.after.blocked(path.parent.name, ready_epoch)  # The delivery loop wakes it when it opens.
+            return False
+        detail = self.report_detail(path.parent.name)
+        if detail and not self.report_matches(detail, meta):
+            # Made from older text (live text, or before a late fact check): the next
+            # history pass makes it again, keeping what was already delivered.
+            self._history_checked.pop(_safe(str(detail.get("meeting_id") or "")), None)
+            return False
+        if (not detail or not self._ready_for_delivery(detail)
+                or not (Path(str(meta.get("pdf_path") or "")).is_file()
+                        or (path.parent / STANDALONE_REPORT).is_file())):
+            return False
+        gate = self.report_gate(path.parent.name)
+        if not gate.acquire(blocking=False):
+            return False  # Its report is being created and sent right now.
+        try:
+            with self.lock:
+                if _json(path, {}) != meta:
+                    # Report generation may have completed while we prepared
+                    # the retry. Re-check next scan instead of resending it.
+                    return False
+                # The person may have changed the report since the check above (a removal and Send now):
+                # the attachment must still be made from the text on disk now (MEETONTRACK-94, -163).
+                detail = self.report_detail(path.parent.name)
+                if not detail or not self.report_matches(detail, meta) or not self._ready_for_delivery(detail):
+                    return False
+                taken = self.after.begin_send(path.parent.name, ready_epoch)
+                if taken is None:
+                    self.after.blocked(path.parent.name, ready_epoch)
+                    return False  # A Hold pressed since the check above wins.
+                try:
+                    meta.update(self.deliver(detail, meta, previous=meta))
+                    meta.setdefault("delivery_started_at", now.isoformat(timespec="seconds"))
+                    meta["delivery_checked_at"] = now.isoformat(timespec="seconds")
+                    # Three automatic attempts with backoff (MEETONTRACK-189 step 7);
+                    # after the last, no next attempt is promised.
+                    meta["delivery_attempts"] = attempts + 1
+                    if attempts + 1 < AUTO_ATTEMPTS:
+                        meta["delivery_retry_at"] = (now + timedelta(
+                            minutes=DELIVERY_RETRY_BACKOFF_MINUTES[attempts])).isoformat(timespec="seconds")
+                    else:
+                        meta.pop("delivery_retry_at", None)
+                    _atomic_json(path, meta)
+                    if _went(meta):
+                        self.after.delivered(path.parent.name, taken)
+                finally:
+                    self.after.end_send(path.parent.name)
+        finally:
+            gate.release()
+        return True
+
+    def _record_retry_error(self, path: Path, now: datetime, exc: Exception) -> None:
+        """A report whose retry threw: try again in 15 minutes, and say why in report.json.
+
+        Before, the exception left the scan, so the same report threw first on every
+        60-second pass and no older report was ever retried (MEETONTRACK-189 P1-12).
+        """
+        traceback.print_exc()
+        try:
+            with self.lock:
+                meta = _json(path, {})
+                if not isinstance(meta, dict):
+                    return
+                attempts = int(meta.get("delivery_attempts") or 0)
+                meta["delivery_attempts"] = attempts + 1  # A throw is an attempt too.
+                meta["delivery_retry_at"] = (now + timedelta(
+                    minutes=DELIVERY_RETRY_BACKOFF_MINUTES[min(attempts, len(DELIVERY_RETRY_BACKOFF_MINUTES) - 1)]
+                )).isoformat(timespec="seconds")
+                meta["delivery_error"] = f"{type(exc).__name__}: {exc}"[:300]
+                _atomic_json(path, meta)
+        except Exception:  # noqa: BLE001 - recording the error must not raise either
+            traceback.print_exc()
 
     def delivery_health(self) -> dict:
         """Expose all configured channels without sending or querying providers."""
@@ -1562,6 +1713,9 @@ class MeetingArchive:
             health["undelivered"].append({"meeting_id": path.parent.name, "channels": [], "uncertain": False,
                                           "final_wait": wait, **self._delivery_label(path.parent.name)})
             health["issue_count"] = int(health.get("issue_count") or 0) + 1
+        # Recording markers left behind by a kill: ignored by the report gate, named here.
+        health["stuck_recordings"] = stuck_markers(self._markers())
+        health["issue_count"] = int(health.get("issue_count") or 0) + len(health["stuck_recordings"])
         return health
 
     def repair_report_states(self) -> None:
@@ -1818,10 +1972,14 @@ class MeetingArchive:
             json.dumps(material, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
 
+    def _markers(self) -> list[Path]:
+        return (self.recording_locations.markers() if self.recording_locations
+                else list(self.recordings_root.glob("*/.recording.json")))
+
     def _capture_active(self) -> bool:
-        markers = (self.recording_locations.markers() if self.recording_locations
-                   else self.recordings_root.glob("*/.recording.json"))
-        return any(markers)
+        # A marker whose owner is dead, or that is older than any recording,
+        # no longer holds every report back; the health check names it (MEETONTRACK-189 P1-11).
+        return bool(live_markers(self._markers()))
 
     @_shared_indexes
     def needs_report(self, meeting_id: str) -> bool:
@@ -2221,6 +2379,8 @@ class MeetingArchive:
                    "в любом браузере. Приложение продолжит попытки создать PDF.")
                 + links_text
             )
+            if problems := capture_problem_lines(detail):
+                body = "\n".join(problems) + "\n\n" + body
             if smtp:
                 message = EmailMessage()
                 message["From"] = settings.get("smtp", {}).get("from", "")
@@ -2289,8 +2449,11 @@ class MeetingArchive:
                 "--title", detail["title"],
                 "--date", stamp,
             ]
-            if not has_pdf:
-                command.extend(["--note", "PDF создать не удалось; отчет приложен как HTML-файл."])
+            note = "" if has_pdf else "PDF создать не удалось; отчет приложен как HTML-файл."
+            if problems := capture_problem_lines(detail):
+                note = " ".join([*problems, note or "PDF приложен к сообщению."])
+            if note:
+                command.extend(["--note", note])
             for key, flag in (
                 ("drive_folder_url", "--drive-folder-url"),
                 ("drive_html_url", "--drive-html-url"),
@@ -2828,10 +2991,12 @@ h1{{font-size:26pt;line-height:1.1;margin:0 0 8mm;color:#174c3e}} h2{{font-size:
 .note,.chat,.utterance{{break-inside:avoid;border-bottom:1px solid #e0e5e2;padding:2.5mm 0}} .note p,.chat p,.utterance p{{margin:1mm 0 0}} .time,time,.chat span{{font-size:8.5pt;color:#707b77;margin-left:3mm}}
 .utterance .translated{{border-left:2px solid #2c6958;padding-left:3mm;background:#eff5f2}}
 .frames{{display:grid;grid-template-columns:1fr 1fr;gap:5mm}} figure{{margin:0;break-inside:avoid}} img{{width:100%;height:auto;border:1px solid #d5ddd9;border-radius:5px}} figcaption{{font-size:8.5pt;color:#65706c;margin-top:1mm}}
+.capture-problem{{background:#fbe9e7;border-left:4px solid #b3261e;color:#5f1410;padding:2mm 4mm;margin:2mm 0 4mm;font-weight:600}}
 .empty{{color:#6c7773;font-style:italic}} .page-break{{break-before:page}}
 </style></head><body>
 <div class="brand">MeetOnTrack by aiagentlbs.com</div><h1>{title}</h1>
 <div class="meta"><span>{esc(date_label)}</span><span>Длительность {esc(duration)}</span><span>{len(detail['transcript'])} реплик</span></div>
+{''.join(f'<p class="capture-problem" role="alert">{esc(line)}</p>' for line in capture_problem_lines(detail))}
 <section id="overview" class="opening"><h2>Участники</h2>
 <p class="main-speaker">Основной спикер по объему распознанной речи: <strong>{esc(main_speaker)}</strong></p>
 <ul class="roster">{roster or '<li>Имена участников не подтверждены записью или чатом.</li>'}</ul>

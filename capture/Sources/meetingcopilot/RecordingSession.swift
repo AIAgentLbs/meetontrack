@@ -1,3 +1,4 @@
+@preconcurrency import AVFoundation
 import Foundation
 
 /// A session that is being recorded, as far as the filesystem can tell: the
@@ -21,13 +22,10 @@ struct RecordingInProgress: Sendable {
 final class RecordingSession {
     enum StartFailure: Error, CustomStringConvertible {
         case systemAudio(Error)
-        case microphone(Error)
-
 
         var description: String {
             switch self {
             case .systemAudio(let error): return "system audio: \(error)"
-            case .microphone(let error): return "microphone: \(error)"
             }
         }
     }
@@ -125,8 +123,33 @@ final class RecordingSession {
         dir = candidate
     }
 
-    /// Start both tracks. If the mic fails after the system tap started, the
-    /// tap is torn down so we never run half a session silently.
+    /// How the microphone half of a session started.
+    enum MicStart: Equatable, Sendable {
+        case started
+        /// No microphone grant: only the far end is recorded.
+        case denied
+        case failed(String)
+        /// The start did not return within the watchdog. It keeps running in
+        /// the background and is adopted if it finishes while still wanted.
+        case timedOut
+    }
+
+    /// The microphone half's state, owned by the main actor. Until it is
+    /// `.running` nothing on the main thread touches the recorder, because
+    /// its start may still be in flight on another thread.
+    private enum MicState { case starting, running, notRunning(MicStart) }
+    private var micState = MicState.starting
+    private var stopped = false
+    /// `stopped`, readable from the thread that starts the microphone: a grant
+    /// given after Stop must not open a track nobody will finalize.
+    private nonisolated let halted = HaltFlag()
+    /// A microphone start that outlived the watchdog was adopted after all.
+    var onMicrophoneAdopted: (() -> Void)?
+    static let micStartTimeout: TimeInterval = 10
+
+    /// Start the far-end track. The microphone starts separately, in
+    /// `startMicrophone()`, so a hanging CoreAudio call can never freeze the
+    /// app (MEETONTRACK-189 P0-4).
     func start() throws {
         // Point the tap at the call app when we know it. Everything else the
         // Mac plays — music, notifications, the video you open afterwards —
@@ -146,17 +169,6 @@ final class RecordingSession {
                 at: dir.appendingPathComponent(Self.manifestFile))
             throw StartFailure.systemAudio(error)
         }
-        do {
-            // The mic track follows the same call the tap does: the microphone
-            // that app is listening to is the one being spoken into, and it is
-            // not always the system default.
-            try mic.start(writingTo: dir.appendingPathComponent("mic.caf"), callApps: tapFamilies)
-        } catch {
-            system.stop()
-            try? FileManager.default.removeItem(
-                at: dir.appendingPathComponent(Self.manifestFile))
-            throw StartFailure.microphone(error)
-        }
         watchdog = Timer.scheduledTimer(
             withTimeInterval: Self.watchdogInterval, repeats: true
         ) { [weak self] _ in
@@ -167,12 +179,127 @@ final class RecordingSession {
         }
     }
 
+    /// Start the microphone track off the main thread, after checking the
+    /// grant, behind a `micStartTimeout` watchdog. A missing grant, a failure
+    /// or a timeout leaves the far-end track recording; the caller says so.
+    func startMicrophone() async -> MicStart {
+        let mic = self.mic
+        let url = dir.appendingPathComponent("mic.caf")
+        // The mic track follows the same call the tap does: the microphone
+        // that app is listening to is the one being spoken into, and it is
+        // not always the system default.
+        let families = tapFamilies
+        let result = await Self.startMicrophone(
+            status: AVCaptureDevice.authorizationStatus(for: .audio),
+            requestAccess: { await AVCaptureDevice.requestAccess(for: .audio) },
+            timeout: Self.micStartTimeout,
+            start: { [halted] in
+                guard !halted.isSet else { throw CancellationError() }
+                try mic.start(writingTo: url, callApps: families)
+            },
+            late: { [weak self] error in
+                Task { @MainActor in self?.microphoneStartedLate(error: error) }
+            })
+        if stopped {
+            // Stopped while the start was in flight: put the engine down again.
+            if result == .started { mic.stop() }
+        } else if result == .started {
+            micState = .running
+        } else if case .starting = micState {
+            // A late start may already have been adopted; it wins.
+            micState = .notRunning(result)
+        }
+        return result
+    }
+
+    /// Whether the microphone track is being written now (a late start counts).
+    var microphoneRunning: Bool {
+        if case .running = micState { return true }
+        return false
+    }
+
+    /// A start that outlived the watchdog finally returned.
+    private func microphoneStartedLate(error: Error?) {
+        guard error == nil else { return }
+        if stopped { mic.stop(); return }
+        micState = .running
+        FileHandle.standardError.write(Data("mic: started late, adopted\n".utf8))
+        onMicrophoneAdopted?()
+    }
+
+    /// The microphone start, as pure control flow: preflight the grant, run
+    /// `start` on a background thread, and give up waiting after `timeout`.
+    /// `late` receives the outcome of a start that returned after the timeout.
+    nonisolated static func startMicrophone(
+        status: AVAuthorizationStatus,
+        requestAccess: @Sendable () async -> Bool,
+        timeout: TimeInterval,
+        start: @escaping @Sendable () throws -> Void,
+        late: @escaping @Sendable (Error?) -> Void
+    ) async -> MicStart {
+        switch status {
+        case .denied, .restricted: return .denied
+        case .notDetermined: guard await requestAccess() else { return .denied }
+        default: break
+        }
+        final class Once: @unchecked Sendable {
+            private let lock = NSLock()
+            private var taken = false
+            func claim() -> Bool {
+                lock.lock(); defer { lock.unlock() }
+                if taken { return false }
+                taken = true
+                return true
+            }
+        }
+        let once = Once()
+        // Dedicated threads, not the shared pool: a busy pool must not be able
+        // to delay the watchdog, and a hung start must not hold a pool thread.
+        return await withCheckedContinuation { continuation in
+            Thread.detachNewThread {
+                var failure: Error?
+                do { try start() } catch { failure = error }
+                if once.claim() {
+                    continuation.resume(returning: failure.map { .failed(String(describing: $0)) } ?? .started)
+                } else {
+                    late(failure)
+                }
+            }
+            Thread.detachNewThread {
+                Thread.sleep(forTimeInterval: timeout)
+                if once.claim() { continuation.resume(returning: .timedOut) }
+            }
+        }
+    }
+
+    /// Delete a session folder whose tracks hold nothing beyond their headers
+    /// and that has no meta.json (MEETONTRACK-189 P3-7). True when removed.
+    @discardableResult
+    nonisolated static func removeIfNothingRecorded(_ dir: URL) -> Bool {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: dir.appendingPathComponent("meta.json").path) else { return false }
+        for name in ["mic.caf", "system.caf"] {
+            let size = (try? fm.attributesOfItem(
+                atPath: dir.appendingPathComponent(name).path))?[.size] as? Int64 ?? 0
+            if size > headerOnlyBytes { return false }
+        }
+        return (try? fm.removeItem(at: dir)) != nil
+    }
+
+    /// A CAF with nothing in it: the header AVAudioFile writes before audio.
+    nonisolated static let headerOnlyBytes: Int64 = 4096
+
     /// Stop both tracks, write meta.json, and drop the in-progress manifest.
     func stop(reason: String = "manual") {
         watchdog?.invalidate()
         watchdog = nil
+        stopped = true
+        halted.set()
+        // Callbacks capture this session; dropping them ends the cycle.
+        onFarEndProblem = nil
+        onMicrophoneAdopted = nil
         if pausedSince != nil { resume() }
-        mic.stop()
+        if case .running = micState { mic.stop() } else { mic.seal() }
         system.stop()
 
         let ended = Date()
@@ -206,13 +333,29 @@ final class RecordingSession {
         meta.merge(context.metaFields) { current, _ in current }
         if pausedFor > 0 { meta["paused_seconds"] = Int(pausedFor) }
         if !trackEverStalled.isEmpty { meta["stalled_tracks"] = trackEverStalled.sorted() }
-        meta["mic_capture"] = mic.capture.meta
+        let problems = currentCaptureProblems(now: ended)
+        if !problems.isEmpty {
+            meta["capture_problems"] = problems
+            if let cause = farEndProblem(now: ended) { meta["far_end_cause"] = cause.rawValue }
+        }
+        switch micState {
+        case .running: meta["mic_capture"] = mic.capture.meta
+        case .starting: meta["mic_start"] = "still-starting"
+        case .notRunning(let outcome): meta["mic_start"] = Self.describe(outcome)
+        }
+        if !micRecorded {
+            // No microphone track to transcribe: list only the far end, or the
+            // transcriber stops on a file that was never written.
+            meta["files"] = ["system": "system.caf"]
+            meta["start_offset_ms"] = ["system": 0]
+        }
         if !system.recoveryEvents.isEmpty { meta["system_recoveries"] = system.recoveryEvents }
         // Every route change the mic track survived: headphones connecting,
         // AirPods leaving an ear, a call app taking the device. Each one is a
         // seam in the track, and a transcript that goes strange after one is
         // explained here rather than guessed at.
-        let restarts = mic.restarts
+        let restarts: [MicRecorder.Restart]
+        if case .running = micState { restarts = mic.restarts } else { restarts = [] }
         if !restarts.isEmpty {
             meta["mic_restarts"] = restarts.map { $0.meta(iso: iso) }
         }
@@ -282,6 +425,47 @@ final class RecordingSession {
     var callTrackStalled: Bool { trackStalled.contains("system") }
     private(set) var callAppHasOutput = false
 
+    // MARK: - far end not recorded
+
+    /// The far end has carried nothing audible all session (see
+    /// `SystemAudioRecorder.farEndProblem`). Vetoes the no-call-audio stop.
+    func farEndProblem(now: Date = Date()) -> SystemAudioRecorder.FarEndProblem? {
+        system.farEndProblem(sessionStartedAt: startedAt, now: now)
+    }
+
+    /// Told when the far end turns out not to be recorded while you talk, and
+    /// again (with nil) if it is heard after all.
+    var onFarEndProblem: ((SystemAudioRecorder.FarEndProblem?) -> Void)?
+    private var reportedFarEndProblem: SystemAudioRecorder.FarEndProblem?
+
+    /// A session expected to have a far end: one we started for a call, or
+    /// one a call app was holding the mic for. A voice memo has none.
+    private var expectsFarEnd: Bool { trigger != .manual || !tapFamilies.isEmpty }
+
+    /// What meta.json's `capture_problems` says, and whether the live warning
+    /// is up: the far end was never heard in a call while you were heard.
+    nonisolated static func captureProblems(
+        expectsFarEnd: Bool, micHeard: Bool, farEnd: SystemAudioRecorder.FarEndProblem?,
+        micRecorded: Bool = true
+    ) -> [String] {
+        // A missing microphone is said in the report too, not only in meta.
+        (micRecorded ? [] : ["mic_not_recorded"])
+            + (expectsFarEnd && micHeard && farEnd != nil ? ["far_end_not_recorded"] : [])
+    }
+
+    private func currentCaptureProblems(now: Date) -> [String] {
+        Self.captureProblems(
+            expectsFarEnd: expectsFarEnd, micHeard: mic.lastSoundAt != nil,
+            farEnd: farEndProblem(now: now), micRecorded: micRecorded)
+    }
+
+    /// The microphone track holds audio: it is running, or a start that never
+    /// finished its bookkeeping already wrote buffers (review round 3).
+    private var micRecorded: Bool {
+        if case .running = micState { return true }
+        return mic.firstBufferAt != nil
+    }
+
     // MARK: - discarding
 
     /// Delete the whole session folder. Used for automatic recordings that
@@ -326,15 +510,12 @@ final class RecordingSession {
                 let pid = manifest["pid"] as? Int32
             else { continue }
 
-            // The same liveness test recovery uses, and the same caveat: a
-            // recycled PID could fool it. Here the cost is warning about a
-            // recording that has already ended, which is again the safe
-            // direction to be wrong in.
+            // The same liveness test recovery uses.
             found.append(RecordingInProgress(
                 dir: dir,
                 pid: pid,
                 started: (manifest["started"] as? String).flatMap { iso.date(from: $0) },
-                ownerIsAlive: kill(pid, 0) == 0
+                ownerIsAlive: ProcessStart.ownerAlive(manifest)
             ))
         }
         return found
@@ -376,13 +557,16 @@ final class RecordingSession {
             }
 
             // A live owner means a second meetingcopilot is recording into this folder
-            // right now. Leave it strictly alone. (A recycled PID could fool
-            // this; the cost is deferring recovery to the next launch, which
-            // is the safe direction to be wrong in.)
-            if let pid = manifest["pid"] as? Int32, kill(pid, 0) == 0 { continue }
+            // right now. Leave it strictly alone. The owner's start time
+            // tells a recycled pid apart (MEETONTRACK-189).
+            if ProcessStart.ownerAlive(manifest) { continue }
 
             // Something has to be in the tracks, or there's nothing to recover.
-            let files = (manifest["files"] as? [String: String]) ?? [:]
+            // A track never written (a microphone that did not start) is left
+            // out, so transcription reads the one that was (MEETONTRACK-189).
+            let files = ((manifest["files"] as? [String: String]) ?? [:]).filter {
+                fm.fileExists(atPath: dir.appendingPathComponent($0.value).path)
+            }
             let sizes = files.values.compactMap { name -> Int64? in
                 (try? fm.attributesOfItem(
                     atPath: dir.appendingPathComponent(name).path
@@ -392,6 +576,11 @@ final class RecordingSession {
                 FileHandle.standardError.write(Data(
                     "interrupted session \(dir.lastPathComponent) has no audio — skipping\n".utf8
                 ))
+                // Nothing to recover, and a marker left here reads as a
+                // recording forever and holds every later report back
+                // (MEETONTRACK-189 P1-11). The empty folder goes with it.
+                try? fm.removeItem(at: manifestURL)
+                removeIfNothingRecorded(dir)
                 continue
             }
 
@@ -454,6 +643,9 @@ final class RecordingSession {
             "trigger": trigger.rawValue,
         ]
         if let title { manifest["title"] = title }
+        if let ownStart = ProcessStart.of(ProcessInfo.processInfo.processIdentifier) {
+            manifest["pid_started"] = ownStart
+        }
         manifest.merge(context.metaFields) { current, _ in current }
         if let micStart = mic.firstBufferAt, let systemStart = system.firstBufferAt {
             let earliest = min(micStart, systemStart)
@@ -522,6 +714,7 @@ final class RecordingSession {
         }
 
         followCallApp(now: now)
+        noticeFarEndProblem(now: now)
 
         // Which microphone is the right one is not settled once at the start.
         // The call app can move to another device without anything
@@ -529,8 +722,10 @@ final class RecordingSession {
         // engine is silent in every other way, so the question is asked again
         // on every tick. Both are cheap; being on the wrong microphone for an
         // hour is not.
-        mic.follow(callApps: tapFamilies)
-        mic.checkRoute()
+        if case .running = micState {
+            mic.follow(callApps: tapFamilies)
+            mic.checkRoute()
+        }
 
         // Refresh the manifest once both first buffers have landed, so a crash
         // recovers with the same clock alignment a clean stop would have had.
@@ -542,6 +737,17 @@ final class RecordingSession {
     }
 
     private var manifestOffsetsWritten = false
+
+    private func noticeFarEndProblem(now: Date) {
+        // Only the far-end problem raises this warning; a missing microphone has its own.
+        let problem = currentCaptureProblems(now: now).contains("far_end_not_recorded")
+            ? farEndProblem(now: now) : nil
+        guard problem != reportedFarEndProblem else { return }
+        reportedFarEndProblem = problem
+        // This warning replaces the later, vaguer one below.
+        if problem != nil { farEndWarningShown = true }
+        onFarEndProblem?(problem)
+    }
 
     /// Keep the tap pointed at the call as its processes come and go, and
     /// notice if that leaves us recording silence.
@@ -576,23 +782,25 @@ final class RecordingSession {
         ) else { return }
         let farEndSilentFor = now.timeIntervalSince(system.lastSoundAt ?? startedAt)
         farEndWarningShown = true
-        let detail: (String, String)
-        if case .apps = system.scope {
-            detail = (
-                "Recording only \(tapFamilies.joined(separator: ", ")) and it has been silent for \(Int(farEndSilentFor / 60)) min. Set system_audio to \"all\" if this is wrong.",
-                "Пишется только \(tapFamilies.joined(separator: ", ")), и там тихо уже \(Int(farEndSilentFor / 60)) мин. Если это неверно, поставьте system_audio в \"all\"."
-            )
-        } else {
-            detail = (
-                "Nothing has been heard on the system track for \(Int(farEndSilentFor / 60)) min. Check the call output and System Audio Recording permission.",
-                "На системной дорожке ничего не слышно уже \(Int(farEndSilentFor / 60)) мин. Проверьте выход звука звонка и разрешение на запись системного аудио."
-            )
-        }
+        // No config advice: the person reading this is not editing files.
+        let detail = (
+            "Nothing has been heard from the other side for \(Int(farEndSilentFor / 60)) min. Check the call's sound output and System Audio Recording permission.",
+            "От собеседника ничего не слышно уже \(Int(farEndSilentFor / 60)) мин. Проверьте вывод звука звонка и разрешение на запись системного аудио."
+        )
         notifyUser(
             title: localised(
                 "meetingcopilot: nothing from the far end", "meetingcopilot: от дальней стороны ничего нет"),
             body: localised(detail.0, detail.1)
         )
+    }
+
+    nonisolated static func describe(_ outcome: MicStart) -> String {
+        switch outcome {
+        case .started: return "started"
+        case .denied: return "denied"
+        case .timedOut: return "timed-out"
+        case .failed(let detail): return "failed: " + detail
+        }
     }
 
     nonisolated static func shouldWarnAboutFarEndSilence(
@@ -606,5 +814,40 @@ final class RecordingSession {
         let youSpokeRecently = micLastSoundAt.map { now.timeIntervalSince($0) < 120 } ?? false
         let farEndSilentFor = now.timeIntervalSince(systemLastSoundAt ?? recordingStartedAt)
         return youSpokeRecently && farEndSilentFor > 300
+    }
+}
+
+/// A one-way flag shared with a background thread.
+final class HaltFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    func set() { lock.lock(); value = true; lock.unlock() }
+}
+
+/// When a process started, so a marker's pid can be told apart from a later
+/// process that was handed the same number.
+enum ProcessStart {
+    /// Epoch seconds, or nil when the process is gone or cannot be read.
+    nonisolated static func of(_ pid: Int32) -> Double? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let start = info.kp_proc.p_un.__p_starttime
+        guard start.tv_sec > 0 else { return nil }
+        return Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
+    }
+
+    /// The marker's writer is still running: its pid is alive and, when the
+    /// marker recorded one, started at the recorded time. A marker without a
+    /// start time (older builds) falls back to the pid alone.
+    nonisolated static func ownerAlive(_ manifest: [String: Any]) -> Bool {
+        guard let raw = (manifest["pid"] as? NSNumber)?.int64Value, raw > 1, raw < Int64(Int32.max),
+              case let pid = Int32(raw),
+              kill(pid, 0) == 0 else { return false }
+        guard let recorded = (manifest["pid_started"] as? NSNumber)?.doubleValue,
+              let actual = of(pid) else { return true }
+        return abs(actual - recorded) < 1
     }
 }

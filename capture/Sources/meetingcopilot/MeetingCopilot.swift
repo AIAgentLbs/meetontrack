@@ -449,6 +449,9 @@ final class AppController {
         setup.isRecording = { [weak self] in self?.isRecording == true }
         setup.onShowSettings = { [weak self] in self?.showSettings() }
         setup.onFinished = { [weak self] in
+            // The wizard has just covered this install, even when dismissed
+            // with Later: no second check behind the person's back.
+            if let build = SetupState.currentBuild { SetupState.rememberCheckedBuild(build) }
             self?.startAutomaticFeatures(requestCalendarAccess: false)
             self?.offerSetup()
             self?.showWindow()
@@ -464,6 +467,24 @@ final class AppController {
     )
     /// The assistant server's release offer, in the menu and one banner per version.
     private lazy var releaseNotice = ReleaseNotice { [weak self] in self?.menuBar.updateRelease($0) }
+    /// What the menu bar flags: delivery from the server, capture from this
+    /// recording (MEETONTRACK-189 P2-21).
+    private lazy var deliveryAttention = DeliveryAttention { [weak self] line in
+        self?.deliveryLine = line
+        self?.refreshAttention()
+    }
+    private var deliveryLine: String?
+    private var captureLines: [String: String] = [:]
+
+    private func refreshAttention() {
+        let capture = ["far-end", "microphone"].compactMap { captureLines[$0] }
+        menuBar.updateAttention(capture + (deliveryLine.map { [$0] } ?? []))
+    }
+
+    private func setCaptureAttention(_ key: String, _ line: String?) {
+        captureLines[key] = line
+        refreshAttention()
+    }
     private let transcription = TranscriptionCoordinator()
     private let liveTranscription = LiveTranscriptionCoordinator()
     private let liveTranscriptExporter = LiveTranscriptExporter()
@@ -556,6 +577,7 @@ final class AppController {
         // before any window can ask for it and stopped when the app quits.
         LocalServer.shared.start()
         releaseNotice.start()
+        deliveryAttention.start()
         if Config.showWindowAtLaunch(), !SetupState.isPending {
             window.show()
             AssistantLink.open()
@@ -615,6 +637,7 @@ final class AppController {
             showSetup()
         } else {
             startAutomaticFeatures(requestCalendarAccess: true)
+            recheckAfterInstall()
         }
     }
 
@@ -681,12 +704,54 @@ final class AppController {
 
         autoRecord.enabled = Config.autoRecord().enabled
         let shouldStart = autoRecord.enabled
-        Task { [weak self] in
-            if requestCalendarAccess { await self?.calendar?.requestAccess() }
-            if shouldStart { self?.autoRecord.start() }
+        var start: (() -> Void)?
+        if shouldStart { start = { [weak self] in self?.autoRecord.start() } }
+        var askCalendar: (@MainActor () async -> Void)?
+        if requestCalendarAccess {
+            askCalendar = { [weak self] in await self?.calendar?.requestAccess() }
         }
+        Self.beginWatching(startAutoRecord: start, requestCalendarAccess: askCalendar)
         menuBar.updateAutoRecord(enabled: autoRecord.enabled, decision: nil)
         window.updateAutoRecord(enabled: autoRecord.enabled, decision: nil)
+    }
+
+    /// The first launch of a new install re-checks the grants a reinstall can
+    /// reset: the microphone, and the system-audio tone test. A failure opens
+    /// setup on the failing row. Runs beside auto-record, never before it
+    /// (MEETONTRACK-189 P1-5).
+    private func recheckAfterInstall() {
+        guard let build = SetupState.currentBuild, SetupState.checkedBuild() != build else { return }
+        Task { @MainActor [weak self] in
+            // A tone during a call would be heard by everyone on it, and be
+            // recorded; the next launch checks instead.
+            guard let self, self.session == nil else { return }
+            let microphone = SetupPermissions.microphone()
+            let systemAudio = await SetupPermissions.testSystemAudio()
+            if systemAudio == .heard {
+                SetupState.rememberSystemAudioHeard()
+            } else {
+                SetupState.forgetSystemAudioHeard()
+            }
+            SetupState.rememberCheckedBuild(build)
+            let failing = SetupState.afterInstallFailures(microphone: microphone, systemAudio: systemAudio)
+            guard !failing.isEmpty else { return }
+            FileHandle.standardError.write(Data(
+                "after install: \(failing.joined(separator: ", ")) not working, opening setup\n".utf8))
+            self.showSetup()
+        }
+    }
+
+    /// Auto-record first, the calendar prompt second. After a reinstall the
+    /// calendar grant is "not asked yet", and the system prompt waits for an
+    /// answer for as long as nobody gives one; a call that starts meanwhile
+    /// must still be recorded (MEETONTRACK-189 P0-3). The calendar trigger
+    /// already tolerates "not authorized yet".
+    static func beginWatching(
+        startAutoRecord: (() -> Void)?,
+        requestCalendarAccess: (@MainActor () async -> Void)?
+    ) {
+        startAutoRecord?()
+        if let requestCalendarAccess { Task { @MainActor in await requestCalendarAccess() } }
     }
 
     /// Start or stop by signal — `kill -USR1 $(pgrep -x meetingcopilot)` — so a hotkey
@@ -792,8 +857,10 @@ final class AppController {
 
     private func startSession(trigger: RecordingSession.Trigger, context: MeetingContext) {
         guard session == nil else { return }
+        var created: RecordingSession?
         do {
             let newSession = try RecordingSession(root: root, context: context, trigger: trigger)
+            created = newSession
             try newSession.start()
             session = newSession
             FileHandle.standardError.write(Data(
@@ -810,6 +877,8 @@ final class AppController {
             }
         } catch {
             FileHandle.standardError.write(Data("recording start failed: \(error)\n".utf8))
+            // A start that recorded nothing leaves no folder behind (P3-7).
+            if let created { RecordingSession.removeIfNothingRecorded(created.dir) }
             window.showStartFailure(error.localizedDescription)
             window.bringToFront()
             notifyUser(
@@ -836,7 +905,7 @@ final class AppController {
             recordingDirectory: newSession.dir.path
         )
         liveSessionID = liveExportContext.meetingID
-        Task { [weak self, liveTranscription, liveTranscriptExporter] in
+        let liveBegan = Task { [weak self, liveTranscription, liveTranscriptExporter] in
             await liveTranscription.beginRecording(
                 enabled: liveEnabled,
                 update: { [weak self] snapshot in
@@ -860,6 +929,62 @@ final class AppController {
         }
 
         present(.recording, elapsed: "0:00")
+
+        // The far end never heard while you talk: a live capture warning (Call
+        // and Home show it), and one banner that opens the System Audio pane
+        // (MEETONTRACK-189 P0-2). It closes if the far end is heard after all.
+        let sessionStarted = newSession.startedAt
+        newSession.onFarEndProblem = { [weak self, weak newSession, liveTranscription] problem in
+            Task {
+                await liveBegan.value
+                if let problem {
+                    await liveTranscription.noteCaptureWarning(
+                        reason: "system-audio-lost", cause: problem.rawValue,
+                        since: sessionStarted)
+                } else {
+                    await liveTranscription.endCaptureWarning(reason: "system-audio-lost")
+                }
+            }
+            if problem != nil { Notifications.farEndNotRecorded() }
+            Task { @MainActor in
+                guard let self, let newSession, self.session === newSession else { return }
+                self.setCaptureAttention("far-end", problem == nil ? nil : localised(
+                    "The other side is not being recorded", "Собеседник не записывается"))
+            }
+        }
+
+        newSession.onMicrophoneAdopted = { [weak self, weak newSession, liveTranscription] in
+            Task { @MainActor in
+                guard let self, let newSession, self.session === newSession else { return }
+                await liveTranscription.endCaptureWarning(reason: "microphone-not-started")
+                self.setCaptureAttention("microphone", nil)
+            }
+        }
+
+        // The microphone starts off the main thread behind a watchdog: a
+        // CoreAudio call that hangs must never freeze the menu, the ticker and
+        // Stop again (MEETONTRACK-189 P0-4, 2026.11.23-1235).
+        Task { [weak self, liveTranscription] in
+            let result = await newSession.startMicrophone()
+            guard result != .started else { return }
+            FileHandle.standardError.write(Data(
+                "mic: \(RecordingSession.describe(result)) — recording the far end only\n".utf8))
+            // After the live state is reset for this session, or the reset
+            // would wipe the warning.
+            await liveBegan.value
+            // Checked before the warning: a later recording must not inherit
+            // it, and a start adopted late has already recovered.
+            guard let self, self.session === newSession, !newSession.microphoneRunning else { return }
+            await liveTranscription.noteCaptureWarning(reason: "microphone-not-started")
+            self.setCaptureAttention("microphone", localised(
+                "Your microphone is not being recorded", "Ваш микрофон не записывается"))
+            if result == .denied {
+                // Automatic starts already said so (AutoRecordController.begin).
+                if trigger == .manual { Notifications.microphoneMissing() }
+            } else {
+                Notifications.microphoneFailed()
+            }
+        }
     }
 
     private func stopSession(reason: String = "manual") {
@@ -876,6 +1001,8 @@ final class AppController {
         ))
         self.session = nil
         liveSessionID = nil
+        captureLines = [:]
+        refreshAttention()
         present(.idle, elapsed: nil)
         // If Sparkle was told to wait for this recording, it has waited.
         updates.recordingDidFinish()

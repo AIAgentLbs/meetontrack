@@ -110,6 +110,49 @@ final class SystemAudioRecorder {
         return now.timeIntervalSince(firstBufferAt) >= grace && highestPeak == 0
     }
 
+    /// Why the far end is not being recorded, when it looks like our capture
+    /// failing rather than a quiet call (MEETONTRACK-189 P0-1/P0-2/P1-10).
+    enum FarEndProblem: String, Sendable {
+        /// Nothing but exact zeros: the System Audio Recording grant is the
+        /// usual cause.
+        case silentTap = "system_audio_permission"
+        /// Samples arrive, but none has ever reached the speech threshold.
+        case neverHeard = "never_heard"
+    }
+
+    /// How long a session runs before "never heard" counts. A call often opens
+    /// with a few seconds of nobody speaking; it rarely opens with this many.
+    static let neverHeardAfter: TimeInterval = 45
+
+    /// The one "far end not recorded" signal. Its consumers: the no-call-audio
+    /// veto, the live capture warning with its banner, and `capture_problems`
+    /// in meta.json.
+    func farEndProblem(sessionStartedAt: Date, now: Date = Date()) -> FarEndProblem? {
+        state.withLock { s in
+            Self.farEndProblem(
+                sessionStartedAt: sessionStartedAt, firstBufferAt: s.firstBufferAt,
+                bufferCount: s.bufferCount, highestPeak: s.highestPeak,
+                lastSoundAt: s.lastSoundAt, levelMeasurable: s.levelMeasurable, now: now)
+        }
+    }
+
+    static func farEndProblem(
+        sessionStartedAt: Date,
+        firstBufferAt: Date?,
+        bufferCount: Int,
+        highestPeak: Float,
+        lastSoundAt: Date?,
+        levelMeasurable: Bool,
+        now: Date
+    ) -> FarEndProblem? {
+        // "Can't measure" is not "silent".
+        guard levelMeasurable, lastSoundAt == nil,
+              now.timeIntervalSince(sessionStartedAt) >= neverHeardAfter else { return nil }
+        return isDigitallySilent(
+            firstBufferAt: firstBufferAt, bufferCount: bufferCount,
+            highestPeak: highestPeak, now: now) ? .silentTap : .neverHeard
+    }
+
     /// While muted the tap keeps running and silence is written instead of the
     /// audio, so the track stays wall-clock aligned across a pause.
     var isMuted: Bool {

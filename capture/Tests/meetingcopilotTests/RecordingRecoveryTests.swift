@@ -142,6 +142,9 @@ struct RecordingRecoveryTests {
         #expect(FileManager.default.fileExists(
             atPath: session.appendingPathComponent("meta.json").path
         ) == false)
+        // MEETONTRACK-189 P1-11: a marker left here held every later report back.
+        #expect(!FileManager.default.fileExists(
+            atPath: session.appendingPathComponent(".recording.json").path))
     }
 
     @Test("A stale manifest next to a finished session is just cleaned up")

@@ -143,12 +143,24 @@ final class MicRecorder: @unchecked Sendable {
         /// closes it with silence.
         var gapSince: Date?
         var restarts: [Restart] = []
+        /// Set by `seal()`: no file is opened or written from then on.
+        var sealed = false
     }
     private let state = OSAllocatedUnfairLock(initialState: LockedState())
 
     private var file: AVAudioFile? {
         get { state.withLock { $0.file } }
-        set { state.withLock { $0.file = newValue } }
+        set { state.withLock { if !$0.sealed || newValue == nil { $0.file = newValue } } }
+    }
+
+    /// Close the write path for good, from any thread, even while `start` is
+    /// still running elsewhere: a session stopped during a slow start must
+    /// not get audio written after Stop (MEETONTRACK-189 review).
+    func seal() {
+        state.withLock {
+            $0.sealed = true
+            $0.file = nil
+        }
     }
 
     /// Wall-clock time of the first captured buffer — the track's true start,
@@ -256,6 +268,7 @@ final class MicRecorder: @unchecked Sendable {
     private var livenessFrames = 0
     private var livenessPeak: Float = 0
     private var livenessSettled = false
+    private let startGate = MicStartGate()
 
     /// Start capturing the mic as PCM in `url` (use a .caf extension — CAF
     /// needs no finalization pass, so a crash loses nothing written).
@@ -267,11 +280,25 @@ final class MicRecorder: @unchecked Sendable {
     /// changes.
     func start(writingTo url: URL, callApps: [String] = []) throws {
         guard !isRecording else { return }
+        startGate.beginStart()
         self.url = url
         followedCallApps = callApps
         requestedVoiceProcessing = Config.micVoiceProcessing()
-        try attach(voiceProcessing: requestedVoiceProcessing)
+        do {
+            try attach(voiceProcessing: requestedVoiceProcessing)
+        } catch {
+            startGate.abandonStart()
+            throw error
+        }
         isRecording = true
+        defer {
+            // A silent voice-processing route found while this (background)
+            // start was still running was held back; run it now, or the mic
+            // stays silent for the rest of the call.
+            if startGate.finishStart() {
+                DispatchQueue.main.async { [weak self] in self?.fallBackToRaw() }
+            }
+        }
         inputDevice = AudioDevices.name(of: boundDevice) ?? AudioDevices.defaultInputName()
         outputDevice = AudioDevices.defaultOutputName()
         initialVoiceProcessing = engine.inputNode.isVoiceProcessingEnabled
@@ -505,7 +532,9 @@ final class MicRecorder: @unchecked Sendable {
                 if self.livenessFrames >= checkFrames {
                     self.livenessSettled = true
                     if self.livenessPeak == 0 {
-                        DispatchQueue.main.async { self.fallBackToRaw() }
+                        DispatchQueue.main.async {
+                            if !self.startGate.deferFallback() { self.fallBackToRaw() }
+                        }
                         return
                     }
                 }
@@ -881,7 +910,10 @@ final class MicRecorder: @unchecked Sendable {
     /// down and restart raw, discarding the silent prefix so the track's
     /// timestamps start at real audio.
     private func fallBackToRaw() {
-        guard isRecording else { return }
+        // A session stopped while this was queued has finalized mic.caf:
+        // never delete or reopen it (a sealed recorder may still read as
+        // recording while its late start winds down).
+        guard isRecording, !state.withLock({ $0.sealed }) else { return }
         FileHandle.standardError.write(Data(
             "warning: voice processing delivered silence — restarting mic raw\n".utf8
         ))
@@ -919,6 +951,36 @@ final class MicRecorder: @unchecked Sendable {
                 "mic raw fallback failed: \(error) — session continues without mic track\n".utf8
             ))
             file = nil
+        }
+    }
+}
+
+/// `start` runs off main while the voice tap can already ask main to fall
+/// back to raw capture. A fallback asked for during the start is held and
+/// handed back by `finishStart`, so it is neither lost nor run against a
+/// half-built engine.
+final class MicStartGate: Sendable {
+    private struct State { var starting = false; var pending = false }
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    func beginStart() { state.withLock { $0 = State(starting: true) } }
+    func abandonStart() { state.withLock { $0 = State() } }
+
+    /// True when the start is still running and the fallback is now held.
+    func deferFallback() -> Bool {
+        state.withLock {
+            guard $0.starting else { return false }
+            $0.pending = true
+            return true
+        }
+    }
+
+    /// True once when a fallback was held during this start.
+    func finishStart() -> Bool {
+        state.withLock {
+            let pending = $0.starting && $0.pending
+            $0 = State()
+            return pending
         }
     }
 }

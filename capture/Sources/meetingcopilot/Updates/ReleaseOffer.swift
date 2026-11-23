@@ -72,6 +72,75 @@ struct ReleaseOffer: Equatable {
     }
 }
 
+/// Reports the person has not received, read from the assistant server's
+/// delivery health every minute for the menu bar (MEETONTRACK-189 P2-21).
+@MainActor
+final class DeliveryAttention {
+    private let server: LocalServer
+    private let show: (String?) -> Void
+    private var timer: Timer?
+
+    init(server: LocalServer = .shared, show: @escaping (String?) -> Void) {
+        self.server = server
+        self.show = show
+    }
+
+    /// One line for the menu, or nil when everything went out.
+    nonisolated static func line(delivery: [String: Any]) -> String? {
+        let undelivered = delivery["undelivered"] as? [[String: Any]] ?? []
+        let unsent = undelivered.count
+        let stuck = (delivery["stuck_recordings"] as? [Any])?.count ?? 0
+        // A sign-in or a choice the person must make blocks sending without
+        // being listed as undelivered yet.
+        let blocked = Set(((delivery["channels"] as? [String: Any]) ?? [:]).values.flatMap {
+            (($0 as? [String: Any])?["issues"] as? [[String: Any]] ?? []).compactMap {
+                ["auth_required", "needs_choice"].contains($0["reason"] as? String ?? "")
+                    ? $0["meeting_id"] as? String : nil
+            }
+        }).count
+        if blocked > 0 {
+            return localised("Reports wait for you: \(blocked)", "Отчеты ждут вашего действия: \(blocked)")
+        }
+        if unsent > 0 {
+            // Which report, never a bare count (MEETONTRACK-189 step 7).
+            let title = undelivered.lazy.compactMap { $0["title"] as? String }.first { !$0.isEmpty }
+            let first = title.map { localised("“\($0)”", "«\($0)»") } ?? localised("a meeting", "встреча")
+            let more = unsent > 1 ? localised(" and \(unsent - 1) more", " и еще \(unsent - 1)") : ""
+            return localised("Not sent: ", "Не отправлены: ") + first + more
+        }
+        if stuck > 0 {
+            return localised("A recording was cut off; open the assistant",
+                             "Запись прервалась, откройте помощник")
+        }
+        return nil
+    }
+
+    func start() {
+        guard timer == nil else { return }
+        server.onEveryReady { [weak self] in self?.refresh() }
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func refresh() {
+        guard server.isReady,
+              let url = URL(string: "http://127.0.0.1:\(server.port)/api/delivery") else { return }
+        Task {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 12
+            // Server busy or restarting: keep what is shown.
+            guard let (data, response) = try? await URLSession.shared.data(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let delivery = value["delivery"] as? [String: Any] else { return }
+            show(Self.line(delivery: delivery))
+        }
+    }
+}
+
 /// Asks the app's own assistant server about releases at start and every 15 minutes
 /// (the server's own GitHub refresh period; Swift never calls GitHub), shows the result
 /// in the menu, posts one banner per new version, and starts the install the same way

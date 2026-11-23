@@ -89,6 +89,9 @@ class DeliveryHealth:
             started = _date(report.get("delivery_started_at")) or generated
             expired = bool(report.get("delivery_on_request")) or bool(
                 started and now - started > timedelta(days=self.retry_days))
+            # Automatic retries also end after three attempts (MEETONTRACK-189
+            # step 7); unlike the window, that is never history to skip.
+            spent = int(report.get("delivery_attempts") or 0) >= 3
             # Completed historical reports do not fill the recent summary. An
             # unresolved delivery must not silently disappear when retry ends,
             # and a send the person asked for is judged too. A rebuilt status file
@@ -144,7 +147,9 @@ class DeliveryHealth:
                     state, reason = "failed", "retry_overdue"
                 # "unknown" is never retried automatically (it may duplicate a
                 # send), so it ends the same way as an expired retry window.
-                if (expired or raw == "unknown") and state not in {"sent", "waiting"} and reason != "report_missing":
+                # Spent retries end only plain failures: a sign-in or a CRM choice keeps its own action.
+                if ((expired or raw == "unknown" or (spent and state == "failed"))
+                        and state not in {"sent", "waiting"} and reason != "report_missing"):
                     if delivered:
                         # Retries ended but the report reached the person another
                         # way: close it. The failed channel stays visible only in

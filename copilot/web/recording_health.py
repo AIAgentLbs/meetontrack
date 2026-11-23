@@ -6,6 +6,7 @@ live owner and meeting clock, and nothing while a Stop's pause is pending (`hold
 from __future__ import annotations
 
 import argparse
+import calendar
 try:
     import fcntl
 except ImportError:
@@ -62,6 +63,19 @@ def owner_alive(pid) -> bool:
         return False
 
 
+def process_started(pid: int) -> float | None:
+    """When process `pid` started (epoch seconds), or None when it cannot be read."""
+    if os.name == "nt":
+        return None
+    try:
+        # In UTC: local time repeats an hour when daylight saving ends.
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True,
+                             timeout=5, env={**os.environ, "LC_ALL": "C", "TZ": "UTC0"}).stdout.strip()
+        return float(calendar.timegm(time.strptime(out, "%a %b %d %H:%M:%S %Y")))
+    except (OSError, ValueError, OverflowError, subprocess.SubprocessError):
+        return None
+
+
 def windows_owner_alive(pid: int) -> bool:
     # os.kill(pid, 0) terminates a process on Windows. Query only.
     import ctypes
@@ -79,6 +93,52 @@ def windows_owner_alive(pid: int) -> bool:
         return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
     finally:
         kernel.CloseHandle(handle)
+
+
+# A marker this old belongs to no recording: the recorder's duration ceiling
+# defaults to 5 hours (MEETONTRACK-189 P1-11).
+STALE_MARKER_SECONDS = 12 * 3600
+
+
+def marker_state(path: Path, now: float | None = None) -> str:
+    """What a .recording.json says: "live", or why it is left behind.
+
+    "dead": its owner process is gone, or its pid now belongs to a process
+    that started at another time (a recycled pid); "stale": the owner cannot
+    be confirmed and it is older than any recording. A confirmed owner keeps
+    it live at any age (a manual recording has no duration ceiling). An
+    unreadable marker counts as live while it is fresh: the safe direction.
+    """
+    marker = read_json(path)
+    pid = marker.get("pid")
+    if isinstance(pid, int) and not isinstance(pid, bool) and 1 < pid < 2**31:
+        if not owner_alive(pid):
+            return "dead"
+        recorded = marker.get("pid_started")
+        if isinstance(recorded, (int, float)) and not isinstance(recorded, bool):
+            actual = process_started(pid)
+            if actual is not None:
+                # ps reports whole seconds; the recorder writes the exact time.
+                return "live" if abs(actual - recorded) < 2 else "dead"
+    try:
+        age = (now if now is not None else time.time()) - path.stat().st_mtime
+    except OSError:
+        return "dead"
+    return "stale" if age > STALE_MARKER_SECONDS else "live"
+
+
+def live_markers(markers) -> list[Path]:
+    return [path for path in markers if marker_state(path) == "live"]
+
+
+def stuck_markers(markers) -> list[dict]:
+    """Markers left behind that would otherwise hold every report back, for the health check."""
+    found = []
+    for path in markers:
+        state = marker_state(path)
+        if state != "live":
+            found.append({"directory": str(path.parent), "reason": state})
+    return found
 
 
 class RecordingLocations:
