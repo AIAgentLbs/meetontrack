@@ -1,6 +1,7 @@
 import json
 import tempfile
 import time
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
@@ -236,6 +237,27 @@ class OAuthTests(unittest.TestCase):
             credential.refresh.side_effect = RuntimeError("private token must not escape")
             with self.assertRaisesRegex(ValueError, "^authorization_expired$"):
                 self.oauth.token("mail")
+
+    def test_network_failure_during_refresh_is_retried_not_a_lost_sign_in(self):
+        # google-auth raises TransportError when the token endpoint cannot be reached (MEETONTRACK-183 review).
+        self.oauth._save({"permissions": ["context"], "credentials": {"refresh_token": "old"}, "account": "a@example.com"})
+        exceptions = types.ModuleType("google.auth.exceptions")
+        exceptions.TransportError = type("TransportError", (Exception,), {})
+        modules = {"google": types.ModuleType("google"), "google.auth": types.ModuleType("google.auth"),
+                   "google.auth.exceptions": exceptions}
+        cls = Mock()
+        credential = cls.from_authorized_user_info.return_value
+        credential.valid = False
+        credential.refresh.side_effect = exceptions.TransportError("offline")
+        with patch.dict("sys.modules", modules), \
+                patch("google_oauth.dependencies", return_value=(MagicMock(), None, cls, Mock())):
+            with self.assertRaisesRegex(ValueError, "^timeout_outcome_unknown$"):
+                self.oauth.token("context")
+            self.assertEqual(self.oauth.status()["state"], "connected")
+            credential.refresh.side_effect = RuntimeError("invalid_grant")
+            with self.assertRaisesRegex(ValueError, "^authorization_expired$"):
+                self.oauth.token("context")
+            self.assertEqual(self.oauth.status()["state"], "authorization_expired")
 
     def test_transport_rejects_other_hosts_credentials_and_ports(self):
         for url in ["https://attacker.example/token", "http://www.googleapis.com/", "https://user@www.googleapis.com/", "https://www.googleapis.com:8443/"]:

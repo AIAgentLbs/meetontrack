@@ -24,6 +24,8 @@ class CalendarUnavailable(Exception):
 class CalendarMeetings:
     """Cached, read-only calendar lookup; never stores event descriptions."""
 
+    READ_SECONDS = 5  # like the gws timeout: the live-state poll waits on this read and gives up after 8 s
+
     def __init__(self, executable: str | None = None, enabled=None, oauth=None) -> None:
         # oauth: returns the app's own Google sign-in (GoogleOAuth) when it is the chosen Google profile, else None.
         # Then the calendar is read only through it, never through gws, which may hold another account; the gws
@@ -41,19 +43,22 @@ class CalendarMeetings:
         if oauth is None:
             return None, {}
         try:
-            return oauth, oauth.status()
+            status = oauth.status()
         except (OSError, ValueError):  # credential store unreadable: not connected
             return oauth, {}
+        # Connected for the calendar only with the read-only context grant (as GoogleContext.status checks).
+        ready = status.get("state") == "connected" and "context" in (status.get("permissions") or [])
+        return oauth, {**status, "ready": ready}
 
     def available(self) -> bool:
         oauth, status = self._native()
-        reader = status.get("state") == "connected" if oauth is not None else bool(self.executable)
+        reader = status.get("ready") is True if oauth is not None else bool(self.executable)
         return reader and (self.enabled is None or bool(self.enabled()))
 
     def state(self) -> str:
         oauth, status = self._native()
         if oauth is not None:  # expired or not finished: Home offers to (re)connect
-            if status.get("state") != "connected":
+            if not status.get("ready"):
                 return "not_connected"
             return "not_connected" if self.enabled is not None and not self.enabled() else "connected"
         if not self.executable and self._look_up:
@@ -62,11 +67,32 @@ class CalendarMeetings:
             return "tool_missing"
         return "not_connected" if self.enabled is not None and not self.enabled() else "connected"
 
+    def _read_signed_in(self, oauth, params: dict):
+        """google_api.read bounded to READ_SECONDS: a token refresh alone may take 20 s. A late answer is dropped
+        (a refreshed token is still saved by the sign-in)."""
+        from google_api import read
+        answer: dict = {}
+
+        def work() -> None:
+            try:
+                answer["payload"] = read(oauth, ("calendar", "events", "list"), params)
+            except Exception as error:  # handed to the caller below
+                answer["error"] = error
+
+        worker = threading.Thread(target=work, name="calendar-read", daemon=True)
+        worker.start()
+        worker.join(self.READ_SECONDS)
+        if worker.is_alive():
+            raise ValueError("calendar_read_timeout")
+        if "error" in answer:
+            raise answer["error"]
+        return answer.get("payload")
+
     def for_day(self, day: date) -> list[dict]:
         if self.enabled is not None and not self.enabled():
             return []
         oauth, status = self._native()
-        if oauth is not None and status.get("state") != "connected":
+        if oauth is not None and not status.get("ready"):
             return []  # the chosen sign-in needs reconnecting (state() says so); never another account's gws
         if oauth is None and not self.executable:
             return []
@@ -90,12 +116,11 @@ class CalendarMeetings:
         events: list[dict] = []
         try:
             if oauth is not None:
-                from google_api import read
-                payload = read(oauth, ("calendar", "events", "list"), params)
+                payload = self._read_signed_in(oauth, params)
             else:
                 result = subprocess.run(
                     [self.executable, "calendar", "events", "list", "--params", json.dumps(params)],
-                    capture_output=True, text=True, timeout=5, check=False,
+                    capture_output=True, text=True, timeout=self.READ_SECONDS, check=False,
                 )
                 payload = json.loads(result.stdout) if result.returncode == 0 else None
             if not isinstance(payload, dict):

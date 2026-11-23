@@ -42,6 +42,15 @@ def dependencies():
         raise ValueError("google_dependency_missing") from None
 
 
+def transient_refresh_failure(error):
+    """A network failure (google-auth TransportError) or a retryable token answer, not a rejected sign-in."""
+    try:
+        from google.auth.exceptions import TransportError
+    except ImportError:
+        return False
+    return isinstance(error, TransportError) or getattr(error, "retryable", False) is True
+
+
 def validate_client(value):
     if not isinstance(value, dict) or set(value) != {"installed"}:
         raise ValueError("google_desktop_json_required")
@@ -246,7 +255,10 @@ class GoogleOAuth:
                         request = Request(session=session)
                         credentials.refresh(lambda **kwargs: request(**{**kwargs, "timeout": 20}))
                     self._save({**data, "credentials": json.loads(credentials.to_json())})
-                except Exception:
+                except Exception as error:
+                    if transient_refresh_failure(error):
+                        # Google unreachable: the sign-in stays valid and the next request retries.
+                        raise ValueError("timeout_outcome_unknown") from None
                     self._error = "authorization_expired"
                     raise ValueError("authorization_expired") from None
             return credentials.token

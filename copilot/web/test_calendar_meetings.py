@@ -1,6 +1,8 @@
 """MEETONTRACK-183: the calendar is read through the app's own Google sign-in when it is connected."""
 import json
 import subprocess
+import threading
+import time
 import unittest
 from datetime import date
 from unittest import mock
@@ -57,6 +59,18 @@ class OAuthCalendarTests(unittest.TestCase):
             calendar.for_day(date(2026, 11, 26))
         self.assertEqual(len(oauth.calls), 1)
 
+    def test_slow_sign_in_read_is_bounded_like_gws(self):
+        # A token refresh may take 20 s; the live-state poll gives up after 8 s (Codex review P1).
+        release = threading.Event()
+        self.addCleanup(release.set)
+        oauth = FakeOAuth(answer={"items": [EVENT]})
+        oauth.request = lambda *args, **kwargs: release.wait(10) and {"items": []}
+        calendar = CalendarMeetings(executable="", oauth=lambda: oauth)
+        started = time.monotonic()
+        with mock.patch.object(CalendarMeetings, "READ_SECONDS", 0.2), self.assertRaises(CalendarUnavailable):
+            calendar.for_day(date(2026, 11, 26))
+        self.assertLess(time.monotonic() - started, 2)
+
     def test_nonsense_answer_from_sign_in_is_calendar_unavailable(self):
         calendar = CalendarMeetings(executable="", oauth=lambda: FakeOAuth(answer=["not", "a", "dict"]))
         with self.assertRaises(CalendarUnavailable):
@@ -98,6 +112,9 @@ class OAuthCalendarTests(unittest.TestCase):
         self.assertEqual(CalendarMeetings(executable="", oauth=lambda: None).state(), "tool_missing")
         self.assertEqual(CalendarMeetings(executable="/bin/gws", oauth=lambda: None).state(), "connected")
         self.assertFalse(CalendarMeetings(executable="", oauth=lambda: signed_out).available())
+        mail_only = FakeOAuth()
+        mail_only.status = lambda: {"state": "connected", "account": "me@example.com", "permissions": ["mail"]}
+        self.assertEqual(CalendarMeetings(executable="/bin/gws", oauth=lambda: mail_only).state(), "not_connected")
 
 
 if __name__ == "__main__":
