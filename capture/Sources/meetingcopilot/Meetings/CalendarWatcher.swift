@@ -77,10 +77,15 @@ final class CalendarWatcher {
 
     /// The event that best describes a recording started at `date` — used to
     /// name the session folder even when the recording began some other way.
-    /// Prefers something with other people in it over a solo block.
     func bestMatch(for date: Date) -> Meeting? {
-        let candidates = meetings(around: date, slack: 8 * 60)
-        return candidates.first { $0.looksLikeCall } ?? candidates.first
+        Self.callEvent(among: meetings(around: date, slack: 8 * 60))
+    }
+
+    /// Only an event with other people or a conference link names a recording.
+    /// A solo block at the same hour (a match fixture, a reminder) says
+    /// nothing about an unplanned call, so the session is named by time.
+    nonisolated static func callEvent(among candidates: [Meeting]) -> Meeting? {
+        candidates.first { $0.looksLikeCall }
     }
 
     // MARK: -

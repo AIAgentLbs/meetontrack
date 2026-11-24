@@ -241,6 +241,20 @@ struct NoCallAudioStopTests {
         #expect(starts == 0)
     }
 
+    @Test("A solo calendar block at the same hour does not name a recording")
+    func testSoloCalendarBlockDoesNotNameARecording() {
+        func event(_ title: String, call: Bool) -> CalendarWatcher.Meeting {
+            CalendarWatcher.Meeting(
+                id: title, title: title, start: Date(), end: Date().addingTimeInterval(3600),
+                attendees: [], remoteAttendees: [], link: nil, looksLikeCall: call)
+        }
+        let fixture = event("Home - Away [league]", call: false)
+        #expect(CalendarWatcher.callEvent(among: [fixture]) == nil)
+        #expect(
+            CalendarWatcher.callEvent(among: [fixture, event("Weekly sync", call: true)])?.title
+                == "Weekly sync")
+    }
+
     @Test("A call the person chose not to record does not start on its own")
     @MainActor
     func testSkippedCallDoesNotAutoStart() {
