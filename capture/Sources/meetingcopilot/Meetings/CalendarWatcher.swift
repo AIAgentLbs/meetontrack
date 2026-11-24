@@ -232,8 +232,8 @@ final class CalendarWatcher {
     /// Substrings that mean "there's a call link in here". Kept broad rather
     /// than clever: a missed marker only costs the calendar trigger for that
     /// event, and the mic trigger still catches the meeting.
-    private static let conferenceMarkers = [
-        "zoom.us", "meet.google.com", "teams.microsoft", "teams.live", "whereby.com",
+    nonisolated static let conferenceMarkers = [
+        "zoom.us", "zoom.com/j/", "zoom.com/my/", "zoom.com/w/", "meet.google.com", "teams.microsoft", "teams.live", "whereby.com",
         "webex.com", "jitsi", "around.co", "gather.town", "huddle", "discord.gg",
         "telemost", "yandex.ru/telemost", "ktalk", "contour.ru", "salutejazz", "vkmeet",
     ]

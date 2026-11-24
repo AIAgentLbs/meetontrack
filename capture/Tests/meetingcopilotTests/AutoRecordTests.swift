@@ -253,6 +253,8 @@ struct NoCallAudioStopTests {
         #expect(
             CalendarWatcher.callEvent(among: [fixture, event("Weekly sync", call: true)])?.title
                 == "Weekly sync")
+        // A regional Zoom join link (us05web.zoom.com/j/...) is a call too.
+        #expect(CalendarWatcher.conferenceMarkers.contains { "https://us05web.zoom.com/j/8812".contains($0) })
     }
 
     @Test("A call the person chose not to record does not start on its own")
