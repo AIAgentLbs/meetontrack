@@ -580,6 +580,7 @@ hashes, Pages removed, and the Windows installer relocated to
 - [ ] [MEETONTRACK-189](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-189/) (shipped in v0.1.38 on 2026-11-24, in Review): after-call chain reliability. Audit: docs/superpowers/specs/2026-11-23-after-call-reliability-audit.md. Not yet run on a release: scripts/release-gate-after-call.py (needs manual permission steps).
 - [ ] [MEETONTRACK-191](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-191/) (shipped in v0.1.38 on 2026-11-24, in Review): no false red not-recording bar after a deliberate stop while the calendar event still runs.
 - [ ] [MEETONTRACK-200](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-200/) (shipped in v0.1.39 on 2026-11-25, in Review): an unplanned call is not named after a solo calendar entry at the same hour; zoom.com join links count as call links.
+- [ ] [MEETONTRACK-201](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-201/) (merged 2026-11-25, Ready to deploy, not released): a memo answer with no supported goal is `nothing_found`, not a failure. Left open there: Home wording when sources exist but support no goal; empty-text sources still cost an AI run; a real failure is retried once and never again before the call; a talk or webinar gets no app-written memo.
   the complete Capture + web + Python product, not just release notifications.
   Migrate Mac's split payload into the Sparkle update unit and Windows ZIP installs
   into the owned Velopack channel; retain recordings/settings and provide rollback.
