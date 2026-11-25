@@ -334,10 +334,11 @@ class MemoWriter:
                                     timeout=self.AI_TIMEOUT)
                 plan, digest = build_plan(event_id, meeting, parse_answer(reply.text, sources), sources, language)
         except NothingSupported:  # the sources name the people but say nothing to prepare from
-            if not shown:  # an earlier memo stays; these sources count as tried (see `_spend`)
-                self._update(event_id, state="nothing_found", plan=None, **settled)
+            if _kept(before):  # an earlier memo stays, also after a rebuild; these sources count as tried
+                self._update(event_id, state="ready", since=None, reason="", attempts=0, rebuild=False)
             else:
-                self._update(event_id, since=None, reason="", attempts=0)
+                self._update(event_id, state="nothing_found", plan=None, provider=ticket.choice["provider"],
+                             model=reply.model or ticket.choice["model"], **settled)
             return True
         except Exception as error:
             key = ticket.key if ticket is not None and ticket.state == "ready" else ""
@@ -529,9 +530,8 @@ def parse_answer(text: str, sources: list[dict]) -> dict:
     except ValueError:
         raise ValueError("memo answer is not a JSON object") from None
     known = {str(s["id"]) for s in sources}
-    goal = _line(answer.get("goal"), known, 160)
-    if goal is None:
-        raise NothingSupported("memo answer has no cited goal")
+    stated = answer.get("goal")
+    goal = _line(stated, known, 160)
     parsed = {"goal": goal, "background": _line(answer.get("background"), known, 200),
               "last_contact": _line(answer.get("last_contact"), known, 200)}
     for key in ("questions", "risks"):
@@ -540,6 +540,11 @@ def parse_answer(text: str, sources: list[dict]) -> dict:
         if not isinstance(lines, list):
             raise ValueError(f"memo answer {key} is not a list")
         parsed[key] = [line for value in lines if (line := _line(value, known, 200))][:3]
+    if goal is None:
+        # Only an otherwise valid answer that itself states no goal (null, or no text and no sources) says
+        # "nothing supported"; a missing key or a goal citing unknown sources stays a failure with its retry.
+        explicit = "goal" in answer and (stated is None or not stated["text"].strip() and not stated["sources"])
+        raise (NothingSupported if explicit else ValueError)("memo answer has no cited goal")
     return parsed
 
 

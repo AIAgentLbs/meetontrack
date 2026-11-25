@@ -688,6 +688,26 @@ class LoopTests(unittest.TestCase):
         e = self.writer.events["ev1"]
         self.assertEqual((e["state"], e["reason"], e["retry_at"], e["plan"]), ("nothing_found", "", None, None))
         self.assertEqual(len(self.ai.calls), 1)
+        self.assertTrue(e["model"])
+
+    def test_missing_or_miscited_goal_still_fails_with_a_retry(self):
+        for answer in ('{}', '{"goal":{"text":"Close the deal","sources":["S99"]},"questions":[],"risks":[]}',
+                       '{"goal":null,"questions":"x"}'):
+            with self.subTest(answer=answer):
+                self.writer.events.clear()
+                self.ai.answer = answer
+                self.tick(NOW)
+                e = self.writer.events["ev1"]
+                self.assertEqual((e["state"], e["reason"]), ("failed", "ai_no_answer"))
+                self.assertIsNotNone(e["retry_at"])
+
+    def test_rebuild_with_no_supported_goal_keeps_the_earlier_memo(self):
+        self.tick(NOW)
+        self.assertEqual(len(self.writer.plans()), 1)
+        self.ai.answer = '{"goal":null,"background":null,"last_contact":null,"questions":[],"risks":[]}'
+        self.writer.rebuild("ev1", self.agenda)
+        self.tick(NOW + timedelta(minutes=1))
+        self.assertEqual((self.writer.events["ev1"]["state"], len(self.writer.plans())), ("ready", 1))
 
     def test_failure_reasons(self):
         cases = [("needs_choice", None, "ai_needs_choice", 0),
