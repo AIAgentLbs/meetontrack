@@ -579,6 +579,7 @@ hashes, Pages removed, and the Windows installer relocated to
 - [ ] [MEETONTRACK-188](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-188/) (shipped in v0.1.38 on 2026-11-24, in Review): a memo e-mail sent to your own address is marked unread in the inbox (gmail.modify relabel after the send).
 - [ ] [MEETONTRACK-189](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-189/) (shipped in v0.1.38 on 2026-11-24, in Review): after-call chain reliability. Audit: docs/superpowers/specs/2026-11-23-after-call-reliability-audit.md. Not yet run on a release: scripts/release-gate-after-call.py (needs manual permission steps).
 - [ ] [MEETONTRACK-191](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-191/) (shipped in v0.1.38 on 2026-11-24, in Review): no false red not-recording bar after a deliberate stop while the calendar event still runs.
+- [ ] [MEETONTRACK-200](https://tasks.aiagentlbs.com/sg/browse/MEETONTRACK-200/) (shipped in v0.1.39 on 2026-11-25, in Review): an unplanned call is not named after a solo calendar entry at the same hour; zoom.com join links count as call links.
   the complete Capture + web + Python product, not just release notifications.
   Migrate Mac's split payload into the Sparkle update unit and Windows ZIP installs
   into the owned Velopack channel; retain recordings/settings and provide rollback.
