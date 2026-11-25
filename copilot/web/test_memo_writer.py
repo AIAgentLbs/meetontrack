@@ -680,6 +680,15 @@ class LoopTests(unittest.TestCase):
         self.assertEqual((e["state"], e["reason"], e["plan"]), ("failed", "ai_no_answer", None))
         self.assertEqual(self.writer.plans(), [])
 
+    def test_answer_with_no_supported_goal_is_nothing_found_not_a_failure(self):
+        """MEETONTRACK-201: the sources name the people but support no goal. No failure, no retry, one run."""
+        self.ai.answer = '{"goal":{"text":"","sources":[]},"background":null,"last_contact":null,"questions":[],"risks":[]}'
+        self.tick(NOW)
+        self.tick(NOW + timedelta(minutes=30))
+        e = self.writer.events["ev1"]
+        self.assertEqual((e["state"], e["reason"], e["retry_at"], e["plan"]), ("nothing_found", "", None, None))
+        self.assertEqual(len(self.ai.calls), 1)
+
     def test_failure_reasons(self):
         cases = [("needs_choice", None, "ai_needs_choice", 0),
                  ("ready", ai_providers.AIChoiceError("needs_choice", "Choose an AI."), "ai_needs_choice", 1),

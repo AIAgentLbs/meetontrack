@@ -333,6 +333,12 @@ class MemoWriter:
                 reply = self.ai.run("memo", memo_prompt(meeting, sources, language), ticket=ticket, web=False,
                                     timeout=self.AI_TIMEOUT)
                 plan, digest = build_plan(event_id, meeting, parse_answer(reply.text, sources), sources, language)
+        except NothingSupported:  # the sources name the people but say nothing to prepare from
+            if not shown:  # an earlier memo stays; these sources count as tried (see `_spend`)
+                self._update(event_id, state="nothing_found", plan=None, **settled)
+            else:
+                self._update(event_id, since=None, reason="", attempts=0)
+            return True
         except Exception as error:
             key = ticket.key if ticket is not None and ticket.state == "ready" else ""
             self._fail(event_id, before, now, _reason(error, replied=reply is not None), signature, key)
@@ -512,6 +518,10 @@ def _line(value: object, known: set[str], limit: int) -> dict | None:
     return {"text": text, "sources": cited} if text and cited else None
 
 
+class NothingSupported(ValueError):
+    """A well-formed answer saying the sources support no goal: nothing to show, not a failure."""
+
+
 def parse_answer(text: str, sources: list[dict]) -> dict:
     """The AI answer checked against the source ids; ValueError (naming no content) when malformed."""
     try:
@@ -521,7 +531,7 @@ def parse_answer(text: str, sources: list[dict]) -> dict:
     known = {str(s["id"]) for s in sources}
     goal = _line(answer.get("goal"), known, 160)
     if goal is None:
-        raise ValueError("memo answer has no cited goal")
+        raise NothingSupported("memo answer has no cited goal")
     parsed = {"goal": goal, "background": _line(answer.get("background"), known, 200),
               "last_contact": _line(answer.get("last_contact"), known, 200)}
     for key in ("questions", "risks"):
