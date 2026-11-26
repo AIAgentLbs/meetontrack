@@ -66,6 +66,29 @@ class VisualSpeakerTests(unittest.TestCase):
              phrase("01:05", text="My name is Carol")])
         self.assertEqual(names, ["Alice", "Bob", "Carol"])
 
+    def test_later_speaker_does_not_rename_earlier_lines_of_a_shared_voice(self):
+        # MEETONTRACK-206: diarization put Alice and Bob on one voice. When a second
+        # voice appeared, the self-introduction Carl made on the first voice renamed
+        # every earlier line of that voice, Alice's and Bob's included.
+        items = [frame("00:01", "Alice"), frame("00:11", "Alice"), frame("00:21", "Alice"),
+                 frame("01:01", "Bob"), frame("01:11", "Bob"), frame("01:21", "Bob"),
+                 frame("02:01", "Carl Novak"), frame("02:11", "Carl Novak"), frame("02:21", "Carl Novak")]
+        segments = [phrase("00:00", until="00:05"), phrase("00:10", until="00:15"),
+                    phrase("00:20", until="00:25"), phrase("01:00", until="01:05"),
+                    phrase("01:10", until="01:15"), phrase("01:20", until="01:25"),
+                    phrase("02:00", until="02:05", text="Меня зовут Карл"),
+                    phrase("02:10", voice="remote-2", until="02:15"),
+                    phrase("02:20", voice="remote-2", until="02:25")]
+        names = self.annotate(items, segments)
+        self.assertEqual(names[:6], ["Alice"] * 3 + ["Bob"] * 3)
+        self.assertEqual(names[7:], ["Carl Novak"] * 2)
+        self.assertEqual(self.annotate(items, segments, "speaker_label")[:6], ["Alice"] * 3 + ["Bob"] * 3)
+        # Later turns of Alice alone do not turn Bob's earlier lines back into a voice-wide name.
+        later = [(f"0{3 + i // 6}:{i % 6}0", f"0{3 + i // 6}:{i % 6}5") for i in range(12)]
+        longer = self.annotate(items + [frame(start[:-1] + "1", "Alice") for start, _ in later],
+                               segments + [phrase(start, until=until) for start, until in later])
+        self.assertEqual(longer[3:6], ["Bob"] * 3)
+
     def test_common_words_after_im_are_not_names(self):
         # MEETONTRACK-104: "I'm sure" named the whole remote voice "Sure".
         texts = ["Ah, okay, so", "Yeah.", "I'm sure that's a good one.",
