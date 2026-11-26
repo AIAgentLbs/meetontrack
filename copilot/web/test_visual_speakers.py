@@ -83,6 +83,11 @@ class VisualSpeakerTests(unittest.TestCase):
         self.assertEqual(names[:6], ["Alice"] * 3 + ["Bob"] * 3)
         self.assertEqual(names[7:], ["Carl Novak"] * 2)
         self.assertEqual(self.annotate(items, segments, "speaker_label")[:6], ["Alice"] * 3 + ["Bob"] * 3)
+        # Later turns of Alice alone do not turn Bob's earlier lines back into a voice-wide name.
+        later = [(f"0{3 + i // 6}:{i % 6}0", f"0{3 + i // 6}:{i % 6}5") for i in range(12)]
+        longer = self.annotate(items + [frame(start[:-1] + "1", "Alice") for start, _ in later],
+                               segments + [phrase(start, until=until) for start, until in later])
+        self.assertEqual(longer[3:6], ["Bob"] * 3)
 
     def test_common_words_after_im_are_not_names(self):
         # MEETONTRACK-104: "I'm sure" named the whole remote voice "Sure".

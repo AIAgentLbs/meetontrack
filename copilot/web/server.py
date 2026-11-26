@@ -2010,9 +2010,10 @@ class MeetingFrames:
         for voice_id, seen in seen_on_voice.items() if not channel_only else []:
             seen = Counter({name: count for name, count in seen.items() if count > microphone_only[name]})
             ranked = seen.most_common(2)
-            # A second person on at least two frames and a fifth of them: one
-            # stray frame does not split a real voice.
-            if len(ranked) == 2 and ranked[1][1] >= max(2, 0.2 * sum(seen.values())):
+            # A second person on at least two frames: one stray frame does not split
+            # a real voice. No share of the total, so later frames of one person
+            # cannot dilute the other back into a voice-wide rename.
+            if len(ranked) == 2 and ranked[1][1] >= 2:
                 shared_voices[voice_id] = set(seen)
 
         # Calendar attribution and an explicit spoken self-introduction are
