@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from functools import lru_cache
 import difflib
 import hashlib
@@ -1923,7 +1924,8 @@ class MeetingFrames:
         spoken_at = []
         starts = sorted(start for start in (moment(segment.get("timestamp") or "") for segment in segments)
                         if start is not None)
-        for segment in segments if len(acoustic_slots) <= 1 else []:
+        # Also with several voices: one voice can still carry several people (MEETONTRACK-206).
+        for segment in segments:
             start = moment(segment.get("timestamp") or "")
             end = moment(segment.get("end_timestamp") or "")
             if segment.get("source") in {"system", "microphone"} and start is not None:
@@ -1934,21 +1936,37 @@ class MeetingFrames:
                     end = min(following or start + timedelta(seconds=120), start + timedelta(seconds=120))
                 # Recognised starts lag the highlighted tile by a few seconds
                 # (live call 2026-10-22: tile 17:04:08, phrase 17:04:12).
-                spoken_at.append((start - timedelta(seconds=5), end + timedelta(seconds=2), segment["source"]))
+                spoken_at.append((start - timedelta(seconds=5), end + timedelta(seconds=2), segment["source"],
+                                  str(segment.get("voice_id") or "")))
         remote_score: dict[str, int] = {}
+        # Who the frames show while one diarized voice alone was on the call audio
+        # (MEETONTRACK-206). Without headphones the microphone hears the call too,
+        # so it does not disqualify a frame here; a name seen more often during the
+        # microphone alone is the user's own tile.
+        seen_on_voice: dict[str, Counter] = {}
+        microphone_only: Counter = Counter()
         for frame in meeting_frames if spoken_at else []:
             captured = moment(frame.get("captured_at") or "")
             if not frame.get("speaker") or captured is None or frame.get("speaker_confidence") == "meet-active-tile":
                 continue
-            sources = {source for start, end, source in spoken_at if start <= captured <= end}
+            heard = [(source, voice) for start, end, source, voice in spoken_at if start <= captured <= end]
+            sources = {source for source, _voice in heard}
+            name = str(frame["speaker"])
             if len(sources) == 1:
-                name = str(frame["speaker"])
                 remote_score[name] = remote_score.get(name, 0) + (1 if "system" in sources else -1)
+            if sources == {"microphone"}:
+                microphone_only[name] += 1
+            voices = {voice for source, voice in heard if source == "system"}
+            if len(voices) == 1 and "" not in voices:
+                seen_on_voice.setdefault(voices.pop(), Counter())[name] += 1
         visible_speakers = {name for name, score in remote_score.items() if score > 0}
         channel_only = len(acoustic_slots) <= 1 and len(visible_speakers) >= 2
-        frame_window = 15 if channel_only else 8
 
-        def nearest_named_frame(segment: dict) -> tuple[float, dict] | None:
+        def nearest_named_frame(
+            segment: dict, names: set[str] | None = visible_speakers if channel_only else None
+        ) -> tuple[float, dict] | None:
+            # `names`: a shared channel, named only by the people seen on it.
+            shared = names is not None
             if segment.get("source") != "system" or not segment.get("timestamp"):
                 return None
             try:
@@ -1958,7 +1976,7 @@ class MeetingFrames:
             # On a shared channel a long phrase is named by a frame taken while
             # it was spoken, measured from the phrase interval, not its start.
             until = moment
-            if channel_only and segment.get("end_timestamp"):
+            if shared and segment.get("end_timestamp"):
                 try:
                     until = datetime.fromisoformat(str(segment["end_timestamp"]).replace("Z", "+00:00"))
                 except ValueError:
@@ -1967,7 +1985,7 @@ class MeetingFrames:
             for frame in frames:
                 if frame.get("meeting_id") != transcript.get("meeting_id") or not frame.get("speaker"):
                     continue
-                if channel_only and str(frame["speaker"]) not in visible_speakers:
+                if shared and str(frame["speaker"]) not in names:
                     continue
                 try:
                     captured = datetime.fromisoformat(str(frame["captured_at"]).replace("Z", "+00:00"))
@@ -1978,9 +1996,24 @@ class MeetingFrames:
                 else:
                     distance = min(abs((captured - moment).total_seconds()),
                                    abs((captured - until).total_seconds()))
-                if distance <= frame_window and (nearest is None or distance < nearest[0]):
+                if distance <= (15 if shared else 8) and (nearest is None or distance < nearest[0]):
                     nearest = (distance, frame)
             return nearest
+
+        # MEETONTRACK-206: diarization can put several people on one voice even
+        # when the call has other voices too. A voice whose own phrases the frames
+        # show as two or more people is a shared channel, not a person: one name
+        # (a self-introduction, a frame) must not rename all of its lines, past
+        # ones included. Each of its phrases is named on its own, as on a single
+        # undiarized channel.
+        shared_voices: dict[str, set[str]] = {}
+        for voice_id, seen in seen_on_voice.items() if not channel_only else []:
+            seen = Counter({name: count for name, count in seen.items() if count > microphone_only[name]})
+            ranked = seen.most_common(2)
+            # A second person on at least two frames and a fifth of them: one
+            # stray frame does not split a real voice.
+            if len(ranked) == 2 and ranked[1][1] >= max(2, 0.2 * sum(seen.values())):
+                shared_voices[voice_id] = set(seen)
 
         # Calendar attribution and an explicit spoken self-introduction are
         # stronger evidence than OCR. A green Zoom/Meet border can still name
@@ -2003,11 +2036,15 @@ class MeetingFrames:
         if channel_only:
             voice_names.clear()
             voice_confidence.clear()
+        for voice_id in shared_voices:
+            voice_names.pop(voice_id, None)
+            voice_confidence.pop(voice_id, None)
 
         votes: dict[str, dict[str, float]] = {}
         for segment in segments if not channel_only else []:
             voice_id = str(segment.get("voice_id") or "")
-            nearest = nearest_named_frame(segment) if voice_id and voice_id not in voice_names else None
+            nearest = (nearest_named_frame(segment)
+                       if voice_id and voice_id not in voice_names and voice_id not in shared_voices else None)
             if nearest and nearest[1].get("speaker_confidence") != "meet-active-tile":
                 name = str(nearest[1].get("speaker") or "")
                 votes.setdefault(voice_id, {})[name] = (
@@ -2068,7 +2105,8 @@ class MeetingFrames:
                 segment["speaker"] = voice_names[voice_id]
                 segment["speaker_confidence"] = voice_confidence[voice_id]
                 continue
-            if channel_only:
+            names = visible_speakers if channel_only else shared_voices.get(voice_id)
+            if names is not None:
                 segment.pop("voice_id", None)
                 if segment.get("speaker"):
                     continue
@@ -2077,7 +2115,7 @@ class MeetingFrames:
                     segment["speaker"] = introduced
                     segment["speaker_confidence"] = "spoken-self-introduction"
                     continue
-            nearest = nearest_named_frame(segment) if not voice_id or channel_only else None
+            nearest = nearest_named_frame(segment, names) if not voice_id or names is not None else None
             if nearest and nearest[1].get("speaker_confidence") != "meet-active-tile":
                 segment["speaker"] = nearest[1]["speaker"]
                 segment["speaker_confidence"] = nearest[1]["speaker_confidence"]
