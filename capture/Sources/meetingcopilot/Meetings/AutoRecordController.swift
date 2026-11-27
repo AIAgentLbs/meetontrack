@@ -272,6 +272,8 @@ final class AutoRecordController {
             callTrackStalled: session.callTrackStalled,
             callAppHasOutput: session.callAppHasOutput, paused: session.isPaused,
             farEndNeverHeard: session.farEndProblem(now: now) != nil,
+            micSpeechQuietFor: session.lastMicSpeechAt.map { now.timeIntervalSince($0) },
+            callAppHoldsMic: mic.active,
             micQuietFor: micQuietFor, farEndQuietFor: farEndQuietFor, settings: settings) {
             let minutes = Int(settings.silenceStop / 60)
             lastDecision = reason == "silence"
@@ -329,6 +331,8 @@ final class AutoRecordController {
         callAppHasOutput: Bool = false,
         paused: Bool = false,
         farEndNeverHeard: Bool = false,
+        micSpeechQuietFor: TimeInterval? = nil,
+        callAppHoldsMic: Bool = false,
         micQuietFor: TimeInterval,
         farEndQuietFor: TimeInterval,
         settings: Config.AutoRecordSettings
@@ -345,6 +349,17 @@ final class AutoRecordController {
         // a live call at 20 minutes (MEETONTRACK-189 P0-1). Silence on both
         // tracks and the duration ceiling still apply.
         if farEndNeverHeard { return nil }
+        // The far end silent while the call app still holds the mic and plays,
+        // and live recognition still hears you speak: the tap lost the call
+        // mid-meeting. On 2026.11.26 this ended a talk 10 min early,
+        // mid-sentence (MEETONTRACK-207). Words, not mic level, so room noise
+        // after a call (MEETONTRACK-137) does not hold the recording; bounded,
+        // so talk near a browser that never let go still ends it.
+        // ponytail: without live recognition there is no word evidence and the
+        // old two-window bound applies; a dead tap and an idle browser stream
+        // look identical at the capture level.
+        if callAppHasOutput, callAppHoldsMic, let speech = micSpeechQuietFor,
+           speech <= settings.silenceStop, farEndQuietFor <= 6 * settings.silenceStop { return nil }
         // Open output I/O is not audible samples: a browser keeps a silent
         // stream open after a call. It buys one more window, long after tap
         // recovery (3 attempts, 20 s apart) has had its chance, then the rule

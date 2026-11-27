@@ -10,7 +10,7 @@ class TeamsParticipantTests(unittest.TestCase):
     def test_capture_warning_reaches_copilot_even_when_transcript_is_truncated(self):
         context = Handler._transcript_text({
             "capture_warnings": [{"reason": "system-audio-lost"}],
-            "segments": [{"speaker": "Голос не подтверждён", "text": "a" * 300}],
+            "segments": [{"speaker": "Распределить", "text": "a" * 300}],
         }, max_chars=20)
         self.assertIn("нельзя приписывать пользователю", context)
         self.assertTrue(context.endswith("a" * 20))
@@ -39,7 +39,7 @@ class TeamsParticipantTests(unittest.TestCase):
         typo = {"participant_platform": "teams", "participant_labels": ["Maxim Vyakin"]}
         self.assertEqual(teams_one_to_one_name([frame, frame, typo]), "Maxim Vyatkin")
 
-    def test_annotation_names_remote_not_microphone_and_marks_capture_gap(self):
+    def test_annotation_names_remote_not_microphone_and_keeps_mic_through_capture_gap(self):
         with tempfile.TemporaryDirectory() as directory:
             frames = MeetingFrames(Path(directory) / "frames.json")
             frames.items = [{
@@ -52,14 +52,20 @@ class TeamsParticipantTests(unittest.TestCase):
                 "segments": [
                     {"source": "system", "voice_id": "remote-1", "timestamp": "2026-09-27T11:09:00Z", "text": "hello"},
                     {"source": "microphone", "timestamp": "2026-09-27T11:10:00Z", "text": "hi"},
-                    {"source": "microphone", "timestamp": "2026-09-27T11:30:00Z", "text": "uncertain"},
+                    {"source": "microphone", "timestamp": "2026-09-27T11:30:00Z", "text": "still me"},
+                    # Stored by an older version (MEETONTRACK-207): the mark is cleared.
+                    {"source": "microphone", "timestamp": "2026-09-27T11:31:00Z", "text": "me too",
+                     "speaker_identity": "unverified", "speaker_confidence": "capture-channel-loss",
+                     "speaker": "Голос не подтверждён"},
                 ],
             })
-            remote, mic, lost = annotated["segments"]
+            remote, mic, lost, legacy = annotated["segments"]
             self.assertEqual(remote["speaker"], "Maxim Vyatkin")
             self.assertNotIn("speaker", mic)
-            self.assertEqual(lost["speaker_identity"], "unverified")
-            self.assertEqual(lost["source"], "microphone")
+            # A lost far end does not make your own microphone lines unassigned.
+            for line in (lost, legacy):
+                self.assertNotIn("speaker_identity", line)
+                self.assertNotIn("speaker", line)
 
     def test_multiple_acoustic_voices_are_not_renamed_as_one_person(self):
         with tempfile.TemporaryDirectory() as directory:

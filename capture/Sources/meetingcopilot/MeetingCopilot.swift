@@ -1066,6 +1066,7 @@ final class AppController {
 
     private func showLive(_ snapshot: LiveTranscriptionCoordinator.Snapshot) {
         window.updateLive(snapshot)
+        session?.noteLiveMicSpeech(snapshot.lastMicSpeechMark)
         if snapshot.status.shouldDetachAudioSinks {
             // The coordinator has closed its queues; detach here as well so
             // the real-time recorders stop making now-unused buffer copies.

@@ -2068,15 +2068,12 @@ class MeetingFrames:
                 used_names.add(name)
 
         for segment in segments:
-            if segment.get("source") == "microphone" and any(
-                warning.get("reason") == "system-audio-lost"
-                and str(warning.get("started_at") or "") <= str(segment.get("timestamp") or "")
-                and (not warning.get("ended_at") or str(segment.get("timestamp") or "") < str(warning["ended_at"]))
-                for warning in transcript.get("capture_warnings", [])
-            ):
-                segment["speaker_identity"] = "unverified"
-                segment["speaker_confidence"] = "capture-channel-loss"
-                segment["speaker"] = "Голос не подтверждён"
+            # A lost far end says nothing about who spoke into the microphone:
+            # those lines stay the local user's (MEETONTRACK-207). Clear the
+            # mark older versions stored on them.
+            if segment.get("source") == "microphone" and segment.get("speaker_confidence") == "capture-channel-loss":
+                for key in ("speaker_identity", "speaker_confidence", "speaker"):
+                    segment.pop(key, None)
             if segment.get("source") != "system" or not segment.get("timestamp"):
                 continue
             voice_id = str(segment.get("voice_id") or "")
@@ -3299,7 +3296,7 @@ class Handler(BaseHTTPRequestHandler):
         if snapshot.get("capture_warnings"):
             text = (
                 "[КАЧЕСТВО ЗАПИСИ: потеряна системная аудиодорожка. "
-                "Неразмеченные реплики («Распределить» / «Голос не подтверждён») нельзя приписывать пользователю "
+                "Неразмеченные реплики («Распределить») нельзя приписывать пользователю "
                 "или собеседнику. microphone/system — каналы захвата, не личности.]\n"
                 + text
             )

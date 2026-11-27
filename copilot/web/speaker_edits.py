@@ -20,10 +20,12 @@ def segment_id(segment: dict) -> str:
 def base_speaker(segment: dict) -> tuple[str, str]:
     if segment.get("speaker_identity") == "manual" and segment.get("speaker_id"):
         return str(segment["speaker_id"]), str(segment.get("speaker") or "Собеседник")
-    if segment.get("speaker_identity") == "unverified":
-        return "unassigned", "Распределить"
+    # The microphone is the local user's own track, also while the far end is
+    # lost: older meetings stored those lines as "unverified" (MEETONTRACK-207).
     if segment.get("source") == "microphone":
         return "self", "Я"
+    if segment.get("speaker_identity") == "unverified":
+        return "unassigned", "Распределить"
     voice = str(segment.get("voice_id") or "")
     if re.fullmatch(r"remote-[1-9][0-9]*", voice):
         slot = int(voice.split("-")[-1])
@@ -209,6 +211,10 @@ class SpeakerEdits:
             if key not in not_by_id and (saved := corrected.get(key)):
                 for field in ("speaker", "speaker_id", "speaker_confidence", "speaker_identity"):
                     segment[field] = saved[field]
+            if segment.get("source") == "microphone" and segment.get("speaker_confidence") == "capture-channel-loss":
+                # Stored by an older version (MEETONTRACK-207): the line is the local user's.
+                for field in ("speaker", "speaker_confidence", "speaker_identity"):
+                    segment.pop(field, None)
             identity, label = base_speaker(segment)
             segment["segment_id"] = key
             target = identity

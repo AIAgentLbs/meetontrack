@@ -194,6 +194,65 @@ struct NoCallAudioStopTests {
             micQuietFor: 1, farEndQuietFor: 5 * 3600, settings: settings) == nil)
     }
 
+    /// MEETONTRACK-207: the call-audio track went silent mid-call while the
+    /// call app kept playing and you kept presenting; the recording stopped
+    /// as "no call audio" with you mid-sentence.
+    @Test("A far end lost mid-call does not stop a recording while you are still speaking")
+    func farEndLostWhileSpeaking() {
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
+            micSpeechQuietFor: 5, callAppHoldsMic: true, micQuietFor: 1,
+            farEndQuietFor: 2 * window + 180, settings: settings) == nil)
+        // A browser that let go of the mic is not a call any more.
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
+            micSpeechQuietFor: 5, micQuietFor: 1, farEndQuietFor: 2 * window + 180,
+            settings: settings) == "no-call-audio")
+        // Bounded: talk near a browser that never let go still ends it.
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
+            micSpeechQuietFor: 5, callAppHoldsMic: true, micQuietFor: 1,
+            farEndQuietFor: 6 * window + 1, settings: settings) == "no-call-audio")
+        // Once you stop speaking the usual rule applies again.
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
+            micSpeechQuietFor: window + 1, callAppHoldsMic: true, micQuietFor: 1,
+            farEndQuietFor: 2 * window + 180,
+            settings: settings) == "no-call-audio")
+        // Room noise is level without words: it holds nothing (MEETONTRACK-137).
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
+            micSpeechQuietFor: nil, micQuietFor: 1, farEndQuietFor: 2 * window + 1,
+            settings: settings) == "no-call-audio")
+        // Without the call app playing, your words alone do not hold it.
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true,
+            micSpeechQuietFor: 5, callAppHoldsMic: true, micQuietFor: 1, farEndQuietFor: window + 1,
+            settings: settings) == "no-call-audio")
+        // Silence on both tracks still ends it.
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
+            micSpeechQuietFor: 5, micQuietFor: window + 1, farEndQuietFor: window + 1,
+            settings: settings) == "silence")
+    }
+
+    @Test("A new or growing microphone line counts as speech; a repeat does not")
+    @MainActor
+    func liveMicSpeechMark() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = try RecordingSession(root: root, trigger: .micActivity)
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        session.noteLiveMicSpeech(nil, now: t0)
+        #expect(session.lastMicSpeechAt == nil)
+        session.noteLiveMicSpeech("10|hello", now: t0)
+        session.noteLiveMicSpeech("10|hello", now: t0.addingTimeInterval(60))
+        #expect(session.lastMicSpeechAt == t0)
+        session.noteLiveMicSpeech("10|hello there", now: t0.addingTimeInterval(90))
+        #expect(session.lastMicSpeechAt == t0.addingTimeInterval(90))
+    }
+
     @Test("Both tracks silent is still reported as silence, and unmeasurable levels stop nothing")
     func silenceAndUnmeasurable() {
         #expect(AutoRecordController.backstopStop(

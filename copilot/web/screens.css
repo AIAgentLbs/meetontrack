@@ -320,7 +320,7 @@ body:is([data-view="call"], [data-view="after"])[data-call-panel="transcript"] #
 /* A Call panel shows only what it was opened for (C1): no tab bars, no board chips or per-card status controls, no
    second status line under the transcript heading. The board's status is the column count; a closed card is muted. */
 body:is([data-view="call"], [data-view="after"]) :is(#workspace-filters, .call-board .board-summary, .board-item-controls select,
-  .board-item-heading .traffic-light, .transcript-tabs, .pane-header .status-strip, #transcript-meta) { display: none; }
+  .board-item-heading .traffic-light, .transcript-tabs, .pane-header .status-strip, #transcript-meta:not(.fail)) { display: none; }
 body:is([data-view="call"], [data-view="after"]) .board-item.resolved .board-item-heading p { color: var(--muted); }
 /* The correct fact is what to say, not an error: plain text on the Call board (C1, H5). */
 body:is([data-view="call"], [data-view="after"]) .call-board .fact-body .fact-actual { color: var(--text); }

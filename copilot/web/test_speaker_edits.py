@@ -23,7 +23,7 @@ class SpeakerEditTests(unittest.TestCase):
                 {"source": "microphone", "timestamp": "2026-09-27T10:00:00Z", "text": "hello"},
                 {"source": "system", "voice_id": "remote-1", "timestamp": "2026-09-27T10:00:10Z", "text": "hi"},
                 {"source": "system", "voice_id": "remote-1", "timestamp": "2026-09-27T10:00:20Z", "text": "yes"},
-                {"source": "microphone", "speaker_identity": "unverified", "timestamp": "2026-09-27T10:10:00Z", "text": "uncertain"},
+                {"source": "system", "speaker_identity": "unverified", "timestamp": "2026-09-27T10:10:00Z", "text": "uncertain"},
             ],
         }
 
@@ -35,6 +35,17 @@ class SpeakerEditTests(unittest.TestCase):
         self.assertEqual([s["speaker_id"] for s in result["segments"]], ["self", "remote-1", "remote-1", "unassigned"])
         self.assertEqual(result["speakers"][1]["name"], "Собеседник 1")
         self.assertNotIn("speaker_id", self.snapshot["segments"][0])
+
+    def test_microphone_lines_stay_the_local_user_when_far_end_was_lost(self):
+        # MEETONTRACK-207: older versions stored these as unverified.
+        stored = {"meeting_id": "meeting-a", "segments": [
+            {"source": "microphone", "timestamp": "2026-09-27T10:20:00Z", "text": "still me",
+             "speaker_identity": "unverified", "speaker_confidence": "capture-channel-loss",
+             "speaker": "Распределить"}]}
+        segment = self.edits.annotate(stored)["segments"][0]
+        self.assertEqual((segment["speaker_id"], segment["speaker_label"]), ("self", "Я"))
+        self.assertNotIn("speaker", segment)
+        self.assertNotIn("speaker_identity", segment)
 
     def test_bulk_rename_survives_reload_and_new_streamed_turn(self):
         result = self.edits.rename(self.snapshot, "remote-1", "Alex Sample")
@@ -56,7 +67,7 @@ class SpeakerEditTests(unittest.TestCase):
         result = self.edits.assign(self.snapshot, [key], "remote-1")
         segment = result["segments"][-1]
         self.assertEqual(segment["speaker_id"], "remote-1")
-        self.assertEqual(segment["source"], "microphone")
+        self.assertEqual(segment["source"], "system")
         self.assertEqual(segment["text"], "uncertain")
         self.assertEqual(segment["speaker_identity"], "manual")
         self.assertEqual(result["segments"][0]["speaker_id"], "self")
