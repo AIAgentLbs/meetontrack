@@ -298,7 +298,8 @@ const translations = {
     "speaker.unverified": "Голос не подтвержден",
     "speaker.unverified_short": "Неясно",
     "transcript.capture_lost": "Потеря аудио",
-    "transcript.capture_lost_hint": "Системная дорожка пропала. На отмеченном участке нельзя уверенно определить, кто говорит.",
+    "transcript.capture_lost_hint": "Звук звонка пропал из записи. Речь собеседников на этом участке не записана.",
+    "transcript.other_lost": "Собеседники не записываются с {time}",
     "speaker.others": "Остальные",
     "transcript.empty_title": "Жду расшифровку",
     "transcript.empty_text": "MeetOnTrack передает локальную расшифровку примерно раз в секунду.",
@@ -687,7 +688,8 @@ const translations = {
     "speaker.unverified": "Unverified voice",
     "speaker.unverified_short": "Unverified",
     "transcript.capture_lost": "Audio dropout",
-    "transcript.capture_lost_hint": "The system audio track was lost. Speaker identity is uncertain in the marked interval.",
+    "transcript.capture_lost_hint": "The call audio dropped out of the recording. The other side's speech is not recorded in this stretch.",
+    "transcript.other_lost": "The other side is not recorded since {time}",
     "speaker.others": "Others",
     "transcript.empty_title": "Waiting for the transcript",
     "transcript.empty_text": "MeetOnTrack publishes the local transcript about once per second.",
@@ -2072,8 +2074,16 @@ function renderTranscript(transcript) {
   transcriptSignature = signature;
 
   const audioDropoutActive = transcript.capture_warnings?.some((warning) => !warning.ended_at);
+  // The far end lost mid-call says so plainly, with since when (MEETONTRACK-207).
+  const otherLost = (transcript.live || transcript.status === "recording") && transcript.capture_warnings?.find(
+    (warning) => warning.reason === "system-audio-lost" && !warning.ended_at);
+  const lostAt = new Date(otherLost?.started_at || "");
+  elements.transcriptMeta.classList.toggle("fail", Boolean(otherLost) && !transcript.error);
   elements.transcriptMeta.textContent = transcript.error
     ? t("error.transcript")
+    : otherLost
+      ? t("transcript.other_lost", { time: Number.isNaN(lostAt.getTime()) ? "—"
+        : new Intl.DateTimeFormat(uiLanguage === "ru" ? "ru-RU" : "en-GB", { timeStyle: "short" }).format(lostAt) })
     : audioDropoutActive
       ? t("transcript.capture_lost")
     : transcript.status === "overloaded"

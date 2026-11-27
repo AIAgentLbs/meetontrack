@@ -24,6 +24,15 @@ actor LiveTranscriptionCoordinator {
         var captureWarnings: [CaptureWarning] = []
         var recognitionProgressAt: Date? = nil
         var recoveryAttempts: Int = 0
+
+        /// Identity of the newest microphone line, text included, so a line
+        /// that grows counts as speech too.
+        var lastMicSpeechMark: String? {
+            for case .speech(let block) in entries.reversed() where block.speaker == .you {
+                return "\(block.startMilliseconds)|\(block.text)"
+            }
+            return nil
+        }
     }
 
     struct CaptureWarning: Sendable, Encodable {

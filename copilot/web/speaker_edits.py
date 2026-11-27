@@ -20,10 +20,12 @@ def segment_id(segment: dict) -> str:
 def base_speaker(segment: dict) -> tuple[str, str]:
     if segment.get("speaker_identity") == "manual" and segment.get("speaker_id"):
         return str(segment["speaker_id"]), str(segment.get("speaker") or "Собеседник")
-    if segment.get("speaker_identity") == "unverified":
-        return "unassigned", "Распределить"
+    # The microphone is the local user's own track, also while the far end is
+    # lost: older meetings stored those lines as "unverified" (MEETONTRACK-207).
     if segment.get("source") == "microphone":
         return "self", "Я"
+    if segment.get("speaker_identity") == "unverified":
+        return "unassigned", "Распределить"
     voice = str(segment.get("voice_id") or "")
     if re.fullmatch(r"remote-[1-9][0-9]*", voice):
         slot = int(voice.split("-")[-1])

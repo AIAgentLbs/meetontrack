@@ -425,6 +425,20 @@ final class RecordingSession {
     var callTrackStalled: Bool { trackStalled.contains("system") }
     private(set) var callAppHasOutput = false
 
+    /// When live recognition last turned microphone audio into words. Words,
+    /// not level: room noise moves the level meter but is not you talking
+    /// (MEETONTRACK-137, MEETONTRACK-207). nil while live recognition is off.
+    private(set) var lastMicSpeechAt: Date?
+    private var micSpeechMark: String?
+
+    /// `mark` names the newest recognised microphone line; a new or grown
+    /// line means you are speaking now.
+    func noteLiveMicSpeech(_ mark: String?, now: Date = Date()) {
+        guard let mark, mark != micSpeechMark else { return }
+        micSpeechMark = mark
+        lastMicSpeechAt = now
+    }
+
     // MARK: - far end not recorded
 
     /// The far end has carried nothing audible all session (see
