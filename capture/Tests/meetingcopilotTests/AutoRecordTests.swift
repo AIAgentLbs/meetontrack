@@ -201,12 +201,23 @@ struct NoCallAudioStopTests {
     func farEndLostWhileSpeaking() {
         #expect(AutoRecordController.backstopStop(
             trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
+            micSpeechQuietFor: 5, callAppHoldsMic: true, micQuietFor: 1,
+            farEndQuietFor: 2 * window + 180, settings: settings) == nil)
+        // A browser that let go of the mic is not a call any more.
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
             micSpeechQuietFor: 5, micQuietFor: 1, farEndQuietFor: 2 * window + 180,
-            settings: settings) == nil)
+            settings: settings) == "no-call-audio")
+        // Bounded: talk near a browser that never let go still ends it.
+        #expect(AutoRecordController.backstopStop(
+            trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
+            micSpeechQuietFor: 5, callAppHoldsMic: true, micQuietFor: 1,
+            farEndQuietFor: 6 * window + 1, settings: settings) == "no-call-audio")
         // Once you stop speaking the usual rule applies again.
         #expect(AutoRecordController.backstopStop(
             trigger: .micActivity, levelsMeasurable: true, callAppHasOutput: true,
-            micSpeechQuietFor: window + 1, micQuietFor: 1, farEndQuietFor: 2 * window + 180,
+            micSpeechQuietFor: window + 1, callAppHoldsMic: true, micQuietFor: 1,
+            farEndQuietFor: 2 * window + 180,
             settings: settings) == "no-call-audio")
         // Room noise is level without words: it holds nothing (MEETONTRACK-137).
         #expect(AutoRecordController.backstopStop(
@@ -216,7 +227,7 @@ struct NoCallAudioStopTests {
         // Without the call app playing, your words alone do not hold it.
         #expect(AutoRecordController.backstopStop(
             trigger: .micActivity, levelsMeasurable: true,
-            micSpeechQuietFor: 5, micQuietFor: 1, farEndQuietFor: window + 1,
+            micSpeechQuietFor: 5, callAppHoldsMic: true, micQuietFor: 1, farEndQuietFor: window + 1,
             settings: settings) == "no-call-audio")
         // Silence on both tracks still ends it.
         #expect(AutoRecordController.backstopStop(

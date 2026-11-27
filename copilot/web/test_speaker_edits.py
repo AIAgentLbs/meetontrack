@@ -40,9 +40,12 @@ class SpeakerEditTests(unittest.TestCase):
         # MEETONTRACK-207: older versions stored these as unverified.
         stored = {"meeting_id": "meeting-a", "segments": [
             {"source": "microphone", "timestamp": "2026-09-27T10:20:00Z", "text": "still me",
-             "speaker_identity": "unverified", "speaker_confidence": "capture-channel-loss"}]}
+             "speaker_identity": "unverified", "speaker_confidence": "capture-channel-loss",
+             "speaker": "Распределить"}]}
         segment = self.edits.annotate(stored)["segments"][0]
         self.assertEqual((segment["speaker_id"], segment["speaker_label"]), ("self", "Я"))
+        self.assertNotIn("speaker", segment)
+        self.assertNotIn("speaker_identity", segment)
 
     def test_bulk_rename_survives_reload_and_new_streamed_turn(self):
         result = self.edits.rename(self.snapshot, "remote-1", "Alex Sample")

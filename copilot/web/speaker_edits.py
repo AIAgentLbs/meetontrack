@@ -211,6 +211,10 @@ class SpeakerEdits:
             if key not in not_by_id and (saved := corrected.get(key)):
                 for field in ("speaker", "speaker_id", "speaker_confidence", "speaker_identity"):
                     segment[field] = saved[field]
+            if segment.get("source") == "microphone" and segment.get("speaker_confidence") == "capture-channel-loss":
+                # Stored by an older version (MEETONTRACK-207): the line is the local user's.
+                for field in ("speaker", "speaker_confidence", "speaker_identity"):
+                    segment.pop(field, None)
             identity, label = base_speaker(segment)
             segment["segment_id"] = key
             target = identity
